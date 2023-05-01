@@ -1,0 +1,37 @@
+[
+    {
+        "owner": "paulirish",
+        "base": ".oh-my-zsh/custom/plugins",
+        "name": "git-open"
+    },
+    {
+        "owner": "zsh-users",
+        "base": ".oh-my-zsh/custom/plugins",
+        "name": "zsh-completions"
+    },
+    {
+        "owner": "zsh-users",
+        "base": ".oh-my-zsh/custom/plugins",
+        "name": "zsh-syntax-highlighting"
+    },
+    {
+        "owner": "tmux-plugins",
+        "base": ".tmux/plugins",
+        "name": "tmux-cpu"
+    },
+    {
+        "owner": "tmux-plugins",
+        "base": ".tmux/plugins",
+        "name": "tmux-sidebar"
+    },
+    {
+        "owner": "tmux-plugins",
+        "base": ".tmux/plugins",
+        "name": "tmux-yank"
+    },
+    {
+        "owner": "tmux-plugins",
+        "base": ".tmux/plugins",
+        "name": "tmux-resurrect"
+    }
+]

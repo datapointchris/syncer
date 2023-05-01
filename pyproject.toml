@@ -1,0 +1,29 @@
+[tool.poetry]
+name = "syncer"
+version = "0.45.0"
+description = "Dotfiles, apps, configuration, and convenience scripts for setting up or syncing computers"
+authors = ["Chris Birch <datapointchris@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.scripts]
+syncer = "syncer.main:app"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+typer = "^0.7.0"
+black = "^23.1.0"
+flake8 = "^6.0.0"
+pre-commit = "^3.1.1"
+ipykernel = "^6.21.3"
+rich = "^13.3.2"
+tqdm = "^4.65.0"
+mkdocs = "^1.4.2"
+pydantic = "^1.10.7"
+
+[tool.poetry.group.dev.dependencies]
+flake8 = "^6.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
