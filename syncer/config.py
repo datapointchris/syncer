@@ -15,7 +15,7 @@ class Target(BaseSettings):
 
 
 class Data(BaseSettings):
-    DATA_DIR: pathlib.Path = pathlib.Path(__file__).parent.parent.resolve() / 'data'
+    DATA_DIR: pathlib.Path = pathlib.Path(__file__).parent / 'data'
     PLUGINS: pathlib.Path = DATA_DIR / 'plugins.json'
     PROJECTS: pathlib.Path = DATA_DIR / 'projects.json'
 
