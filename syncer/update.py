@@ -15,10 +15,12 @@ def main():
     print('[blue]Updating syncer...[/blue]')
     print(settings.syncer.BASE)
     os.chdir(settings.syncer.BASE)
+
     print('[green]Building new wheel...[/green]')
     subprocess.call('deactivate', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.call('poetry build', shell=True)
+
     print('[green]Installing new wheel...[/green]')
     wheel_path = next(settings.syncer.DIST_DIR.glob('*.whl'))
-    subprocess.call(f'pip install -q --user {wheel_path} --force-reinstall', shell=True)
+    subprocess.call(f'pip install --quiet --user {wheel_path} --force-reinstall', shell=True)
     print('[green]Done![/green]')
