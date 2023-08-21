@@ -42,6 +42,7 @@ class DataSettings(BaseSettings):
     DATA_DIR: pathlib.Path = pathlib.Path(__file__).parent / 'data'
     PLUGINS: pathlib.Path = DATA_DIR / 'plugins.json'
     PROJECTS: pathlib.Path = DATA_DIR / 'projects.json'
+    LABS: pathlib.Path = DATA_DIR / '1904labs.json'
 
 
 class Settings(BaseSettings):

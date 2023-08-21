@@ -1,0 +1,82 @@
+[
+    {
+        "base": "code",
+        "type": "1904labs",
+        "language": null,
+        "name": "1904labs-cc-data",
+        "owner": "1904labs",
+        "host": "https://github.com"
+    },
+    {
+        "base": "code",
+        "type": "1904labs",
+        "language": null,
+        "name": "aiecs_dashboard_api_cdk",
+        "owner": "1904labs",
+        "host": "https://github.com"
+    },
+    {
+        "base": "code",
+        "type": "1904labs",
+        "language": null,
+        "name": "aiecs_dashboard_ui",
+        "owner": "1904labs",
+        "host": "https://github.com"
+    },
+    {
+        "base": "code",
+        "type": "1904labs",
+        "language": null,
+        "name": "aiecs_etl_pipeline",
+        "owner": "1904labs",
+        "host": "https://github.com"
+    },
+    {
+        "base": "code",
+        "type": "1904labs",
+        "language": null,
+        "name": "aiecs_return_calls",
+        "owner": "1904labs",
+        "host": "https://github.com"
+    },
+    {
+        "base": "code",
+        "type": "1904labs",
+        "language": null,
+        "name": "aiecs-deployment-pipelines",
+        "owner": "1904labs",
+        "host": "https://github.com"
+    },
+    {
+        "base": "code",
+        "type": "1904labs",
+        "language": null,
+        "name": "aiecsCli",
+        "owner": "1904labs",
+        "host": "https://github.com"
+    },
+    {
+        "base": "code",
+        "type": "1904labs",
+        "language": null,
+        "name": "genericLexBot",
+        "owner": "1904labs",
+        "host": "https://github.com"
+    },
+    {
+        "base": "code",
+        "type": "1904labs",
+        "language": null,
+        "name": "lexbot-tuning",
+        "owner": "1904labs",
+        "host": "https://github.com"
+    },
+    {
+        "base": "code",
+        "type": "1904labs",
+        "language": null,
+        "name": "wallyV2",
+        "owner": "1904labs",
+        "host": "https://github.com"
+    }
+]
