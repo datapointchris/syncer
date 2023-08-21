@@ -13,8 +13,8 @@ app = typer.Typer()
 
 def remove_and_symlink(
     file: str,
-    source_base: pathlib.Path = settings.source.DOTFILES,
-    target_base: pathlib.Path = settings.target.DOTFILES,
+    source_base: pathlib.Path = settings.dotfiles.source.DOTFILES,
+    target_base: pathlib.Path = settings.dotfiles.target.DOTFILES,
 ):
     source = source_base / file
     target = target_base / file
@@ -28,22 +28,26 @@ def remove_and_symlink(
 
 def symlink_universal():
     print(f'[yellow underline]{SPACES}Dotfiles{SPACES}[/]')
-    for dotfile in settings.UNIVERSAL_DOTFILES:
+    for dotfile in settings.dotfiles.UNIVERSAL_DOTFILES:
         remove_and_symlink(dotfile)
     print()
 
 
 def symlink_mac():
     print(f'[yellow underline]{SPACES}MacOS Specific{SPACES}[/]')
-    remove_and_symlink('aws-profiles', source_base=settings.source.BINS, target_base=settings.target.MAC_BINS)
-    remove_and_symlink('ichrisbirch', source_base=settings.source.BINS, target_base=settings.target.MAC_BINS)
-    for dotfile in settings.MAC_ONLY_DOTFILES:
+    remove_and_symlink(
+        'aws-profiles', source_base=settings.dotfiles.source.BINS, target_base=settings.dotfiles.target.MAC_BINS
+    )
+    remove_and_symlink(
+        'ichrisbirch', source_base=settings.dotfiles.source.BINS, target_base=settings.dotfiles.target.MAC_BINS
+    )
+    for dotfile in settings.dotfiles.MAC_ONLY_DOTFILES:
         remove_and_symlink(dotfile)
 
 
 def symlink_linux():
     print(f'[yellow underline]{SPACES}Linux Specific{SPACES}[/]')
-    for dotfile in settings.LINUX_ONLY_DOTFILES:
+    for dotfile in settings.dotfiles.LINUX_ONLY_DOTFILES:
         remove_and_symlink(dotfile)
 
 
