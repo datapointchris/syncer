@@ -53,12 +53,10 @@ def message(directory: str, color: str, msg: str):
 @app.callback(invoke_without_command=True)
 @app.command()
 def main():
-    """
-    Sync projects
-    """
     print('[blue]Syncing Projects...[/blue]')
 
     projects = load_projects(settings.data.PROJECTS)
+    projects += load_projects(settings.data.LABS)
 
     create_base_directories(projects)
 
@@ -77,7 +75,12 @@ def main():
 
         if unpushed := subprocess.getoutput('git log origin/master..master'):
             if unpushed.startswith('fatal'):
-                message(str(project.directory), 'red', 'no master branch')
+                if unpushed := subprocess.getoutput('git log origin/main..main'):
+                    if unpushed.startswith('fatal'):
+                        message(str(project.directory), 'red', 'no master branch or main branch')
+                    else:
+                        message(str(project.directory), 'yellow', 'unpushed local changes')
+                        subprocess.call(['git', 'log', 'origin/main..main'])
             else:
                 message(str(project.directory), 'yellow', 'unpushed local changes')
                 subprocess.call(['git', 'log', 'origin/master..master'])
@@ -88,7 +91,11 @@ def main():
 
             if unpushed := subprocess.getoutput('git log origin/master..master'):
                 if unpushed.startswith('fatal'):
-                    message(str(project.directory), 'red', 'no master branch and remote changes')
+                    if unpushed := subprocess.getoutput('git log origin/main..main'):
+                        if unpushed.startswith('fatal'):
+                            message(str(project.directory), 'red', 'no master or main branch and remote changes')
+                        else:
+                            message(str(project.directory), 'red', 'unpushed local changes and remote changes')
                 else:
                     message(str(project.directory), 'red', 'unpushed local changes and remote changes')
 
