@@ -17,7 +17,6 @@ def main():
     os.chdir(settings.syncer.BASE)
 
     print('[green]Building new wheel...[/green]')
-    subprocess.call('deactivate', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.call('poetry build', shell=True)
 
     print('[green]Installing new wheel...[/green]')
