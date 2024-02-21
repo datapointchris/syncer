@@ -7,18 +7,10 @@ import typer
 from colorama import Fore, Style
 
 from syncer import utilities
-from syncer.config import settings
 
 logger = logging.getLogger(__name__)
 
 app = typer.Typer()
-
-APP_LOCATION = settings.syncer.ROOT
-
-
-def print_and_log(message: str, color: str):
-    print(color + message + Style.RESET_ALL)
-    logger.info(message)
 
 
 @app.callback(invoke_without_command=True)
@@ -26,6 +18,12 @@ def print_and_log(message: str, color: str):
 def main(
     dry_run: Annotated[bool, typer.Option()] = False,
 ):
+
+    def print_and_log(message: str, color: str):
+        log_dry_run = 'DRY RUN: ' if dry_run else ''
+        print(color + message + Style.RESET_ALL)
+        logger.info(log_dry_run + message.lower())
+
     if dry_run:
         print(Fore.YELLOW + '=' * 35 + '|  DRY RUN  |' + '=' * 35 + Style.RESET_ALL)
 
@@ -36,9 +34,8 @@ def main(
         if not dry_run:
             sys.exit(1)
 
-    github_version = subprocess.run(
-        'gh release view latest --json tag_name'.split(), capture_output=True, text=True
-    ).stdout
+    github_version_command = 'gh release view --json tagName --jq .tagName'.split()
+    github_version = subprocess.run(github_version_command, capture_output=True, text=True).stdout.strip()
     print_and_log(f"Latest version: {github_version}", Fore.RESET)
 
     if github_version > current_version:

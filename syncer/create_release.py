@@ -9,9 +9,9 @@ from colorama import Fore, Style
 from syncer.config import settings
 from syncer.repos import Repo
 
-app = typer.Typer()
-
 logger = logging.getLogger(__name__)
+
+app = typer.Typer()
 
 
 @app.callback(invoke_without_command=True)
@@ -65,6 +65,7 @@ def main(
             sys.exit(1)
 
     syncer.okay('checkes passed for creating release')
+    logger.info(f'{log_dry_run}checks passed for creating release')
 
     update_project_version = f'poetry version {version}'
     commit_version_bump = f"git commit -am 'build: create release {version} - {title}'"
@@ -75,19 +76,24 @@ def main(
     if not dry_run:
         with syncer.chdir():
             syncer.info(f'Updating project version to {version}')
+            logger.info(f'{log_dry_run}updating project version to {version}')
             subprocess.call(update_project_version, shell=True)
 
             syncer.info('Pushing version bump to git')
+            logger.info(f'{log_dry_run}pushing version bump to git')
             subprocess.call(commit_version_bump, shell=True)
 
             syncer.info(f'Creating git tag for version {version}')
+            logger.info(f'{log_dry_run}creating git tag for version {version}')
             subprocess.call(create_git_tag, shell=True)
 
             syncer.info('Pushing tag to origin')
+            logger.info(f'{log_dry_run}pushing tag to origin')
             subprocess.call(push_tag_to_github, shell=True)
 
+            syncer.info(f'Creating release on github for version {version} - {title}')
+            logger.info(f'{log_dry_run}creating release on github for version {version} - {title}')
             subprocess.call(create_release_on_github, shell=True)
-            syncer.info(f'Created release on github for version {version} - {title}')
     else:
         syncer.info(f'Update project version: {update_project_version}')
         logger.info(f'{log_dry_run}update project version: {update_project_version}')
