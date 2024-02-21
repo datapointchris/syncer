@@ -3,7 +3,7 @@
 **Usage**:
 
 ```console
-$ syncer [OPTIONS] COMMAND [ARGS]...
+syncer [OPTIONS] COMMAND [ARGS]...
 ```
 
 **Options**:
@@ -24,7 +24,7 @@ $ syncer [OPTIONS] COMMAND [ARGS]...
 **Usage**:
 
 ```console
-$ syncer dotfiles [OPTIONS] COMMAND [ARGS]...
+syncer dotfiles [OPTIONS] COMMAND [ARGS]...
 ```
 
 **Options**:
@@ -40,7 +40,7 @@ $ syncer dotfiles [OPTIONS] COMMAND [ARGS]...
 **Usage**:
 
 ```console
-$ syncer dotfiles main [OPTIONS]
+syncer dotfiles main [OPTIONS]
 ```
 
 **Options**:
@@ -54,7 +54,7 @@ Sync dotfiles, projects, or plugins
 **Usage**:
 
 ```console
-$ syncer main [OPTIONS]
+syncer main [OPTIONS]
 ```
 
 **Options**:
@@ -68,7 +68,7 @@ Sync various downloaded plugins
 **Usage**:
 
 ```console
-$ syncer plugins [OPTIONS] COMMAND [ARGS]...
+syncer plugins [OPTIONS] COMMAND [ARGS]...
 ```
 
 **Options**:
@@ -86,7 +86,7 @@ Sync various downloaded plugins
 **Usage**:
 
 ```console
-$ syncer plugins main [OPTIONS]
+syncer plugins main [OPTIONS]
 ```
 
 **Options**:
@@ -100,7 +100,7 @@ Sync projects
 **Usage**:
 
 ```console
-$ syncer projects [OPTIONS] COMMAND [ARGS]...
+syncer projects [OPTIONS] COMMAND [ARGS]...
 ```
 
 **Options**:
@@ -118,7 +118,7 @@ Sync projects
 **Usage**:
 
 ```console
-$ syncer projects main [OPTIONS]
+syncer projects main [OPTIONS]
 ```
 
 **Options**:

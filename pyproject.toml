@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "syncer"
-version = "0.45.0"
+version = "0.5.0"
 description = "Dotfiles, apps, configuration, and convenience scripts for setting up or syncing computers"
 authors = ["Chris Birch <datapointchris@gmail.com>"]
 license = "MIT"
@@ -10,20 +10,93 @@ readme = "README.md"
 syncer = "syncer.main:app"
 
 [tool.poetry.dependencies]
-python = "^3.10"
-typer = "^0.7.0"
-black = "^23.1.0"
-flake8 = "^6.0.0"
-pre-commit = "^3.1.1"
-ipykernel = "^6.21.3"
-rich = "^13.3.2"
-tqdm = "^4.65.0"
-mkdocs = "^1.4.2"
-pydantic = "^1.10.7"
-typer-cli = "^0.0.13"
+colorama = "^0.4.6"
+pydantic = "^2.6.1"
+python = "^3.11"
+rich = "^13.7.0"
+tqdm = "^4.66.2"
+typer = "^0.9.0"
+pydantic-settings = "^2.2.0"
 
 [tool.poetry.group.dev.dependencies]
-flake8 = "^6.0.0"
+black = "^24.2.0"
+flake8 = "^7.0.0"
+ipykernel = "^6.29.2"
+mkdocs = "^1.5.3"
+pre-commit = "^3.6.2"
+
+# ---------- Configurations ---------- #
+
+
+[tool.bandit]
+exclude_dirs = ["tests", "scripts"]
+skips = ["B311"]
+
+
+[tool.black]
+line-length = 120
+skip-string-normalization = true
+exclude = '''
+(
+/alembic
+| .git
+| .mypy_cache
+| .venv
+| build
+| dist
+)
+'''
+
+[tool.codespell]
+skip = '*.css.map'
+ignore-words-list = "astroid,aNULL,ANULL,anull"
+check-filenames = true
+# count = ""
+# quiet-level = 3
+
+
+[tool.coverage.run]
+parallel = true
+branch = true
+source = ["ichrisbirch"]
+omit = ["ichrisbirch/alembic"]
+
+[tool.coverage.paths]
+source = ["ichrisbirch"]
+
+[tool.coverage.report]
+fail_under = 25
+show_missing = true
+exclude_lines = ["pragma: no cover"]
+
+
+[tool.isort]
+line_length = 120
+profile = "black"
+atomic = true
+skip = [".gitignore"]
+extend_skip = [".md", ".json"]
+
+
+[tool.mypy]
+pretty = true
+ignore_missing_imports = true
+# strict = true
+allow_untyped_defs = true
+check_untyped_defs = false  # Can enable this when all the routes are updated
+plugins = ["pydantic.mypy"]
+warn_return_any = false
+
+
+[tool.pytest.ini_options]
+addopts = ""
+minversion = "6.0"
+testpaths = ["tests"]
+
+
+[tool.refurb]
+enable_all = true
+
 
 [build-system]
 requires = ["poetry-core"]
