@@ -1,0 +1,22 @@
+[
+    {
+        "owner": "paulirish",
+        "base": ".oh-my-zsh/custom/plugins",
+        "name": "git-open"
+    },
+    {
+        "owner": "zsh-users",
+        "base": ".oh-my-zsh/custom/plugins",
+        "name": "zsh-completions"
+    },
+    {
+        "owner": "zsh-users",
+        "base": ".oh-my-zsh/custom/plugins",
+        "name": "zsh-syntax-highlighting"
+    },
+    {
+        "owner": "zsh-users",
+        "base": ".oh-my-zsh/custom/plugins",
+        "name": "zsh-autosuggestions"
+    }
+]
