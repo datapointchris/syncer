@@ -1,15 +1,24 @@
+import enum
 import json
 import os
 import pathlib
 import subprocess
 from dataclasses import dataclass
+from typing import Annotated
 
 import typer
-from rich import print
+from colorama import Fore, Style
 
 from syncer.config import settings
 
 GITHUB = 'https://github.com'
+
+app = typer.Typer()
+
+
+class PluginType(enum.Enum):
+    tmux = 'tmux'
+    zsh = 'zsh'
 
 
 @dataclass
@@ -27,27 +36,25 @@ class Plugin:
         return '/'.join([GITHUB, self.owner, self.name])
 
 
-app = typer.Typer()
-
-
-def message(directory: str, color: str, msg: str):
-    print(f'[default]{directory}[/default] [{color}]{msg}[/{color}]')
+def message(msg: str, directory: pathlib.Path, color: str):
+    message = f'{directory} {color}{"." * (80 - len(str(directory)) - len(msg))} {msg}{Style.RESET_ALL}'
+    print(message)
 
 
 @app.callback(invoke_without_command=True)
 @app.command()
-def main():
+def main(app: Annotated[PluginType, typer.Argument()]):
     """Sync various downloaded plugins"""
-    with open(settings.data.PLUGINS_DIR) as f:
+    with open(settings.data.PLUGINS_DIR / (app.value + '.json')) as f:
         plugins = [Plugin(**p) for p in json.load(f)]
 
     for plugin in plugins:
         if not plugin.directory.parent.exists():
             plugin.directory.parent.mkdir(parents=True, exist_ok=True)
-            message(str(plugin.directory.parent), 'green', 'created')
+            message('created', plugin.directory.parent, Fore.GREEN)
 
         if not plugin.directory.exists():
-            message(str(plugin.directory), 'blue', 'cloning')
+            message('cloning', plugin.directory, Fore.BLUE)
             os.chdir(plugin.directory.parent)
             subprocess.call(['git', 'clone', plugin.url])
             continue
@@ -55,7 +62,7 @@ def main():
             os.chdir(plugin.directory)
 
         if subprocess.getoutput('git fetch'):
-            message(str(plugin.directory), 'blue', 'pulling changes')
+            message('pulling changes', plugin.directory, Fore.BLUE)
             subprocess.call(['git', 'pull'])
         else:
-            message(str(plugin.directory), 'green', 'up to date')
+            message('up to date', plugin.directory, Fore.GREEN)
