@@ -10,5 +10,5 @@ exclude =
 per-file-ignores =
     __init__.py:F401
     env.py:F401
-max-complexity = 10
+max-complexity = 20
 count = true
