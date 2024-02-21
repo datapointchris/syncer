@@ -6,12 +6,13 @@ from syncer import create_release, dotfiles, plugins, repos, testpaths, update, 
 
 app = typer.Typer(no_args_is_help=True)
 
-logger = logging.getLogger("__name__")
-handler = logging.FileHandler("/usr/local/var/log/syncer.log")
-formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger()
+handler = logging.FileHandler('/usr/local/var/log/syncer.log')
+formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s:%(funcName)s:%(lineno)d | %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 logger.setLevel(logging.INFO)
+logger.info('syncer started')
 
 
 @app.command()
