@@ -63,16 +63,16 @@ def main(
 
     if not dry_run:
         with syncer.chdir():
-            subprocess.call(update_project_version)
+            subprocess.call(update_project_version, shell=True)
             syncer.info(f'Updated project version to {version}')
 
-            subprocess.call(create_git_tag)
+            subprocess.call(create_git_tag, shell=True)
             syncer.info(f'Created git tag for version {version}')
 
-            subprocess.call(push_tag_to_github)
+            subprocess.call(push_tag_to_github, shell=True)
             syncer.info('Pushed tag to origin')
 
-            subprocess.call(create_release_on_github)
+            subprocess.call(create_release_on_github, shell=True)
             syncer.info('Created release on github')
     else:
         syncer.info(f'Update project version: {update_project_version}')
