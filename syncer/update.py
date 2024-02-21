@@ -6,8 +6,8 @@ from typing import Annotated
 import typer
 from colorama import Fore, Style
 
+from syncer import utilities
 from syncer.config import settings
-from syncer.repos import Repo
 
 logger = logging.getLogger(__name__)
 
@@ -29,22 +29,17 @@ def main(
     if dry_run:
         print(Fore.YELLOW + '=' * 35 + '|  DRY RUN  |' + '=' * 35 + Style.RESET_ALL)
 
-    syncer = Repo(settings.data.CODE_ROOT, '', 'https://www.github.com', 'datapointchris', 'syncer')
+    current_version = utilities.get_installed_version()
+    print_and_log(f"Current version: {current_version}", Fore.RESET)
+    if not current_version:
+        print_and_log('ABORT: could not retrieve syncer current version', Fore.RED)
+        if not dry_run:
+            sys.exit(1)
 
-    with syncer.chdir():
-        output = subprocess.run('pipx list'.split(), capture_output=True, text=True).stdout
-        syncer_info = output[output.find('syncer') :].split('\n')[0]
-        current_version = syncer_info.split(',')[0].split(' ')[1]
-        print_and_log(f"Current version: {current_version}", Fore.GREEN)
-        if not current_version:
-            syncer.error('ABORT: could not retrieve syncer current version')
-            if not dry_run:
-                sys.exit(1)
-
-        github_version = subprocess.run(
-            'gh release view latest --json tag_name'.split(), capture_output=True, text=True
-        ).stdout
-        print_and_log(f"Latest version: {github_version}", Fore.BLUE)
+    github_version = subprocess.run(
+        'gh release view latest --json tag_name'.split(), capture_output=True, text=True
+    ).stdout
+    print_and_log(f"Latest version: {github_version}", Fore.RESET)
 
     if github_version > current_version:
         print_and_log(f'A new release of syncer is available: {current_version} → {github_version}', Fore.CYAN)
@@ -55,7 +50,7 @@ def main(
 
     print_and_log("Updating...", Fore.BLUE)
 
-    latest_release_url = f'git+{syncer.url}.git@{github_version}'
+    latest_release_url = f'git+https://www.github.com/datapointchris/syncer.git@{github_version}'
 
     # pipx upgrade does not seem to work, instead force install
     install_command = f"pipx install --force {latest_release_url}"

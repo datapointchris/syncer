@@ -8,7 +8,8 @@ exclude =
     build,
     dist
 per-file-ignores =
-    __init__.py:F401
-    env.py:F401
+    utilities.py:E203
 max-complexity = 20
 count = true
+
+# E203 Whitespace before ':', caused by function output used as list slice
