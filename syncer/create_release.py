@@ -57,7 +57,7 @@ def main(
     syncer.okay('checkes passed for creating release')
 
     update_project_version = f'poetry version {version}'
-    create_git_tag = f'git tag -a {version} -m "{title}"'
+    create_git_tag = f'git tag {version} -m "{title}"'
     push_tag_to_github = f'git push --tags origin refs/tags/{version}'
     create_release_on_github = f'gh release create {version} -t "{title}"'
 
