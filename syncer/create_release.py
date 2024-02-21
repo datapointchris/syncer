@@ -66,7 +66,7 @@ def main(
             subprocess.call(update_project_version.split())
             syncer.info(f'Updated project version to {version}')
 
-            subprocess.call(create_git_tag.split())
+            subprocess.call(create_git_tag.split(), shell=True)
             syncer.info(f'Created git tag for version {version}')
 
             subprocess.call(push_tag_to_github.split())
