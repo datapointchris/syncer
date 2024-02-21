@@ -38,16 +38,16 @@ def main(
             syncer.error(f'{error_msg} unpushed local changes on main branch')
             with syncer.chdir():
                 subprocess.call('git log --oneline origin/main..main'.split())
-        if not dry_run:
-            sys.exit(1)
+            if not dry_run:
+                sys.exit(1)
 
     if syncer.has_master_branch:
         if syncer.has_unpushed_master_commits:
             syncer.error(f'{error_msg} unpushed local changes on master branch')
             with syncer.chdir():
                 subprocess.call('git log --oneline origin/master..master'.split())
-        if not dry_run:
-            sys.exit(1)
+            if not dry_run:
+                sys.exit(1)
 
     if syncer.can_update:
         syncer.error(f'{error_msg} repo has upstream changes')
