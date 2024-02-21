@@ -1,87 +1,49 @@
 import pathlib
+
 import typer
-from rich import print
+from colorama import Fore, Style
 
 app = typer.Typer()
+
+PATHS = {
+    'Path()': [
+        ('pathlib.Path()', pathlib.Path()),
+        ('pathlib.Path.cwd()', pathlib.Path.cwd()),
+        ('pathlib.Path().home()', pathlib.Path().home()),
+        ('pathlib.Path().absolute()', pathlib.Path().absolute()),
+        ('pathlib.Path().absolute().parent', pathlib.Path().absolute().parent),
+        ('pathlib.Path().absolute().parent.parent', pathlib.Path().absolute().parent.parent),
+        ('pathlib.Path().parent', pathlib.Path().parent),
+        ('pathlib.Path().parent.absolute()', pathlib.Path().parent.absolute()),
+        ('pathlib.Path().parent.parent', pathlib.Path().parent.parent),
+        ('pathlib.Path().parent.parent.absolute()', pathlib.Path().parent.parent.absolute()),
+        ('pathlib.Path().absolute().parent / "data"', pathlib.Path().absolute().parent / "data"),
+    ],
+    'Path(__file__)': [
+        ('pathlib.Path(__file__)', pathlib.Path(__file__)),
+        ('pathlib.Path.cwd()', pathlib.Path.cwd()),
+        ('pathlib.Path(__file__).home()', pathlib.Path(__file__).home()),
+        ('pathlib.Path(__file__).resolve()', pathlib.Path(__file__).resolve()),
+        ('pathlib.Path(__file__).absolute()', pathlib.Path(__file__).absolute()),
+        ('pathlib.Path(__file__).absolute().parent', pathlib.Path(__file__).absolute().parent),
+        ('pathlib.Path(__file__).absolute().parent.parent', pathlib.Path(__file__).absolute().parent.parent),
+        ('pathlib.Path(__file__).parent', pathlib.Path(__file__).parent),
+        ('pathlib.Path(__file__).parent.absolute()', pathlib.Path(__file__).parent.absolute()),
+        ('pathlib.Path(__file__).parent.parent', pathlib.Path(__file__).parent.parent),
+        ('pathlib.Path(__file__).parent.parent.absolute()', pathlib.Path(__file__).parent.parent.absolute()),
+        ('pathlib.Path(__file__).absolute().parent / "data"', pathlib.Path(__file__).absolute().parent / "data"),
+    ],
+}
 
 
 @app.callback(invoke_without_command=True)
 @app.command()
 def main():
-    print('---------- Path()---------- ')
-    print()
-    print('[blue]pathlib.Path()[/]')
-    print(pathlib.Path())
-
-    print('[blue]pathlib.Path.cwd()[/]')
-    print(pathlib.Path.cwd())
-
-    print('[blue]pathlib.Path().home()[/]')
-    print(pathlib.Path().home())
-
-    print('[blue]pathlib.Path().resolve()[/]')
-    print(pathlib.Path().resolve())
-
-    print('[blue]pathlib.Path().absolute()[/]')
-    print(pathlib.Path().absolute())
-
-    print('[blue]pathlib.Path().absolute().parent[/]')
-    print(pathlib.Path().absolute().parent)
-
-    print('[blue]pathlib.Path().absolute().parent.parent[/]')
-    print(pathlib.Path().absolute().parent.parent)
-
-    print('[blue]pathlib.Path().parent[/]')
-    print(pathlib.Path().parent)
-
-    print('[blue]pathlib.Path().parent.absolute()[/]')
-    print(pathlib.Path().parent.absolute())
-
-    print('[blue]pathlib.Path().parent.parent[/]')
-    print(pathlib.Path().parent.parent)
-
-    print('[blue]pathlib.Path().parent.parent.absolute()[/]')
-    print(pathlib.Path().parent.parent.absolute())
-
-    print('[blue]pathlib.Path().absolute().parent / data[/]')
-    print(pathlib.Path().absolute().parent / 'data')
-
-    print()
-    print('---------- Path(__file__) ----------')
-    print()
-
-    print('[blue]pathlib.Path(__file__)[/]')
-    print(pathlib.Path(__file__))
-
-    print('[blue]pathlib.Path.cwd()[/]')
-    print(pathlib.Path.cwd())
-
-    print('[blue]pathlib.Path(__file__).home()[/]')
-    print(pathlib.Path(__file__).home())
-
-    print('[blue]pathlib.Path(__file__).resolve()[/]')
-    print(pathlib.Path(__file__).resolve())
-
-    print('[blue]pathlib.Path(__file__).absolute()[/]')
-    print(pathlib.Path(__file__).absolute())
-
-    print('[blue]pathlib.Path(__file__).absolute().parent[/]')
-    print(pathlib.Path(__file__).absolute().parent)
-
-    print('[blue]pathlib.Path(__file__).absolute().parent.parent[/]')
-    print(pathlib.Path(__file__).absolute().parent.parent)
-
-    print('[blue]pathlib.Path(__file__).parent[/]')
-    print(pathlib.Path(__file__).parent)
-
-    print('[blue]pathlib.Path(__file__).parent.absolute()[/]')
-    print(pathlib.Path(__file__).parent.absolute())
-
-    print('[blue]pathlib.Path(__file__).parent.parent[/]')
-    print(pathlib.Path(__file__).parent.parent)
-
-    print('[blue]pathlib.Path(__file__).parent.parent.absolute()[/]')
-    print(pathlib.Path(__file__).parent.parent.absolute())
-
-    print('[blue]pathlib.Path(__file__).absolute().parent / data[/]')
-    print(pathlib.Path(__file__).absolute().parent / 'data')
+    for path, commands in PATHS.items():
+        print()
+        print(Fore.GREEN + '-' * 20 + path + '-' * 20 + Style.RESET_ALL)
+        print()
+        for name, command in commands:
+            print(Fore.BLUE + name + Style.RESET_ALL)
+            print(command)
+            print()

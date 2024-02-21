@@ -1,12 +1,13 @@
-import os
-from dataclasses import dataclass
-import subprocess
-import typer
-import pathlib
-from rich import print
 import json
+import os
+import pathlib
+import subprocess
+from dataclasses import dataclass
 
-from .config import settings
+import typer
+from rich import print
+
+from syncer.config import settings
 
 GITHUB = 'https://github.com'
 
@@ -37,7 +38,7 @@ def message(directory: str, color: str, msg: str):
 @app.command()
 def main():
     """Sync various downloaded plugins"""
-    with open(settings.data.PLUGINS, 'r') as f:
+    with open(settings.data.PLUGINS_DIR) as f:
         plugins = [Plugin(**p) for p in json.load(f)]
 
     for plugin in plugins:
