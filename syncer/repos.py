@@ -1,3 +1,4 @@
+import enum
 import json
 import os
 import pathlib
@@ -9,6 +10,13 @@ import typer
 from colorama import Fore, Style
 
 from syncer.config import settings
+
+app = typer.Typer()
+
+
+class RepoType(enum.Enum):
+    datapointchris = 'datapointchris'
+    labs1904 = '1904labs'
 
 
 class Repo:
@@ -95,9 +103,6 @@ class Repo:
             return subprocess.getoutput('git log origin/master..master')
 
 
-app = typer.Typer()
-
-
 def load_repos(filename: pathlib.Path, code_root: pathlib.Path) -> list[Repo]:
     with filename.open() as file:
         return [Repo(**repo, code_root=code_root) for repo in json.load(file)]
@@ -120,6 +125,7 @@ def create_base_directories(repos: list[Repo], dry_run: bool = False):
 @app.callback(invoke_without_command=True)
 @app.command()
 def main(
+    owner: Annotated[RepoType, typer.Argument()],
     dry_run: Annotated[bool, typer.Option()] = False,
     require_main_branch: Annotated[bool, typer.Option()] = False,
     code_root: Annotated[pathlib.Path, typer.Option()] = settings.data.CODE_ROOT,
@@ -129,7 +135,7 @@ def main(
     if dry_run:
         print(Fore.YELLOW + '=' * 35 + '|  DRY RUN  |' + '=' * 35 + Style.RESET_ALL)
 
-    repos = load_repos(settings.data.REPOS_DIR / 'datapointchris.json', code_root=code_root)
+    repos = load_repos(settings.data.REPOS_DIR / (owner.value + '.json'), code_root=code_root)
 
     create_base_directories(repos, dry_run=dry_run)
 
