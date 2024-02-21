@@ -1,10 +1,10 @@
 import pathlib
-import os
-from rich import print
 import platform
-import typer
 
-from .config import settings
+import typer
+from rich import print
+
+from syncer.config import settings
 
 SPACES = ' ' * 10
 
@@ -13,13 +13,13 @@ app = typer.Typer()
 
 def remove_and_symlink(
     file: str,
-    source_base: pathlib.Path = settings.dotfiles.source.DOTFILES,
-    target_base: pathlib.Path = settings.dotfiles.target.DOTFILES,
+    source_base: pathlib.Path = settings.dotfiles.SOURCE_DOTFILES,
+    target_base: pathlib.Path = settings.dotfiles.TARGET_DOTFILES,
 ):
     source = source_base / file
     target = target_base / file
     try:
-        os.remove(target)
+        target.unlink()
     except FileNotFoundError:
         print(f'[yellow]Cannot remove {target}, still proceeding[/]')
     target.symlink_to(source, target_is_directory=source.is_dir())
@@ -35,14 +35,15 @@ def symlink_universal():
 
 def symlink_mac():
     print(f'[yellow underline]{SPACES}MacOS Specific{SPACES}[/]')
-    remove_and_symlink(
-        'aws-profiles', source_base=settings.dotfiles.source.BINS, target_base=settings.dotfiles.target.MAC_BINS
-    )
-    remove_and_symlink(
-        'ichrisbirch', source_base=settings.dotfiles.source.BINS, target_base=settings.dotfiles.target.MAC_BINS
-    )
     for dotfile in settings.dotfiles.MAC_ONLY_DOTFILES:
         remove_and_symlink(dotfile)
+
+    remove_and_symlink(
+        'aws-profiles', source_base=settings.dotfiles.SOURCE_BINS, target_base=settings.dotfiles.TARGET_MAC_BINS
+    )
+    remove_and_symlink(
+        'ichrisbirch', source_base=settings.dotfiles.SOURCE_BINS, target_base=settings.dotfiles.TARGET_MAC_BINS
+    )
 
 
 def symlink_linux():
