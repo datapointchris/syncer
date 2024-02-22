@@ -13,10 +13,5 @@
         "owner": "zsh-users",
         "base": ".oh-my-zsh/custom/plugins",
         "name": "zsh-syntax-highlighting"
-    },
-    {
-        "owner": "zsh-users",
-        "base": ".oh-my-zsh/custom/plugins",
-        "name": "zsh-autosuggestions"
     }
 ]
