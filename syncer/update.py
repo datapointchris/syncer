@@ -17,6 +17,7 @@ app = typer.Typer()
 @app.command()
 def main(
     dry_run: Annotated[bool, typer.Option()] = False,
+    force: Annotated[bool, typer.Option()] = False,
 ):
 
     def print_and_log(message: str, color: str):
@@ -41,7 +42,9 @@ def main(
         print_and_log(f'A new release of syncer is available: {current_version} → {github_version}', Fore.CYAN)
     else:
         print_and_log('No new release of syncer is available', Fore.YELLOW)
-        if not dry_run:
+        if force:
+            print_and_log('Forcing update...', Fore.RED)
+        elif not dry_run:
             sys.exit(0)
 
     print_and_log("Updating...", Fore.BLUE)
