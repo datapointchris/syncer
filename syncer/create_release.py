@@ -110,6 +110,5 @@ def main(
         syncer.info(f'Create Github release: {create_release_on_github}')
         logger.info(f'{log_dry_run}create github release: {create_release_on_github}')
 
-    if dry_run:
         print()
         print(Fore.YELLOW + '=' * 30 + '|  END DRY RUN  |' + '=' * 30 + Style.RESET_ALL)

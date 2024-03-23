@@ -34,8 +34,7 @@ def main(
         if not dry_run:
             sys.exit(1)
 
-    github_version_command = 'gh release view --json tagName --jq .tagName'.split()
-    github_version = subprocess.run(github_version_command, capture_output=True, text=True).stdout.strip()
+    github_version = utilities.get_latest_github_version()
     print_and_log(f"Latest version: {github_version}", Fore.RESET)
 
     if github_version > current_version:
