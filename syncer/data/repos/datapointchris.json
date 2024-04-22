@@ -75,12 +75,6 @@
         "group": "python-projects",
         "host": "https://github.com",
         "owner": "datapointchris",
-        "name": "ames-housing"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
         "name": "aws-lambdas"
     },
     {
@@ -88,18 +82,6 @@
         "host": "https://github.com",
         "owner": "datapointchris",
         "name": "data-conversion"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "ellevation-data-challenge"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "etl-housing"
     },
     {
         "group": "python-projects",
@@ -118,12 +100,6 @@
         "host": "https://github.com",
         "owner": "datapointchris",
         "name": "interview-questions"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "keras-gridsearch"
     },
     {
         "group": "python-projects",
@@ -171,12 +147,6 @@
         "group": "python-projects",
         "host": "https://github.com",
         "owner": "datapointchris",
-        "name": "pyspark-globalmart"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
         "name": "reddit-nlp"
     },
     {
@@ -201,19 +171,7 @@
         "group": "python-projects",
         "host": "https://github.com",
         "owner": "datapointchris",
-        "name": "snakeoil"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
         "name": "solr-bootstrap"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "textron"
     },
     {
         "group": "python-projects",
@@ -232,12 +190,6 @@
         "host": "https://github.com",
         "owner": "datapointchris",
         "name": "visualizer"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "webstore"
     },
     {
         "group": "r-projects",
