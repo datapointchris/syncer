@@ -1,4 +1,5 @@
 import subprocess
+from pathlib import Path
 
 
 def get_installed_version():
@@ -12,3 +13,8 @@ def get_latest_github_version():
     github_version_command = 'gh release view --json tagName --jq .tagName'.split()
     github_version = subprocess.run(github_version_command, capture_output=True, text=True).stdout.strip()
     return github_version
+
+
+def convert_readme_to_help_text(readme: Path):
+    text = readme.read_text()
+    print(text)
