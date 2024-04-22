@@ -12,12 +12,10 @@
         "syncer"
     ],
     "python-projects": [
-        "aws-lambdas",
         "data-conversion",
         "git-graph",
         "github-issues",
         "interview-questions",
-        "llama",
         "mask-rcnn-scooters",
         "mongorest",
         "mortgage-matrix",
