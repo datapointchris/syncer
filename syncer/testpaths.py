@@ -1,4 +1,4 @@
-import pathlib
+from pathlib import Path
 
 import typer
 from colorama import Fore, Style
@@ -7,31 +7,31 @@ app = typer.Typer()
 
 PATHS = {
     'Path()': [
-        ('pathlib.Path()', pathlib.Path()),
-        ('pathlib.Path.cwd()', pathlib.Path.cwd()),
-        ('pathlib.Path().home()', pathlib.Path().home()),
-        ('pathlib.Path().absolute()', pathlib.Path().absolute()),
-        ('pathlib.Path().absolute().parent', pathlib.Path().absolute().parent),
-        ('pathlib.Path().absolute().parent.parent', pathlib.Path().absolute().parent.parent),
-        ('pathlib.Path().parent', pathlib.Path().parent),
-        ('pathlib.Path().parent.absolute()', pathlib.Path().parent.absolute()),
-        ('pathlib.Path().parent.parent', pathlib.Path().parent.parent),
-        ('pathlib.Path().parent.parent.absolute()', pathlib.Path().parent.parent.absolute()),
-        ('pathlib.Path().absolute().parent / "data"', pathlib.Path().absolute().parent / "data"),
+        ('Path()', Path()),
+        ('Path.cwd()', Path.cwd()),
+        ('Path.home()', Path.home()),
+        ('Path().absolute()', Path().absolute()),
+        ('Path().absolute().parent', Path().absolute().parent),
+        ('Path().absolute().parent.parent', Path().absolute().parent.parent),
+        ('Path().parent', Path().parent),
+        ('Path().parent.absolute()', Path().parent.absolute()),
+        ('Path().parent.parent', Path().parent.parent),
+        ('Path().parent.parent.absolute()', Path().parent.parent.absolute()),
+        ('Path().absolute().parent / "data"', Path().absolute().parent / "data"),
     ],
     'Path(__file__)': [
-        ('pathlib.Path(__file__)', pathlib.Path(__file__)),
-        ('pathlib.Path.cwd()', pathlib.Path.cwd()),
-        ('pathlib.Path(__file__).home()', pathlib.Path(__file__).home()),
-        ('pathlib.Path(__file__).resolve()', pathlib.Path(__file__).resolve()),
-        ('pathlib.Path(__file__).absolute()', pathlib.Path(__file__).absolute()),
-        ('pathlib.Path(__file__).absolute().parent', pathlib.Path(__file__).absolute().parent),
-        ('pathlib.Path(__file__).absolute().parent.parent', pathlib.Path(__file__).absolute().parent.parent),
-        ('pathlib.Path(__file__).parent', pathlib.Path(__file__).parent),
-        ('pathlib.Path(__file__).parent.absolute()', pathlib.Path(__file__).parent.absolute()),
-        ('pathlib.Path(__file__).parent.parent', pathlib.Path(__file__).parent.parent),
-        ('pathlib.Path(__file__).parent.parent.absolute()', pathlib.Path(__file__).parent.parent.absolute()),
-        ('pathlib.Path(__file__).absolute().parent / "data"', pathlib.Path(__file__).absolute().parent / "data"),
+        ('Path(__file__)', Path(__file__)),
+        ('Path.cwd()', Path.cwd()),
+        ('Path(__file__).home()', Path(__file__).home()),
+        ('Path(__file__).resolve()', Path(__file__).resolve()),
+        ('Path(__file__).absolute()', Path(__file__).absolute()),
+        ('Path(__file__).absolute().parent', Path(__file__).absolute().parent),
+        ('Path(__file__).absolute().parent.parent', Path(__file__).absolute().parent.parent),
+        ('Path(__file__).parent', Path(__file__).parent),
+        ('Path(__file__).parent.absolute()', Path(__file__).parent.absolute()),
+        ('Path(__file__).parent.parent', Path(__file__).parent.parent),
+        ('Path(__file__).parent.parent.absolute()', Path(__file__).parent.parent.absolute()),
+        ('Path(__file__).absolute().parent / "data"', Path(__file__).absolute().parent / "data"),
     ],
 }
 

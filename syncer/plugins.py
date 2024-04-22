@@ -1,9 +1,9 @@
 import enum
 import json
 import os
-import pathlib
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -29,14 +29,14 @@ class Plugin:
 
     @property
     def directory(self):
-        return pathlib.Path.home() / self.base / self.name
+        return Path.home() / self.base / self.name
 
     @property
     def url(self):
         return '/'.join([GITHUB, self.owner, self.name])
 
 
-def message(msg: str, directory: pathlib.Path, color: str):
+def message(msg: str, directory: Path, color: str):
     message = f'{directory} {color}{"." * (80 - len(str(directory)) - len(msg))} {msg}{Style.RESET_ALL}'
     print(message)
 

@@ -6,7 +6,6 @@ from typing import Annotated
 import typer
 from colorama import Fore, Style
 
-from syncer.config import settings
 from syncer.repos import Repo
 
 logger = logging.getLogger(__name__)
@@ -29,7 +28,7 @@ def main(
     if dry_run:
         print(Fore.YELLOW + '=' * 35 + '|  DRY RUN  |' + '=' * 35 + Style.RESET_ALL)
 
-    syncer = Repo(settings.data.CODE_ROOT, '', 'https://www.github.com', 'datapointchris', 'syncer')
+    syncer = Repo(group='', name='syncer')
 
     error_msg = 'ABORT:'
     if syncer.has_uncommitted_changes:

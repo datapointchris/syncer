@@ -1,5 +1,5 @@
-import pathlib
 import platform
+from pathlib import Path
 
 import typer
 from rich import print
@@ -13,8 +13,8 @@ app = typer.Typer()
 
 def remove_and_symlink(
     file: str,
-    source_base: pathlib.Path = settings.dotfiles.SOURCE_DOTFILES,
-    target_base: pathlib.Path = settings.dotfiles.TARGET_DOTFILES,
+    source_base: Path = settings.dotfiles.SOURCE_DOTFILES,
+    target_base: Path = settings.dotfiles.TARGET_DOTFILES,
 ):
     source = source_base / file
     target = target_base / file

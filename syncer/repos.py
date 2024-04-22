@@ -1,9 +1,9 @@
 import enum
 import json
 import os
-import pathlib
 import subprocess
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -20,20 +20,28 @@ class RepoType(enum.Enum):
 
 
 class Repo:
-    def __init__(self, code_root: pathlib.Path, group: str, host: str, owner: str, name: str):
-        self.code_root = code_root
+
+    def __init__(
+        self,
+        group: str,
+        name: str,
+        host: str = 'https://github.com',
+        owner: str = 'datapointchris',
+        code_root: Path = Path.home() / 'code',
+    ):
         self.group = group
+        self.name = name
         self.host = host
         self.owner = owner
-        self.name = name
+        self.code_root = code_root
         self.full_path = self.code_root / self.group / self.name
-        self.short_path = pathlib.Path(self.group) / self.name
+        self.short_path = Path(self.group) / self.name
         self.directory = self.code_root / self.group
         self.url = '/'.join([self.host, self.owner, self.name])
 
     @contextmanager
     def chdir(self):
-        old_path = pathlib.Path.cwd()
+        old_path = Path.cwd()
         os.chdir(self.full_path)
         try:
             yield
@@ -103,9 +111,14 @@ class Repo:
             return subprocess.getoutput('git log origin/master..master')
 
 
-def load_repos(filename: pathlib.Path, code_root: pathlib.Path) -> list[Repo]:
+def load_repos(filename: Path) -> list[Repo]:
     with filename.open() as file:
-        return [Repo(**repo, code_root=code_root) for repo in json.load(file)]
+        repos = []
+        data = json.load(file)
+        for group, names in data.items():
+            for name in names:
+                repos.append(Repo(group=group, name=name))
+    return repos
 
 
 def print_message(msg: str, repo: Repo, color: str):
@@ -128,14 +141,14 @@ def main(
     owner: Annotated[RepoType, typer.Argument()],
     dry_run: Annotated[bool, typer.Option()] = False,
     require_main_branch: Annotated[bool, typer.Option()] = False,
-    code_root: Annotated[pathlib.Path, typer.Option()] = settings.data.CODE_ROOT,
+    code_root: Annotated[Path, typer.Option()] = settings.data.CODE_ROOT,
 ):
     print(Fore.BLUE + 'Syncing Projects...' + Style.RESET_ALL)
 
     if dry_run:
         print(Fore.YELLOW + '=' * 35 + '|  DRY RUN  |' + '=' * 35 + Style.RESET_ALL)
 
-    repos = load_repos(settings.data.REPOS_DIR / (owner.value + '.json'), code_root=code_root)
+    repos = load_repos(settings.data.REPOS_DIR / (owner.value + '.json'))
 
     create_base_directories(repos, dry_run=dry_run)
 
