@@ -18,7 +18,6 @@
         "github-issues",
         "interview-questions",
         "llama",
-        "logging-test",
         "mask-rcnn-scooters",
         "mongorest",
         "mortgage-matrix",
@@ -28,7 +27,6 @@
         "reddit-scraper",
         "redshift-connect",
         "robo-investor",
-        "solr-bootstrap",
         "tomato-blocks",
         "verbal-morality",
         "visualizer"
@@ -37,8 +35,8 @@
         "stack_overflow_dev_survey_2018"
     ],
     "sql-projects": [
-        "boston-bluebikes",
         "dimensional-modeling",
+        "post-shift",
         "redshift",
         "sql-server"
     ],
