@@ -5,8 +5,7 @@ import typer
 from syncer import create_release, dotfiles, plugins, repos, testpaths, update, utilities
 from syncer.config import settings
 
-help_text = utilities.convert_readme_to_help_text(settings.syncer.ROOT / 'README.md')
-app = typer.Typer(no_args_is_help=True, help=help_text)
+app = typer.Typer(no_args_is_help=True)
 
 logger = logging.getLogger()
 handler = logging.FileHandler('/usr/local/var/log/syncer.log')
@@ -19,7 +18,14 @@ logger.info('syncer started')
 
 @app.command()
 def version():
+    """Show the current installed version of syncer."""
     print(utilities.get_installed_version())
+
+
+@app.command()
+def readme():
+    """Show the README.md file as help text."""
+    print(utilities.convert_readme_to_help_text(settings.syncer.ROOT / 'README.md'))
 
 
 app.add_typer(dotfiles.app, name='dotfiles', short_help='Sync dotfiles for MacOS or Linux based on OS detection')
