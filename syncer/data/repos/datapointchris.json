@@ -1,266 +1,59 @@
-[
-    {
-        "group": "",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "bash-playground"
-    },
-    {
-        "group": "",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "datapointchris"
-    },
-    {
-        "group": "",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "datapointchris-website"
-    },
-    {
-        "group": "",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "docs"
-    },
-    {
-        "group": "",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "dotfiles"
-    },
-    {
-        "group": "",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "ichrisbirch"
-    },
-    {
-        "group": "",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "python-reference"
-    },
-    {
-        "group": "",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "reference"
-    },
-    {
-        "group": "",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "standards"
-    },
-    {
-        "group": "",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "syncer"
-    },
-    {
-        "group": "",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "templates"
-    },
-    {
-        "group": "",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "python-tools"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "aws-lambdas"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "data-conversion"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "git-graph"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "github-issues"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "interview-questions"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "llama"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "logging-test"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "mask-rcnn-scooters"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "mongorest"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "mortgage-matrix"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "object-detection-keras-unet"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "parquet"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "reddit-nlp"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "reddit-scraper"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "redshift-connect"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "robo-investor"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "solr-bootstrap"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "tomato-blocks"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "verbal-morality"
-    },
-    {
-        "group": "python-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "visualizer"
-    },
-    {
-        "group": "r-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "stack_overflow_dev_survey_2018"
-    },
-    {
-        "group": "sql-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "boston-bluebikes"
-    },
-    {
-        "group": "sql-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "dimensional-modeling"
-    },
-    {
-        "group": "sql-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "redshift"
-    },
-    {
-        "group": "sql-projects",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "sql-server"
-    },
-    {
-        "group": "python-forked",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "bodywork-core"
-    },
-    {
-        "group": "python-forked",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "flask-admin"
-    },
-    {
-        "group": "python-forked",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "scikit-learn"
-    },
-    {
-        "group": "python-forked",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "superduperdb"
-    },
-    {
-        "group": "python-forked",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "todo"
-    },
-    {
-        "group": "python-forked",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "tpot"
-    },
-    {
-        "group": "python-tutorials",
-        "host": "https://github.com",
-        "owner": "datapointchris",
-        "name": "docker-redis-cicd"
-    }
-]
+{
+    "": [
+        "bash-playground",
+        "datapointchris",
+        "datapointchris-website",
+        "docs",
+        "dotfiles",
+        "ichrisbirch",
+        "python-reference",
+        "reference",
+        "standards",
+        "syncer"
+    ],
+    "python-projects": [
+        "aws-lambdas",
+        "data-conversion",
+        "git-graph",
+        "github-issues",
+        "interview-questions",
+        "llama",
+        "logging-test",
+        "mask-rcnn-scooters",
+        "mongorest",
+        "mortgage-matrix",
+        "object-detection-keras-unet",
+        "parquet",
+        "reddit-nlp",
+        "reddit-scraper",
+        "redshift-connect",
+        "robo-investor",
+        "solr-bootstrap",
+        "tomato-blocks",
+        "verbal-morality",
+        "visualizer"
+    ],
+    "r-projects": [
+        "stack_overflow_dev_survey_2018"
+    ],
+    "sql-projects": [
+        "boston-bluebikes",
+        "dimensional-modeling",
+        "redshift",
+        "sql-server"
+    ],
+    "python-forked": [
+        "bodywork-core",
+        "flask-admin",
+        "scikit-learn",
+        "superduperdb",
+        "todo",
+        "tpot"
+    ],
+    "python-tutorials": [
+        "docker-redis-cicd"
+    ],
+    "templates": [
+        "new-python-project"
+    ]
+}
