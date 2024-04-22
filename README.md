@@ -12,6 +12,7 @@ Install from the github repo to get the latest stable release
 ### 1) Make Changes in the Repo
 
 Changes should be made inside of the repo and committed as regular.
+Changes must be `PUSHED`
 
 ### 2) Create Release
 
