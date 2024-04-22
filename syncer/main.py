@@ -3,8 +3,10 @@ import logging
 import typer
 
 from syncer import create_release, dotfiles, plugins, repos, testpaths, update, utilities
+from syncer.config import settings
 
-app = typer.Typer(no_args_is_help=True)
+help_text = utilities.convert_readme_to_help_text(settings.syncer.ROOT / 'README.md')
+app = typer.Typer(no_args_is_help=True, help=help_text)
 
 logger = logging.getLogger()
 handler = logging.FileHandler('/usr/local/var/log/syncer.log')
