@@ -1,126 +1,27 @@
-# `syncer`
+# syncer
 
-**Usage**:
+## Installing
 
-```console
-syncer [OPTIONS] COMMAND [ARGS]...
-```
+Use `pipx` to install, so that it is globally available.  
+Install from the github repo to get the latest stable release
+`pipx install git+https://www.github.com/datapointchris/syncer.git@latest`
+(if `@latest` doesn't work then go find the latest release and use that)
 
-**Options**:
+## Updating
 
-* `--install-completion`: Install completion for the current shell.
-* `--show-completion`: Show completion for the current shell, to copy it or customize the installation.
-* `--help`: Show this message and exit.
+### 1) Make Changes in the Repo
 
-**Commands**:
+Changes should be made inside of the repo and committed as regular.
 
-* `dotfiles`
-* `main`: Sync dotfiles, projects, or plugins
-* `plugins`: Sync various downloaded plugins
-* `projects`: Sync projects
+### 2) Create Release
 
-## `syncer dotfiles`
+***IMPORTANT:*** Run `syncer create-release` from INSIDE `.venv` locally.  
+This is necessary so the most recent version of the project that was previously committed in Step 1 will be the version that the new release will be created from.
 
-**Usage**:
+### 3) Update `syncer`
 
-```console
-syncer dotfiles [OPTIONS] COMMAND [ARGS]...
-```
-
-**Options**:
-
-* `--help`: Show this message and exit.
-
-**Commands**:
-
-* `main`
-
-### `syncer dotfiles main`
-
-**Usage**:
-
-```console
-syncer dotfiles main [OPTIONS]
-```
-
-**Options**:
-
-* `--help`: Show this message and exit.
-
-## `syncer main`
-
-Sync dotfiles, projects, or plugins
-
-**Usage**:
-
-```console
-syncer main [OPTIONS]
-```
-
-**Options**:
-
-* `--help`: Show this message and exit.
-
-## `syncer plugins`
-
-Sync various downloaded plugins
-
-**Usage**:
-
-```console
-syncer plugins [OPTIONS] COMMAND [ARGS]...
-```
-
-**Options**:
-
-* `--help`: Show this message and exit.
-
-**Commands**:
-
-* `main`: Sync various downloaded plugins
-
-### `syncer plugins main`
-
-Sync various downloaded plugins
-
-**Usage**:
-
-```console
-syncer plugins main [OPTIONS]
-```
-
-**Options**:
-
-* `--help`: Show this message and exit.
-
-## `syncer projects`
-
-Sync projects
-
-**Usage**:
-
-```console
-syncer projects [OPTIONS] COMMAND [ARGS]...
-```
-
-**Options**:
-
-* `--help`: Show this message and exit.
-
-**Commands**:
-
-* `main`: Sync projects
-
-### `syncer projects main`
-
-Sync projects
-
-**Usage**:
-
-```console
-syncer projects main [OPTIONS]
-```
-
-**Options**:
-
-* `--help`: Show this message and exit.
+**EXIT** the virtual environment, in order to use the global `syncer`  
+Run `syncer update` to get the newest version.
+> [!NOTE]
+> If the newest version is not working, wait a few minutes for Github to update
+> If it does not work after a while, you can use `syncer update --force`
