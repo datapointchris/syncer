@@ -1,16 +1,22 @@
 import logging
 import subprocess
 import sys
+from dataclasses import dataclass
 from typing import Annotated
 
 import typer
-from colorama import Fore, Style
 
 from syncer.repos import Repo
 
 logger = logging.getLogger(__name__)
 
 app = typer.Typer()
+
+
+@dataclass
+class Command:
+    message: str
+    command: str
 
 
 @app.callback(invoke_without_command=True)
@@ -20,20 +26,18 @@ def main(
     title: Annotated[str, typer.Argument()],
     dry_run: Annotated[bool, typer.Option()] = False,
 ):
-    print(Fore.BLUE + 'Creating Release...' + Style.RESET_ALL)
-
-    log_dry_run = 'DRY RUN: ' if dry_run else ''
-    logger.info(f'{log_dry_run}creating release {version} - {title}')
+    syncer = Repo(group='', name='syncer', logger=logger)
 
     if dry_run:
-        print(Fore.YELLOW + '=' * 35 + '|  DRY RUN  |' + '=' * 35 + Style.RESET_ALL)
+        syncer.warning('=' * 35 + '|  DRY RUN  |' + '=' * 35)
 
-    syncer = Repo(group='', name='syncer')
+    syncer.okay(f"creating release: '{version} - {title}'")
+    syncer.info('running checks...')
+    errors = False
 
-    error_msg = 'ABORT:'
     if syncer.has_uncommitted_changes:
-        syncer.error(f'{error_msg} uncommitted local changes')
-        logger.error(f'{log_dry_run}{error_msg} uncommitted local changes')
+        syncer.error('abort: uncommitted local changes')
+        errors = True
         with syncer.chdir():
             subprocess.call('git status --short'.split())
         if not dry_run:
@@ -41,8 +45,8 @@ def main(
 
     if syncer.has_main_branch:
         if syncer.has_unpushed_main_commits:
-            syncer.error(f'{error_msg} unpushed local changes on main branch')
-            logger.error(f'{log_dry_run}{error_msg} unpushed local changes on main branch')
+            errors = True
+            syncer.error('abort: unpushed local changes on main branch')
             with syncer.chdir():
                 subprocess.call('git log --oneline origin/main..main'.split())
             if not dry_run:
@@ -50,64 +54,41 @@ def main(
 
     if syncer.has_master_branch:
         if syncer.has_unpushed_master_commits:
-            syncer.error(f'{error_msg} unpushed local changes on master branch')
-            logger.error(f'{log_dry_run}{error_msg} unpushed local changes on master branch')
+            errors = True
+            syncer.error('abort: unpushed local changes on master branch')
             with syncer.chdir():
                 subprocess.call('git log --oneline origin/master..master'.split())
             if not dry_run:
                 sys.exit(1)
 
     if syncer.can_update:
-        syncer.error(f'{error_msg} repo has upstream changes')
-        logger.error(f'{log_dry_run}{error_msg} repo has upstream changes')
+        syncer.error('abort: repo has upstream changes')
+        errors = True
         if not dry_run:
             sys.exit(1)
 
-    syncer.okay('checkes passed for creating release')
-    logger.info(f'{log_dry_run}checks passed for creating release')
-
-    update_project_version = f'poetry version {version}'
-    commit_version_bump = f"git commit -am 'build: create release {version} - {title}'"
-    create_git_tag = f"git tag {version} -m '{title}'"
-    push_tag_to_github = f'git push --tags origin refs/tags/{version}'
-    create_release_on_github = f"gh release create {version} -t '{title}' --notes-from-tag"
-
-    if not dry_run:
-        with syncer.chdir():
-            syncer.info(f'Updating project version to {version}')
-            logger.info(f'{log_dry_run}updating project version to {version}')
-            subprocess.call(update_project_version, shell=True)
-
-            syncer.info('Pushing version bump to git')
-            logger.info(f'{log_dry_run}pushing version bump to git')
-            subprocess.call(commit_version_bump, shell=True)
-
-            syncer.info(f'Creating git tag for version {version}')
-            logger.info(f'{log_dry_run}creating git tag for version {version}')
-            subprocess.call(create_git_tag, shell=True)
-
-            syncer.info('Pushing tag to origin')
-            logger.info(f'{log_dry_run}pushing tag to origin')
-            subprocess.call(push_tag_to_github, shell=True)
-
-            syncer.info(f'Creating release on github for version {version} - {title}')
-            logger.info(f'{log_dry_run}creating release on github for version {version} - {title}')
-            subprocess.call(create_release_on_github, shell=True)
+    if errors:
+        syncer.error('checks failed for creating release')
     else:
-        syncer.info(f'Update project version: {update_project_version}')
-        logger.info(f'{log_dry_run}update project version: {update_project_version}')
+        syncer.okay('checks passed for creating release')
 
-        syncer.info('Push version bump to git')
-        logger.info(f'{log_dry_run}push version bump to git')
+    COMMANDS = [
+        Command(f'updating project version to {version}', f'poetry version {version}'),
+        Command('locking dependencies', 'poetry lock'),
+        Command('creating commit', f"git commit -am 'build: create release {version} - {title}'"),
+        Command('pushing to git', 'git push'),
+        Command(f'creating git tag for version {version}', f"git tag {version} -m '{title}'"),
+        Command('pushing tag to origin', f'git push --tags origin refs/tags/{version}'),
+        Command('creating release on github', f"gh release create {version} -t '{title}' --notes-from-tag"),
+    ]
 
-        syncer.info(f'Create git tag: {create_git_tag}')
-        logger.info(f'{log_dry_run}create git tag: {create_git_tag}')
+    with syncer.chdir():
+        for cmd in COMMANDS:
+            syncer.info(cmd.message)
+            if not dry_run:
+                subprocess.call(cmd.command, shell=True)
 
-        syncer.info(f'Push tag: {push_tag_to_github}')
-        logger.info(f'{log_dry_run}push tag: {push_tag_to_github}')
+    syncer.okay(f"release created successfully: '{version} - {title}'")
 
-        syncer.info(f'Create Github release: {create_release_on_github}')
-        logger.info(f'{log_dry_run}create github release: {create_release_on_github}')
-
-        print()
-        print(Fore.YELLOW + '=' * 30 + '|  END DRY RUN  |' + '=' * 30 + Style.RESET_ALL)
+    if dry_run:
+        syncer.warning('=' * 35 + '|  END DRY RUN  |' + '=' * 35)

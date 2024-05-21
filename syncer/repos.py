@@ -1,5 +1,6 @@
 import enum
 import json
+import logging
 import os
 import subprocess
 from contextlib import contextmanager
@@ -28,6 +29,7 @@ class Repo:
         host: str = 'https://github.com',
         owner: str = 'datapointchris',
         code_root: Path = Path.home() / 'code',
+        logger: logging.Logger = logging.getLogger(__name__),
     ):
         self.group = group
         self.name = name
@@ -38,6 +40,7 @@ class Repo:
         self.short_path = Path(self.group) / self.name
         self.directory = self.code_root / self.group
         self.url = '/'.join([self.host, self.owner, self.name])
+        self.logger = logger
 
     @contextmanager
     def chdir(self):
@@ -54,15 +57,19 @@ class Repo:
         print(message)
 
     def okay(self, message: str):
-        return self._print_message(message, color=Fore.GREEN)
+        self.logger.info(message)
+        self._print_message(message, color=Fore.GREEN)
 
     def info(self, message: str):
+        self.logger.info(message)
         return self._print_message(message, color=Fore.BLUE)
 
     def warning(self, message: str):
+        self.logger.warning(message)
         return self._print_message(message, color=Fore.YELLOW)
 
     def error(self, message: str):
+        self.logger.error(message)
         return self._print_message(message, color=Fore.RED)
 
     @property
