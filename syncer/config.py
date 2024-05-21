@@ -17,7 +17,6 @@ class DotfilesSettings(BaseSettings):
         ".bashrc",
         ".inputrc",
         ".shellcheckrc",
-        ".profile",
         ".tmux.conf",
         ".config/neofetch",
         ".config/tmuxinator",

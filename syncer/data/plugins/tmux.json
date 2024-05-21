@@ -1,22 +1,22 @@
 [
     {
         "owner": "tmux-plugins",
-        "base": ".tmux/plugins",
+        "base": ".local/share/tmux/plugins",
         "name": "tmux-cpu"
     },
     {
         "owner": "tmux-plugins",
-        "base": ".tmux/plugins",
+        "base": ".local/share/tmux/plugins",
         "name": "tmux-sidebar"
     },
     {
         "owner": "tmux-plugins",
-        "base": ".tmux/plugins",
+        "base": ".local/share/tmux/plugins",
         "name": "tmux-yank"
     },
     {
         "owner": "tmux-plugins",
-        "base": ".tmux/plugins",
+        "base": ".local/share/tmux/plugins",
         "name": "tmux-resurrect"
     }
 ]
