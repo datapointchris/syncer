@@ -8,7 +8,7 @@ class SyncerSettings(BaseSettings):
 
 
 class DotfilesSettings(BaseSettings):
-    MAC_ONLY_DOTFILES: list[str] = ['.aws/config', '.aws/credentials', '.gitconfig']
+    MAC_ONLY_DOTFILES: list[str] = ['.gitconfig']
     LINUX_ONLY_DOTFILES: list[str] = ['.gitconfig-linux']
     UNIVERSAL_DOTFILES: list[str] = [
         '.bash_profile',
@@ -18,8 +18,12 @@ class DotfilesSettings(BaseSettings):
         '.inputrc',
         '.profile',
         '.shellcheckrc',
-        '.tmux.conf',
+        '.config/aws',
+        '.config/gh',
         '.config/neofetch',
+        '.config/nvim',
+        '.config/readline',
+        '.config/tmux',
         '.config/tmuxinator',
         '.iterm2_shell_integration.zsh',
         '.oh-my-zsh/custom/themes/datapointchris.zsh-theme',
