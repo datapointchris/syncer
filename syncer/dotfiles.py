@@ -22,6 +22,14 @@ def remove_and_symlink(
         target.unlink()
     except FileNotFoundError:
         print(f'[yellow]Cannot remove {target}, still proceeding[/]')
+    except PermissionError:
+        print(f'[yellow]Cannot remove {target}, actual directory, not a symlink[/]')
+        print(f'[yellow]Renaming original directory: {target} --> {target}_back[/]')
+        target.rename(target.with_name(f'{target.name}_back'))
+    except Exception as e:
+        print(f'[red]Error: {e}[/]')
+        print(f'[yellow]Skipping {target}[/]')
+        return
     target.symlink_to(source, target_is_directory=source.is_dir())
     print(f'[magenta]{target}[/] --> \n\t[default]{source}[/]')
 
