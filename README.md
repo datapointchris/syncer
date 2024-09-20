@@ -26,3 +26,10 @@ Run `syncer update` to get the newest version.
 > [!NOTE]
 > If the newest version is not working, wait a few minutes for Github to update
 > If it does not work after a while, you can use `syncer update --force`
+
+## Troubleshooting
+
+### Plugins
+
+`syncer plugins [tmux|zsh]` does *not* work inside of `tmux`. It points the plugins dir to `~/.local/share/tmux/plugins/` instead of the plugins director in syncer.
+Syncing plugins must be done in a terminal outside of `tmux`.
