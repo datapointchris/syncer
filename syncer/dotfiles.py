@@ -53,8 +53,6 @@ def symlink_mac():
         'ichrisbirch', source_base=settings.dotfiles.SOURCE_BINS, target_base=settings.dotfiles.TARGET_MAC_BINS
     )
 
-    settings.dotfiles.TARGET_BASE.joinpath('etc.hosts').symlink_to('etc/hosts', target_is_directory=False)
-
 
 def symlink_linux():
     print(f'[yellow underline]{SPACES}Linux Specific{SPACES}[/]')
