@@ -49,9 +49,6 @@ def symlink_mac():
     remove_and_symlink(
         'aws-profiles', source_base=settings.dotfiles.SOURCE_BINS, target_base=settings.dotfiles.TARGET_MAC_BINS
     )
-    remove_and_symlink(
-        'ichrisbirch', source_base=settings.dotfiles.SOURCE_BINS, target_base=settings.dotfiles.TARGET_MAC_BINS
-    )
 
 
 def symlink_linux():
