@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "syncer"
-version = "0.9.7"
+version = "0.9.8"
 description = "Dotfiles, apps, configuration, and convenience scripts for setting up or syncing computers"
 authors = ["Chris Birch <datapointchris@gmail.com>"]
 license = "MIT"
