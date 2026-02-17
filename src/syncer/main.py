@@ -105,12 +105,11 @@ def doctor(
                     console.print(_status_line(ICON_ERR, label, 'using master, has local changes', 'red', branch='master'))
                 elif fix:
                     console.print(_status_line(ICON_WARN, label, 'renaming master → main...', 'yellow', branch='master'))
-                    if repo.rename_branch('master', 'main') and repo.push_branch('main'):
-                        repo.set_default_branch_on_github('main')
-                        repo.delete_remote_branch('master')
-                        console.print('    [green]done[/green]')
+                    ok, steps = repo.rename_master_to_main()
+                    if ok:
+                        console.print(f'    [green]done ({", ".join(steps)})[/green]')
                     else:
-                        console.print('    [red]rename failed[/red]')
+                        console.print(f'    [red]{", ".join(steps)}[/red]')
                 else:
                     console.print(_status_line(ICON_WARN, label, 'using master', 'yellow', branch='master'))
             issues_found += 1
