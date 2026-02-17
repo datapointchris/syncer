@@ -97,11 +97,12 @@ def _show_commits_graph(config: SyncerConfig) -> None:
     console.print('  ' + '\u2500' * 42)
 
     max_commits = max(c for _, c in rows)
+    label_width = max(len(label) for label, _ in rows)
     max_bar = 30
     for label, commits in sorted(rows, key=itemgetter(1), reverse=True):
         bar_len = max(1, round(commits / max_commits * max_bar))
         bar = BLOCK_FULL * bar_len
-        console.print(f'  {label:<30s} {bar}  {commits}')
+        console.print(f'  {label:<{label_width}s} {bar}  {commits}')
 
 
 def _show_repo_age(config: SyncerConfig) -> None:
@@ -137,11 +138,12 @@ def _show_repo_age(config: SyncerConfig) -> None:
     console.print('  ' + '\u2500' * 42)
 
     max_age = max(d for _, d in rows)
+    label_width = max(len(label) for label, _ in rows)
     max_bar = 30
     for label, age_days in sorted(rows, key=itemgetter(1), reverse=True):
         bar_len = max(1, round(age_days / max_age * max_bar)) if max_age > 0 else 1
         bar = BLOCK_FULL * bar_len
-        console.print(f'  {label:<30s} {bar}  {_format_duration(age_days)}')
+        console.print(f'  {label:<{label_width}s} {bar}  {_format_duration(age_days)}')
 
 
 def _show_frequently_dirty(events: list[SyncRunEvent]) -> None:
@@ -169,12 +171,13 @@ def _show_frequently_dirty(events: list[SyncRunEvent]) -> None:
     console.print('  [bold]Frequently Dirty Repos[/bold]')
     console.print('  ' + '\u2500' * 42)
 
+    label_width = max(len(path) for path, _ in frequent)
     max_bar = 13
     for path, count in frequent:
         pct = count / total_runs
         bar_len = max(1, round(pct * max_bar))
         bar = BLOCK_FULL * bar_len
-        console.print(f'  {path:<30s} {bar}  {count} of {total_runs} runs ({pct:.0%})')
+        console.print(f'  {path:<{label_width}s} {bar}  {count} of {total_runs} runs ({pct:.0%})')
 
 
 def _show_stale(events: list[SyncRunEvent]) -> None:
