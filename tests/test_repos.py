@@ -213,6 +213,48 @@ class TestRepo:
         assert repo.behind_remote == 1
 
 
+class TestGitStats:
+    def test_total_commits(self, git_repo):
+        repo = _make_repo(git_repo)
+        assert repo.total_commits == 1
+
+    def test_total_commits_multiple(self, git_repo):
+        (git_repo / 'file2.txt').write_text('content\n')
+        _git(git_repo, 'add', '.')
+        _git(git_repo, 'commit', '-m', 'second')
+        repo = _make_repo(git_repo)
+        assert repo.total_commits == 2
+
+    def test_last_commit_date(self, git_repo):
+        repo = _make_repo(git_repo)
+        date = repo.last_commit_date
+        assert date is not None
+        # ISO 8601 format includes timezone offset
+        assert 'T' in date
+
+    def test_first_commit_date(self, git_repo):
+        repo = _make_repo(git_repo)
+        date = repo.first_commit_date
+        assert date is not None
+        assert 'T' in date
+
+    def test_first_and_last_differ_with_multiple_commits(self, git_repo):
+        import time
+
+        time.sleep(1)  # ensure different timestamps
+        (git_repo / 'file2.txt').write_text('content\n')
+        _git(git_repo, 'add', '.')
+        _git(git_repo, 'commit', '-m', 'second')
+        repo = _make_repo(git_repo)
+        assert repo.first_commit_date != repo.last_commit_date
+
+    def test_stats_on_non_git_dir(self, tmp_path):
+        repo = _make_repo(tmp_path)
+        assert repo.total_commits == 0
+        assert repo.last_commit_date is None
+        assert repo.first_commit_date is None
+
+
 class TestDefaultBranchStaleRef:
     def test_stale_origin_head_falls_back_to_local(self, git_repo_with_remote):
         """If origin/HEAD points to a deleted branch, fall back to local branch detection."""

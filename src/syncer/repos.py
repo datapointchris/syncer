@@ -138,6 +138,27 @@ class Repo:
             return 0
         return len(result.stdout.strip().splitlines())
 
+    @property
+    def last_commit_date(self) -> str | None:
+        result = self._git('log', '-1', '--format=%aI')
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        return result.stdout.strip()
+
+    @property
+    def first_commit_date(self) -> str | None:
+        result = self._git('log', '--reverse', '--format=%aI')
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        return result.stdout.strip().splitlines()[0]
+
+    @property
+    def total_commits(self) -> int:
+        result = self._git('rev-list', '--count', 'HEAD')
+        if result.returncode != 0:
+            return 0
+        return int(result.stdout.strip())
+
     def fetch(self) -> bool:
         result = self._git('fetch', '--quiet')
         return result.returncode == 0
