@@ -1,6 +1,18 @@
 # CHANGELOG
 
 
+## v1.3.1 (2026-02-17)
+
+### Bug Fixes
+
+- Skip update when already at latest release
+  ([`a4aa784`](https://github.com/datapointchris/syncer/commit/a4aa7840556dfa0cdd476c930b33a9a74aba31d3))
+
+The update command now compares the installed version against the latest GitHub release tag and
+  skips reinstallation if already up to date, providing better user feedback about the current
+  version status.
+
+
 ## v1.3.0 (2026-02-17)
 
 ### Documentation
