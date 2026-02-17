@@ -40,6 +40,17 @@ def _time_ago(dt: datetime) -> str:
     return f'{years}y ago'
 
 
+def _format_duration(days: int) -> str:
+    if days >= 365:
+        years = days // 365
+        months = (days % 365) // 30
+        return f'{years}y {months}mo' if months else f'{years}y'
+    if days >= 30:
+        months = days // 30
+        return f'{months}mo'
+    return f'{days}d'
+
+
 def _show_summary(events: list[SyncRunEvent]) -> None:
     console.print('  [bold]Summary (last 30 days)[/bold]')
     console.print('  ' + '\u2500' * 42)
@@ -58,6 +69,79 @@ def _show_summary(events: list[SyncRunEvent]) -> None:
     console.print(f'  Total runs:     {total_runs}')
     console.print(f'  Last run:       {_time_ago(last_run.timestamp)}')
     console.print(f'  Avg issues:     {avg_issues:.1f} per run')
+
+
+def _show_commits_graph(config: SyncerConfig) -> None:
+    rows: list[tuple[str, int]] = []
+    for repo_config in config.repos:
+        path = Path(repo_config.path).expanduser()
+        if not path.exists() or not (path / '.git').is_dir():
+            continue
+        repo = Repo(name=repo_config.name, path=path, owner=config.owner, host=config.host)
+        try:
+            is_fork = repo.is_fork
+        except Exception:
+            is_fork = False
+        if is_fork:
+            continue
+        commits = repo.total_commits
+        if commits > 0:
+            label = repo_config.path if repo_config.path.startswith('~') else repo_config.name
+            rows.append((label, commits))
+
+    if not rows:
+        return
+
+    console.print()
+    console.print('  [bold]Commits by Repo[/bold]')
+    console.print('  ' + '\u2500' * 42)
+
+    max_commits = max(c for _, c in rows)
+    max_bar = 30
+    for label, commits in sorted(rows, key=itemgetter(1), reverse=True):
+        bar_len = max(1, round(commits / max_commits * max_bar))
+        bar = BLOCK_FULL * bar_len
+        console.print(f'  {label:<30s} {bar}  {commits}')
+
+
+def _show_repo_age(config: SyncerConfig) -> None:
+    rows: list[tuple[str, int]] = []
+    for repo_config in config.repos:
+        path = Path(repo_config.path).expanduser()
+        if not path.exists() or not (path / '.git').is_dir():
+            continue
+        repo = Repo(name=repo_config.name, path=path, owner=config.owner, host=config.host)
+        try:
+            is_fork = repo.is_fork
+        except Exception:
+            is_fork = False
+        if is_fork:
+            continue
+        first = repo.first_commit_date
+        if not first:
+            continue
+        try:
+            dt = datetime.fromisoformat(first)
+        except ValueError:
+            continue
+        age_days = (datetime.now(UTC) - dt).days
+        if age_days >= 0:
+            label = repo_config.path if repo_config.path.startswith('~') else repo_config.name
+            rows.append((label, age_days))
+
+    if not rows:
+        return
+
+    console.print()
+    console.print('  [bold]Repo Age[/bold]')
+    console.print('  ' + '\u2500' * 42)
+
+    max_age = max(d for _, d in rows)
+    max_bar = 30
+    for label, age_days in sorted(rows, key=itemgetter(1), reverse=True):
+        bar_len = max(1, round(age_days / max_age * max_bar)) if max_age > 0 else 1
+        bar = BLOCK_FULL * bar_len
+        console.print(f'  {label:<30s} {bar}  {_format_duration(age_days)}')
 
 
 def _show_frequently_dirty(events: list[SyncRunEvent]) -> None:
@@ -132,9 +216,11 @@ def _show_all_repos(config: SyncerConfig, events: list[SyncRunEvent]) -> None:
     table.add_column('Last Active', justify='right')
     table.add_column('Status')
 
+    rows: list[tuple[str, str, str, str, datetime | None]] = []
     for repo_config in config.repos:
         path = Path(repo_config.path).expanduser()
         label = repo_config.path if repo_config.path.startswith('~') else repo_config.name
+        last_dt: datetime | None = None
 
         if path.exists() and (path / '.git').is_dir():
             repo = Repo(name=repo_config.name, path=path, owner=config.owner, host=config.host)
@@ -142,8 +228,8 @@ def _show_all_repos(config: SyncerConfig, events: list[SyncRunEvent]) -> None:
             last_date = repo.last_commit_date
             if last_date:
                 try:
-                    dt = datetime.fromisoformat(last_date)
-                    last_active = _time_ago(dt)
+                    last_dt = datetime.fromisoformat(last_date)
+                    last_active = _time_ago(last_dt)
                 except ValueError:
                     last_active = last_date
             else:
@@ -154,7 +240,11 @@ def _show_all_repos(config: SyncerConfig, events: list[SyncRunEvent]) -> None:
 
         status = latest_status.get(repo_config.name, '-')
         status_style = 'green' if status == 'synced' else 'yellow' if status != '-' else 'dim'
-        table.add_row(label, commits, last_active, f'[{status_style}]{status}[/{status_style}]')
+        rows.append((label, commits, last_active, f'[{status_style}]{status}[/{status_style}]', last_dt))
+
+    rows.sort(key=lambda r: r[4] or datetime.min.replace(tzinfo=UTC), reverse=True)
+    for label, commits, last_active, status_text, _ in rows:
+        table.add_row(label, commits, last_active, status_text)
 
     console.print(table)
 
@@ -193,6 +283,8 @@ def show_stats(config: SyncerConfig) -> None:
     console.print()
 
     _show_summary(events)
+    _show_commits_graph(config)
+    _show_repo_age(config)
     _show_frequently_dirty(events)
     _show_stale(events)
     _show_all_repos(config, events)
