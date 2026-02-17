@@ -1,6 +1,19 @@
 # CHANGELOG
 
 
+## v1.2.0 (2026-02-17)
+
+### Features
+
+- Improve doctor output and add fork detection
+  ([`9d22f01`](https://github.com/datapointchris/syncer/commit/9d22f01f8dcd5600841e12f41c2bf8c5344b0a6b))
+
+Doctor now streams output as it goes with formatted status lines matching sync output. Config paths
+  (e.g. ~/tools/syncer) are shown instead of repo names for clarity. Fork detection via gh repo view
+  prevents attempting to rename master→main on forks. Warnings are yellow, local-changes errors are
+  red. Replaced [dim] markup with [white] for readability.
+
+
 ## v1.1.0 (2026-02-17)
 
 ### Features
