@@ -1,6 +1,24 @@
 # CHANGELOG
 
 
+## v1.4.1 (2026-02-17)
+
+### Bug Fixes
+
+- Align stats bar charts to longest repo path
+  ([`b9c8ece`](https://github.com/datapointchris/syncer/commit/b9c8ece79d2138bd7ba9892d39c0f243695d3885))
+
+Replaced hardcoded 30-character label width with dynamic sizing based on the longest label in each
+  section (commits, repo age, frequently dirty). This prevents misalignment when repo paths exceed
+  30 characters.
+
+- Sync uv.lock with 1.4.0 release
+  ([`66124c4`](https://github.com/datapointchris/syncer/commit/66124c4f00478233ae2f73972ba2d541cf7a6dc1))
+
+This updates uv.lock to reflect the 1.4.0 version. Last manual sync needed since the build_command
+  now handles this during releases.
+
+
 ## v1.4.0 (2026-02-17)
 
 ### Bug Fixes
