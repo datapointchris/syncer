@@ -1,6 +1,58 @@
 # CHANGELOG
 
 
+## v1.4.0 (2026-02-17)
+
+### Bug Fixes
+
+- Update uv.lock during semantic-release
+  ([`149a23f`](https://github.com/datapointchris/syncer/commit/149a23ff57f99bae7265eebb8e67b199dc7a31b7))
+
+Add build_command to semantic_release config to run 'uv lock' during release commits, ensuring the
+  lock file stays in sync with version bumps. Also updates uv.lock to current 1.3.1 version.
+
+### Build System
+
+- Use build(release) prefix for semantic-release commits
+  ([`caa946f`](https://github.com/datapointchris/syncer/commit/caa946fdf97b469e553141c2199ba4e2f3edfd00))
+
+Changes the commit message template for semantic-release from chore(release) to build(release) to
+  better reflect that releases are build system changes.
+
+### Continuous Integration
+
+- Install uv in release workflow for build_command
+  ([`608c465`](https://github.com/datapointchris/syncer/commit/608c465f73a755745496be3947cde8743f60d3d9))
+
+The semantic-release build_command runs `uv lock`, which requires uv to be available in the CI
+  environment. This adds the setup-uv action to install it before the release step.
+
+- Install uv inside semantic-release build command
+  ([`10bf654`](https://github.com/datapointchris/syncer/commit/10bf6540404f50ea77bac11e3dcb1d3a6e7ee6ef))
+
+The semantic-release action runs in a Docker container, so the setup-uv step on the runner doesn't
+  help. Changed build_command to install uv via pip inside the container before running uv lock.
+  Removed the now-unnecessary setup-uv workflow step.
+
+- Use recommended uv lock integration for semantic-release
+  ([`e583e31`](https://github.com/datapointchris/syncer/commit/e583e31fd52e8e95953de174df42c003c1a0468c))
+
+Updated the semantic-release build_command to follow the official uv integration guide: uses
+  --upgrade-package to only update the package version in the lock (not all deps), and stages
+  uv.lock for inclusion in the release commit.
+
+### Features
+
+- Add commit and repo age graphs, sort repos by activity
+  ([`29fff61`](https://github.com/datapointchris/syncer/commit/29fff61113aa8a13835a0c94c2fa05a1defded53))
+
+Adds two new bar chart visualizations to the stats command: - Commits by Repo: shows total commit
+  count per repository - Repo Age: displays time since first commit with duration formatting
+
+Also sorts the All Repos table by last active date (most recent first) and adds comprehensive test
+  coverage for all new functionality.
+
+
 ## v1.3.1 (2026-02-17)
 
 ### Bug Fixes
@@ -12,8 +64,18 @@ The update command now compares the installed version against the latest GitHub 
   skips reinstallation if already up to date, providing better user feedback about the current
   version status.
 
+### Chores
+
+- **release**: 1.3.1
+  ([`8943168`](https://github.com/datapointchris/syncer/commit/8943168fd0e7a85ea17ca8ee5c68954b303a6a85))
+
 
 ## v1.3.0 (2026-02-17)
+
+### Chores
+
+- **release**: 1.3.0
+  ([`747b73a`](https://github.com/datapointchris/syncer/commit/747b73a601bf429dc78f8ba9ea3d7de049a82539))
 
 ### Documentation
 
@@ -89,6 +151,11 @@ Expand test suite from 24 to 48 tests covering: - Display width calculations for
 
 ## v1.2.0 (2026-02-17)
 
+### Chores
+
+- **release**: 1.2.0
+  ([`e8b41b1`](https://github.com/datapointchris/syncer/commit/e8b41b18fa4b11059165280b21d2ab4da6c452e0))
+
 ### Features
 
 - Improve doctor output and add fork detection
@@ -101,6 +168,11 @@ Doctor now streams output as it goes with formatted status lines matching sync o
 
 
 ## v1.1.0 (2026-02-17)
+
+### Chores
+
+- **release**: 1.1.0
+  ([`6b0917b`](https://github.com/datapointchris/syncer/commit/6b0917bc2145bab87c0d57d7ac01d6609e6f7b85))
 
 ### Features
 
@@ -245,6 +317,9 @@ In the case that the target isn't a symlink already (meaning an update) then the
 
 - Update python version
   ([`e1f9ac9`](https://github.com/datapointchris/syncer/commit/e1f9ac948c69978950700de6fcddf427fada591e))
+
+- **release**: 1.0.0
+  ([`94ec373`](https://github.com/datapointchris/syncer/commit/94ec373337e8e2c669af4d484ad9a5871089216b))
 
 ### Documentation
 
