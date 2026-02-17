@@ -50,7 +50,8 @@ def main(
 
     if ctx.invoked_subcommand is None:
         syncer_config = resolve_config(config)
-        sync_repos(syncer_config, dry_run=dry_run)
+        resolved_name = config or _get_default_config_name()
+        sync_repos(syncer_config, dry_run=dry_run, config_name=resolved_name)
 
 
 @app.command()

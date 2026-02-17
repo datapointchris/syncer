@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import subprocess
+import time
+from datetime import UTC
+from datetime import datetime
 from pathlib import Path
 
 from rich.console import Console
 
 from syncer.config import SyncerConfig
+from syncer.tracking import RepoSnapshot
+from syncer.tracking import RunSummary
+from syncer.tracking import SyncRunEvent
+from syncer.tracking import emit_event
+from syncer.tracking import find_stale_repos
+from syncer.tracking import read_events
 
 console = Console(highlight=False)
 
@@ -269,8 +278,9 @@ def find_repo_in_search_paths(name: str, search_paths: list[Path]) -> Path | Non
     return None
 
 
-def sync_repos(config: SyncerConfig, dry_run: bool = False) -> None:
+def sync_repos(config: SyncerConfig, dry_run: bool = False, config_name: str = '') -> None:
     search_paths = [Path(p).expanduser() for p in config.search_paths]
+    start = time.monotonic()
 
     console.print()
     if dry_run:
@@ -283,6 +293,7 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False) -> None:
     issues = 0
     pullable = 0
     pushable = 0
+    snapshots: list[RepoSnapshot] = []
 
     for repo_config in config.repos:
         path = Path(repo_config.path).expanduser()
@@ -295,14 +306,19 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False) -> None:
                 console.print(_status_line(ICON_MOVE, label, 'path mismatch', 'yellow'))
                 console.print(f'    found at {found} (run syncer doctor --fix)')
                 issues += 1
+                snapshots.append(RepoSnapshot(name=repo.name, path=repo_config.path, status='path_mismatch'))
             else:
                 console.print(_status_line(ICON_DOWNLOAD, label, 'cloning', 'cyan'))
                 if not dry_run:
                     if repo.clone():
                         console.print(f'    cloned to {path}')
+                        snapshots.append(RepoSnapshot(name=repo.name, path=repo_config.path, status='cloned'))
                     else:
                         console.print('    clone failed')
                         issues += 1
+                        snapshots.append(RepoSnapshot(name=repo.name, path=repo_config.path, status='missing'))
+                else:
+                    snapshots.append(RepoSnapshot(name=repo.name, path=repo_config.path, status='missing'))
             console.print()
             continue
 
@@ -310,12 +326,14 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False) -> None:
             console.print(_status_line(ICON_ERR, label, 'not a git repository', 'red'))
             console.print()
             issues += 1
+            snapshots.append(RepoSnapshot(name=repo.name, path=repo_config.path, status='not_git'))
             continue
 
         if not repo.has_remote:
             console.print(_status_line(ICON_ERR, label, 'no remote', 'red'))
             console.print()
             issues += 1
+            snapshots.append(RepoSnapshot(name=repo.name, path=repo_config.path, status='no_remote'))
             continue
 
         repo.fetch()
@@ -333,6 +351,7 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False) -> None:
             elif repo.pull():
                 console.print(_status_line(ICON_PULL, label, f'pulled {behind} commit(s)', 'green', branch=branch))
                 pulled += 1
+                snapshots.append(RepoSnapshot(name=repo.name, path=repo_config.path, status='pulled', branch=branch))
                 console.print()
                 continue
 
@@ -343,6 +362,7 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False) -> None:
             elif repo.push():
                 console.print(_status_line(ICON_PUSH, label, f'pushed {ahead} commit(s)', 'green', branch=branch))
                 pushed += 1
+                snapshots.append(RepoSnapshot(name=repo.name, path=repo_config.path, status='pushed', branch=branch))
                 console.print()
                 continue
 
@@ -359,6 +379,7 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False) -> None:
         if not status_parts:
             console.print(_status_line(ICON_OK, label, 'synced', 'green', branch=branch))
             synced += 1
+            snapshots.append(RepoSnapshot(name=repo.name, path=repo_config.path, status='synced', branch=branch, stashes=stashes))
         else:
             status = ', '.join(status_parts)
             console.print(_status_line(ICON_WARN, label, status, 'yellow', branch=branch))
@@ -372,6 +393,18 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False) -> None:
                 for line in repo.behind_commit_lines:
                     console.print(f'    {line}')
             issues += 1
+            snapshots.append(
+                RepoSnapshot(
+                    name=repo.name,
+                    path=repo_config.path,
+                    status='issues',
+                    branch=branch,
+                    uncommitted=len(changes),
+                    unpushed=ahead,
+                    behind=behind,
+                    stashes=stashes,
+                )
+            )
         console.print()
 
     summary_parts = [f'[green]{ICON_OK}  {synced} synced[/green]']
@@ -387,6 +420,32 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False) -> None:
         summary_parts.append(f'[yellow]{ICON_WARN}  {issues} need attention[/yellow]')
     console.print()
     console.print('  │  '.join(summary_parts))
+
+    # Emit tracking event (skip dry runs and demo runs)
+    duration_ms = int((time.monotonic() - start) * 1000)
+    if config_name and not dry_run:
+        event = SyncRunEvent(
+            timestamp=datetime.now(UTC),
+            config_name=config_name,
+            repos=snapshots,
+            summary=RunSummary(
+                total=len(snapshots),
+                synced=synced,
+                pulled=pulled,
+                pushed=pushed,
+                issues=issues,
+                duration_ms=duration_ms,
+            ),
+        )
+        emit_event(event)
+
+        # Show stale repo warnings
+        events = read_events()
+        stale = find_stale_repos(events)
+        if stale:
+            console.print()
+            for repo_path, days in stale:
+                console.print(f'  [yellow]{ICON_WARN}  {repo_path} has had uncommitted changes for {days} days[/yellow]')
 
     if dry_run:
         console.print()
