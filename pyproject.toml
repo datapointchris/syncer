@@ -107,7 +107,7 @@ force-single-line = true
 version_toml = ["pyproject.toml:project.version"]
 branch = "main"
 commit_message = "build(release): {version}"
-build_command = "uv lock"
+build_command = "pip install uv && uv lock"
 
 
 # ---------- Build System ---------- #
