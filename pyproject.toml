@@ -1,96 +1,57 @@
-[tool.poetry]
+[project]
 name = "syncer"
-version = "0.9.9"
-description = "Dotfiles, apps, configuration, and convenience scripts for setting up or syncing computers"
-authors = ["Chris Birch <datapointchris@gmail.com>"]
-license = "MIT"
+version = "1.0.0"
+description = "CLI tool for checking if local git repos are fully synced before switching machines"
+authors = [{ name = "Chris Birch", email = "datapointchris@gmail.com" }]
+license = { text = "MIT" }
 readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "typer>=0.15.0",
+    "rich>=13.0.0",
+    "pydantic>=2.6.0",
+]
 
-[tool.poetry.scripts]
+[project.urls]
+Repository = "https://github.com/datapointchris/syncer"
+
+[project.scripts]
 syncer = "syncer.main:app"
 
-[tool.poetry.dependencies]
-colorama = "^0.4.6"
-pydantic = "^2.6.1"
-python = "^3.11"
-rich = "^13.7.0"
-tqdm = "^4.66.2"
-typer = "^0.9.0"
-pydantic-settings = "^2.2.0"
+[dependency-groups]
+dev = [
+    "bandit>=1.7.8",
+    "mypy>=1.10.0",
+    "pre-commit>=4.3.0",
+    "pytest>=8.0.0",
+    "ruff>=0.7.0",
+]
 
-[tool.poetry.group.dev.dependencies]
-black = "^24.2.0"
-flake8 = "^7.0.0"
-ipykernel = "^6.29.2"
-mkdocs = "^1.5.3"
-pre-commit = "^3.6.2"
 
-# ---------- Configurations ---------- #
+# ---------- Tool Configurations ---------- #
 
 
 [tool.bandit]
-exclude_dirs = ["tests", "scripts"]
-skips = ["B311"]
+exclude_dirs = [".git", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".venv", "tests"]
+skips = ["B311", "B404", "B603"]
 
-
-[tool.black]
-line-length = 120
-skip-string-normalization = true
-exclude = '''
-(
-/alembic
-| .git
-| .mypy_cache
-| .venv
-| build
-| dist
-)
-'''
 
 [tool.codespell]
-skip = '*.css.map'
+skip = '*.lock'
 ignore-words-list = "astroid,aNULL,ANULL,anull"
 check-filenames = true
-# count = ""
-# quiet-level = 3
-
-
-[tool.coverage.run]
-parallel = true
-branch = true
-source = ["ichrisbirch"]
-omit = ["ichrisbirch/alembic"]
-
-[tool.coverage.paths]
-source = ["ichrisbirch"]
-
-[tool.coverage.report]
-fail_under = 25
-show_missing = true
-exclude_lines = ["pragma: no cover"]
-
-
-[tool.isort]
-line_length = 120
-profile = "black"
-atomic = true
-skip = [".gitignore"]
-extend_skip = [".md", ".json"]
 
 
 [tool.mypy]
 pretty = true
 ignore_missing_imports = true
-# strict = true
-allow_untyped_defs = true
-check_untyped_defs = false  # Can enable this when all the routes are updated
-plugins = ["pydantic.mypy"]
+check_untyped_defs = false
 warn_return_any = false
 
 
 [tool.pytest.ini_options]
-addopts = ""
-minversion = "6.0"
+addopts = "-vv"
+minversion = "8.0"
 testpaths = ["tests"]
 
 
@@ -98,6 +59,63 @@ testpaths = ["tests"]
 enable_all = true
 
 
+[tool.ruff]
+line-length = 140
+exclude = [
+    ".git",
+    "__pycache__",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".vscode",
+    ".venv",
+    "build",
+    "dist",
+]
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = [
+    # pycodestyle
+    "E",
+    # Pyflakes
+    "F",
+    # pyupgrade
+    "UP",
+    # flake8-bugbear
+    "B",
+    # flake8-simplify
+    "SIM",
+    # isort
+    "I",
+]
+ignore = ["SIM108"]
+
+[tool.ruff.lint.isort]
+force-single-line = true
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+
+[tool.semantic_release]
+version_toml = ["pyproject.toml:project.version"]
+branch = "main"
+commit_message = "chore(release): {version}"
+
+
+# ---------- Build System ---------- #
+
+
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["uv_build>=0.9.13,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "syncer"
+module-root = "src"

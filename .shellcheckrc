@@ -1,0 +1,4 @@
+# ShellCheck configuration
+source-path=SCRIPTDIR
+external-sources=true
+disable=SC2155
