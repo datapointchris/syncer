@@ -23,6 +23,7 @@ from syncer.repos import Repo
 from syncer.repos import _status_line
 from syncer.repos import find_repo_in_search_paths
 from syncer.repos import sync_repos
+from syncer.stats import show_stats
 
 app = typer.Typer(invoke_without_command=True)
 console = Console()
@@ -148,6 +149,14 @@ def doctor(
         console.print(f'[yellow] {issues_found} issue(s) found.[/yellow]')
         if not fix:
             console.print('[white]Run with --fix to auto-repair[/white]')
+
+
+@app.command()
+def stats(ctx: typer.Context) -> None:
+    """Show sync statistics and repo insights."""
+    config_name = ctx.obj.get('config_name')
+    syncer_config = resolve_config(config_name)
+    show_stats(syncer_config)
 
 
 @app.command()
