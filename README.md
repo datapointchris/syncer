@@ -1,35 +1,51 @@
 # syncer
 
+Check if local git repos are fully synced before switching machines.
+
+Syncer fetches each configured repo, checks for uncommitted changes, unpushed/behind commits, and stashes, then auto-pulls or auto-pushes when safe.
+
 ## Installing
 
-Use `pipx` to install, so that it is globally available.  
-Install from the github repo to get the latest stable release
-`pipx install git+https://www.github.com/datapointchris/syncer.git@latest`
-(if `@latest` doesn't work then go find the latest release and use that)
+```bash
+uv tool install git+https://github.com/datapointchris/syncer.git@latest
+```
 
 ## Updating
 
-### 1) Make Changes in the Repo
+```bash
+syncer update
+```
 
-Changes should be made inside of the repo and committed as regular.
-Changes must be `PUSHED`
+This fetches the latest GitHub release and reinstalls via `uv tool install`.
 
-### 2) Create Release
+## Usage
 
-***IMPORTANT:*** Run `syncer create-release` from INSIDE `.venv` locally.  
-This is necessary so the most recent version of the project that was previously committed in Step 1 will be the version that the new release will be created from.
+```bash
+syncer                  # sync all repos (auto-detects config)
+syncer --dry-run        # show what would happen without making changes
+syncer --config name    # use a specific config
+syncer doctor           # check for path mismatches, missing/untracked repos, master branches
+syncer doctor --fix     # auto-fix issues (update paths, add untracked, rename master to main)
+syncer demo             # run against temp repos to show each status state
+syncer version          # print installed version
+syncer init name        # create a template config file
+```
 
-### 3) Update `syncer`
+## Config
 
-**EXIT** the virtual environment, in order to use the global `syncer`  
-Run `syncer update` to get the newest version.
-> [!NOTE]
-> If the newest version is not working, wait a few minutes for Github to update
-> If it does not work after a while, you can use `syncer update --force`
+Config files live at `~/.config/syncer/<name>.json`.
 
-## Troubleshooting
+```json
+{
+  "owner": "your-github-username",
+  "host": "https://github.com",
+  "search_paths": ["~/code", "~/tools"],
+  "repos": [
+    {"name": "my-repo", "path": "~/code/my-repo"}
+  ]
+}
+```
 
-### Plugins
+If there's only one config file, syncer uses it automatically. With multiple configs, use `--config name` to select one.
 
-`syncer plugins [tmux|zsh]` does *not* work inside of `tmux`. It points the plugins dir to `~/.local/share/tmux/plugins/` instead of the plugins director in syncer.
-Syncing plugins must be done in a terminal outside of `tmux`.
+`search_paths` are used by `syncer doctor` to find repos that moved or aren't tracked in the config.
