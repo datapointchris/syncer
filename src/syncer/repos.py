@@ -7,7 +7,41 @@ from rich.console import Console
 
 from syncer.config import SyncerConfig
 
-console = Console()
+console = Console(highlight=False)
+
+# Nerd font icons
+ICON_OK = '\uf00c'
+ICON_WARN = '\uf071'
+ICON_ERR = '\uf00d'
+ICON_DOWNLOAD = '\uf0ed'
+ICON_PULL = '\uf019'
+ICON_PUSH = '\uf093'
+ICON_MOVE = '\uf0ec'
+ICON_DOT = '\uf444'
+
+LINE_WIDTH = 80
+
+ALL_ICONS = {ICON_OK, ICON_WARN, ICON_ERR, ICON_DOWNLOAD, ICON_PULL, ICON_PUSH, ICON_MOVE}
+
+
+def _display_width(text: str) -> int:
+    """Calculate display width accounting for double-width nerd font icons."""
+    return sum(2 if ch in ALL_ICONS else 1 for ch in text)
+
+
+def _status_line(icon: str, name: str, msg: str, color: str, branch: str | None = None) -> str:
+    prefix = f'{icon}  {name} '
+    prefix_w = _display_width(prefix)
+    if branch:
+        # Displayed: {prefix}{padding} ({branch}) {msg}
+        branch_w = len(f' ({branch}) ')
+        msg_w = len(msg)
+        padding = '_' * max(1, LINE_WIDTH - prefix_w - branch_w - msg_w)
+        return f'[{color}]{prefix}{padding}[/{color}] [blue]({branch})[/blue] [{color}]{msg}[/{color}]'
+    # Displayed: {prefix}{padding} {msg}
+    suffix_w = len(f' {msg}')
+    padding = '_' * max(1, LINE_WIDTH - prefix_w - suffix_w)
+    return f'[{color}]{prefix}{padding} {msg}[/{color}]'
 
 
 class Repo:
@@ -75,6 +109,26 @@ class Repo:
         return int(result.stdout.strip())
 
     @property
+    def unpushed_commit_lines(self) -> list[str]:
+        branch = self.default_branch
+        if not branch:
+            return []
+        result = self._git('log', '--oneline', f'origin/{branch}..{branch}')
+        if result.returncode != 0:
+            return []
+        return [line for line in result.stdout.strip().splitlines() if line]
+
+    @property
+    def behind_commit_lines(self) -> list[str]:
+        branch = self.default_branch
+        if not branch:
+            return []
+        result = self._git('log', '--oneline', f'{branch}..origin/{branch}')
+        if result.returncode != 0:
+            return []
+        return [line for line in result.stdout.strip().splitlines() if line]
+
+    @property
     def stash_count(self) -> int:
         result = self._git('stash', 'list')
         if not result.stdout.strip():
@@ -83,6 +137,34 @@ class Repo:
 
     def fetch(self) -> bool:
         result = self._git('fetch', '--quiet')
+        return result.returncode == 0
+
+    def pull(self) -> bool:
+        result = self._git('pull', '--ff-only')
+        return result.returncode == 0
+
+    def push(self) -> bool:
+        result = self._git('push')
+        return result.returncode == 0
+
+    def rename_branch(self, old: str, new: str) -> bool:
+        result = self._git('branch', '-m', old, new)
+        return result.returncode == 0
+
+    def push_branch(self, branch: str) -> bool:
+        result = self._git('push', '-u', 'origin', branch)
+        return result.returncode == 0
+
+    def delete_remote_branch(self, branch: str) -> bool:
+        result = self._git('push', 'origin', '--delete', branch)
+        return result.returncode == 0
+
+    def set_default_branch_on_github(self, branch: str) -> bool:
+        result = subprocess.run(  # nosec B607
+            ['gh', 'repo', 'edit', f'{self.owner}/{self.name}', '--default-branch', branch],
+            capture_output=True,
+            text=True,
+        )
         return result.returncode == 0
 
     def clone(self) -> bool:
@@ -119,7 +201,11 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False) -> None:
         console.print()
 
     synced = 0
+    pulled = 0
+    pushed = 0
     issues = 0
+    pullable = 0
+    pushable = 0
 
     for repo_config in config.repos:
         path = Path(repo_config.path).expanduser()
@@ -128,57 +214,101 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False) -> None:
         if not repo.exists:
             found = find_repo_in_search_paths(repo.name, search_paths)
             if found:
-                console.print(f'[yellow]{repo.name}[/yellow] — not at configured path [dim]{path}[/dim]')
-                console.print(f'  [cyan]found at {found}[/cyan] (update config or run [bold]syncer doctor --fix[/bold])')
+                console.print(_status_line(ICON_MOVE, repo.name, 'path mismatch', 'yellow'))
+                console.print(f'    found at {found} (run syncer doctor --fix)')
                 issues += 1
-                continue
-            console.print(f'[blue]{repo.name}[/blue] — cloning...')
-            if not dry_run:
-                if repo.clone():
-                    console.print(f'  [green]cloned to {path}[/green]')
-                else:
-                    console.print('  [red]clone failed[/red]')
-                    issues += 1
+            else:
+                console.print(_status_line(ICON_DOWNLOAD, repo.name, 'cloning', 'cyan'))
+                if not dry_run:
+                    if repo.clone():
+                        console.print(f'    cloned to {path}')
+                    else:
+                        console.print('    clone failed')
+                        issues += 1
+            console.print()
             continue
 
         if not repo.is_git_repo:
-            console.print(f'[red]{repo.name}[/red] — not a git repository')
+            console.print(_status_line(ICON_ERR, repo.name, 'not a git repository', 'red'))
+            console.print()
             issues += 1
             continue
 
         if not repo.has_remote:
-            console.print(f'[red]{repo.name}[/red] — no remote configured')
+            console.print(_status_line(ICON_ERR, repo.name, 'no remote', 'red'))
+            console.print()
             issues += 1
             continue
 
         repo.fetch()
 
-        status_parts: list[str] = []
-
-        if changes := repo.uncommitted_changes:
-            status_parts.append(f'[yellow]{len(changes)} uncommitted[/yellow]')
-
-        if ahead := repo.unpushed_commits:
-            status_parts.append(f'[yellow]{ahead} unpushed[/yellow]')
-
-        if behind := repo.behind_remote:
-            status_parts.append(f'[cyan]{behind} behind[/cyan]')
-
-        if stashes := repo.stash_count:
-            status_parts.append(f'[dim]{stashes} stash(es)[/dim]')
-
+        changes = repo.uncommitted_changes
+        ahead = repo.unpushed_commits
+        behind = repo.behind_remote
+        stashes = repo.stash_count
         branch = repo.default_branch or '?'
 
+        # Auto-pull if safe: behind remote with no local changes
+        if behind and not changes and not ahead:
+            if dry_run:
+                pullable += 1
+            elif repo.pull():
+                console.print(_status_line(ICON_PULL, repo.name, f'pulled {behind} commit(s)', 'green', branch=branch))
+                pulled += 1
+                console.print()
+                continue
+
+        # Auto-push if safe: unpushed commits with no uncommitted changes and not behind
+        if ahead and not changes and not behind:
+            if dry_run:
+                pushable += 1
+            elif repo.push():
+                console.print(_status_line(ICON_PUSH, repo.name, f'pushed {ahead} commit(s)', 'green', branch=branch))
+                pushed += 1
+                console.print()
+                continue
+
+        status_parts: list[str] = []
+        if changes:
+            status_parts.append(f'{len(changes)} uncommitted')
+        if ahead:
+            status_parts.append(f'{ahead} unpushed')
+        if behind:
+            status_parts.append(f'{behind} behind')
+        if stashes:
+            status_parts.append(f'{stashes} stash(es)')
+
         if not status_parts:
-            console.print(f'[green]{repo.name}[/green] [dim]({branch})[/dim] — synced')
+            console.print(_status_line(ICON_OK, repo.name, 'synced', 'green', branch=branch))
             synced += 1
         else:
             status = ', '.join(status_parts)
-            console.print(f'[yellow]{repo.name}[/yellow] [dim]({branch})[/dim] — {status}')
+            console.print(_status_line(ICON_WARN, repo.name, status, 'yellow', branch=branch))
+            if changes:
+                for line in changes:
+                    console.print(f'    {line}')
+            if ahead:
+                for line in repo.unpushed_commit_lines:
+                    console.print(f'    {line}')
+            if behind:
+                for line in repo.behind_commit_lines:
+                    console.print(f'    {line}')
             issues += 1
+        console.print()
 
+    summary_parts = [f'[green]{ICON_OK}  {synced} synced[/green]']
+    if dry_run and pullable:
+        summary_parts.append(f'[cyan]{ICON_PULL}  {pullable} pullable[/cyan]')
+    if pulled:
+        summary_parts.append(f'[green]{ICON_PULL}  {pulled} pulled[/green]')
+    if dry_run and pushable:
+        summary_parts.append(f'[cyan]{ICON_PUSH}  {pushable} pushable[/cyan]')
+    if pushed:
+        summary_parts.append(f'[green]{ICON_PUSH}  {pushed} pushed[/green]')
+    if issues:
+        summary_parts.append(f'[yellow]{ICON_WARN}  {issues} need attention[/yellow]')
     console.print()
-    console.print(f'[green]{synced} synced[/green], [yellow]{issues} need attention[/yellow]')
+    console.print('  │  '.join(summary_parts))
 
     if dry_run:
         console.print()
