@@ -179,8 +179,12 @@ def update() -> None:
         sys.exit(1)
 
     tag = result.stdout.strip()
-    console.print(f'Latest release: [cyan]{tag}[/cyan]')
-    console.print('Installing...')
+    current = importlib.metadata.version('syncer')
+    if tag.lstrip('v') == current:
+        console.print(f'[green]Already at latest release: {tag}[/green]')
+        return
+
+    console.print(f'Updating [cyan]{current}[/cyan] → [cyan]{tag}[/cyan]')
 
     install = subprocess.run(  # nosec B607
         ['uv', 'tool', 'install', '--force', f'git+https://github.com/datapointchris/syncer.git@{tag}'],
