@@ -167,6 +167,15 @@ class Repo:
         )
         return result.returncode == 0
 
+    @property
+    def is_fork(self) -> bool:
+        result = subprocess.run(  # nosec B607
+            ['gh', 'repo', 'view', f'{self.owner}/{self.name}', '--json', 'isFork', '--jq', '.isFork'],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0 and result.stdout.strip() == 'true'
+
     def clone(self) -> bool:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         result = subprocess.run(  # nosec B607
@@ -209,16 +218,17 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False) -> None:
 
     for repo_config in config.repos:
         path = Path(repo_config.path).expanduser()
+        label = repo_config.path if repo_config.path.startswith('~') else repo_config.name
         repo = Repo(name=repo_config.name, path=path, owner=config.owner, host=config.host)
 
         if not repo.exists:
             found = find_repo_in_search_paths(repo.name, search_paths)
             if found:
-                console.print(_status_line(ICON_MOVE, repo.name, 'path mismatch', 'yellow'))
+                console.print(_status_line(ICON_MOVE, label, 'path mismatch', 'yellow'))
                 console.print(f'    found at {found} (run syncer doctor --fix)')
                 issues += 1
             else:
-                console.print(_status_line(ICON_DOWNLOAD, repo.name, 'cloning', 'cyan'))
+                console.print(_status_line(ICON_DOWNLOAD, label, 'cloning', 'cyan'))
                 if not dry_run:
                     if repo.clone():
                         console.print(f'    cloned to {path}')
@@ -229,13 +239,13 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False) -> None:
             continue
 
         if not repo.is_git_repo:
-            console.print(_status_line(ICON_ERR, repo.name, 'not a git repository', 'red'))
+            console.print(_status_line(ICON_ERR, label, 'not a git repository', 'red'))
             console.print()
             issues += 1
             continue
 
         if not repo.has_remote:
-            console.print(_status_line(ICON_ERR, repo.name, 'no remote', 'red'))
+            console.print(_status_line(ICON_ERR, label, 'no remote', 'red'))
             console.print()
             issues += 1
             continue
@@ -253,7 +263,7 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False) -> None:
             if dry_run:
                 pullable += 1
             elif repo.pull():
-                console.print(_status_line(ICON_PULL, repo.name, f'pulled {behind} commit(s)', 'green', branch=branch))
+                console.print(_status_line(ICON_PULL, label, f'pulled {behind} commit(s)', 'green', branch=branch))
                 pulled += 1
                 console.print()
                 continue
@@ -263,7 +273,7 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False) -> None:
             if dry_run:
                 pushable += 1
             elif repo.push():
-                console.print(_status_line(ICON_PUSH, repo.name, f'pushed {ahead} commit(s)', 'green', branch=branch))
+                console.print(_status_line(ICON_PUSH, label, f'pushed {ahead} commit(s)', 'green', branch=branch))
                 pushed += 1
                 console.print()
                 continue
@@ -279,11 +289,11 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False) -> None:
             status_parts.append(f'{stashes} stash(es)')
 
         if not status_parts:
-            console.print(_status_line(ICON_OK, repo.name, 'synced', 'green', branch=branch))
+            console.print(_status_line(ICON_OK, label, 'synced', 'green', branch=branch))
             synced += 1
         else:
             status = ', '.join(status_parts)
-            console.print(_status_line(ICON_WARN, repo.name, status, 'yellow', branch=branch))
+            console.print(_status_line(ICON_WARN, label, status, 'yellow', branch=branch))
             if changes:
                 for line in changes:
                     console.print(f'    {line}')
