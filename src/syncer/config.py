@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from rich.console import Console
 
 CONFIG_DIR = Path.home() / '.config' / 'syncer'
+DATA_DIR = Path.home() / '.local' / 'share' / 'syncer'
 
 console = Console()
 
