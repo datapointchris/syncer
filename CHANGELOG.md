@@ -1,6 +1,23 @@
 # CHANGELOG
 
 
+## v1.1.0 (2026-02-17)
+
+### Features
+
+- Add nerd font icons, auto-pull/push, demo command, and doctor master detection
+  ([`268d266`](https://github.com/datapointchris/syncer/commit/268d266fc115f89d873a908ea9d1602f5776a07a))
+
+Enhances syncer with visual improvements and automation:
+
+- Add nerd font icons (✓, ⚠, ✗, etc.) for better visual status - Column-aligned output with
+  underscore padding for consistent layout - Auto-pull for repos cleanly behind remote (no local
+  changes) - Auto-push for repos with unpushed commits (no uncommitted changes) - New `syncer demo`
+  command that creates real temp git repos in various states - Doctor command now detects repos
+  still on master branch with --fix to rename to main - Detailed file/commit listing shown under
+  repos with issues - Summary line shows counts: synced, pulled, pushed, attention needed
+
+
 ## v1.0.0 (2026-02-17)
 
 ### Bug Fixes
