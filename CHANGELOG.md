@@ -1,6 +1,80 @@
 # CHANGELOG
 
 
+## v1.3.0 (2026-02-17)
+
+### Documentation
+
+- Rewrite README for current architecture
+  ([`7c49a2d`](https://github.com/datapointchris/syncer/commit/7c49a2dabe3904da5d128bdd1a24e289ef7c19a7))
+
+The old README documented obsolete features (pipx install, create-release script, plugins, manual
+  update workflow). This complete rewrite reflects the current tool:
+
+- uv-based installation and updates - All CLI commands (sync, doctor, demo, init, version, update) -
+  Config file format and location - Doctor auto-fix capabilities - Simplified troubleshooting
+  (removed obsolete plugin notes)
+
+The documentation now matches what the tool actually does as of v1.2.0.
+
+### Features
+
+- Add git stats properties to Repo class
+  ([`46db748`](https://github.com/datapointchris/syncer/commit/46db7487e4314afab6667e5cf44951361a195037))
+
+Add last_commit_date, first_commit_date, and total_commits properties to query git repository
+  statistics on-demand. These complement existing status properties (ahead/behind) for tracking
+  repository activity.
+
+- Add syncer stats command
+  ([`a96a4c0`](https://github.com/datapointchris/syncer/commit/a96a4c085d2a6829c737fac93e268367c16b1ad5))
+
+Adds a comprehensive stats dashboard showing: - Summary of last 30 days (total runs, last run, avg
+  issues) - Frequently dirty repos with visual bar charts - Stale repo warnings (uncommitted > 3
+  days) - All repos table with live git stats - Recent run history (last 10 runs)
+
+Includes stats.py module and full test coverage in test_stats.py.
+
+- Add tracking data models and JSONL storage
+  ([`f340dab`](https://github.com/datapointchris/syncer/commit/f340dabba775e920f8678859ce9ff6c7abe8b58a))
+
+This introduces a tracking module to record sync run data for future analytics and stale repo
+  detection. Adds DATA_DIR constant pointing to ~/.local/share/syncer/ for XDG-compliant data
+  storage.
+
+New models: - RepoSnapshot: captures repo state (status, branch, counts) - RunSummary: aggregates
+  results of a sync run - SyncRunEvent: timestamped record of a complete sync operation
+
+Storage functions emit/read events to JSONL file. Includes find_stale_repos() to identify repos with
+  uncommitted changes persisting across multiple runs over a threshold period.
+
+- Emit tracking events and warn about stale repos
+  ([`7281df1`](https://github.com/datapointchris/syncer/commit/7281df1ab11421220650cba629e04c05c428d496))
+
+sync_repos now builds RepoSnapshot for each repo (across all status paths), times the sync run, and
+  emits a SyncRunEvent to JSONL after each non-dry-run sync. After emitting, it reads back events to
+  detect and warn about repos with long-standing uncommitted changes.
+
+main.py passes the resolved config name through to enable tracking.
+
+### Testing
+
+- Expand repos test suite and fix stale ref handling
+  ([`6664be3`](https://github.com/datapointchris/syncer/commit/6664be38ce226ac41fc76055e93c374fea006efe))
+
+Improve default_branch to validate that origin/HEAD tracking refs point to existing branches,
+  falling back to local detection if the ref is stale (points to deleted branch).
+
+Add rename_master_to_main method that handles partial states from previous attempts idempotently -
+  checks each step (local rename, remote push, GitHub default, remote master deletion, origin/HEAD
+  update) and only performs needed actions.
+
+Expand test suite from 24 to 48 tests covering: - Display width calculations for icons and text -
+  Status line formatting with/without branch names - Stale origin/HEAD ref handling and fallback
+  logic - Rename idempotency in various partial states - Fork detection via gh CLI - Behind/unpushed
+  commit tracking - Stash count
+
+
 ## v1.2.0 (2026-02-17)
 
 ### Features
