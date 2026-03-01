@@ -1,6 +1,22 @@
 # CHANGELOG
 
 
+## v1.5.2 (2026-03-01)
+
+### Bug Fixes
+
+- Exclude claimed paths from search fallback to prevent false path mismatch
+  ([`0befb8a`](https://github.com/datapointchris/syncer/commit/0befb8a3b7f0c3baeb0c936924de5f764595ec7c))
+
+When a repo's configured path didn't exist, find_repo_in_search_paths matched by directory name
+  only, ignoring that another config entry already owned that path. This caused ichrisbirch-rust at
+  ~/code/rust/ichrisbirch to falsely match the ichrisbirch webapp entry, reporting a spurious "path
+  mismatch".
+
+Pass claimed_paths (all configured repo paths) to find_repo_in_search_paths so it skips any
+  candidate directory already owned by another entry. Applied in both sync_repos and doctor.
+
+
 ## v1.5.1 (2026-03-01)
 
 ### Bug Fixes
