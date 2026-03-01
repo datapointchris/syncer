@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v1.5.1 (2026-03-01)
+
+### Bug Fixes
+
+- Sync uv.lock with updated dependencies
+  ([`93d7bd1`](https://github.com/datapointchris/syncer/commit/93d7bd1863e44cbfa14fe6679f12a6ad4b4cdf5b))
+
+Updates virtualenv 20.37.0 -> 21.1.0 and adds python-discovery 1.1.0 as a new transitive dependency
+  of virtualenv.
+
+
 ## v1.5.0 (2026-03-01)
 
 ### Features
