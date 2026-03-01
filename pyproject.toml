@@ -1,6 +1,6 @@
 [project]
 name = "syncer"
-version = "1.4.1"
+version = "1.5.0"
 description = "CLI tool for checking if local git repos are fully synced before switching machines"
 authors = [{ name = "Chris Birch", email = "datapointchris@gmail.com" }]
 license = { text = "MIT" }

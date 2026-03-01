@@ -1,6 +1,21 @@
 # CHANGELOG
 
 
+## v1.5.0 (2026-03-01)
+
+### Features
+
+- Show clone counts in sync summary bar
+  ([`d880c02`](https://github.com/datapointchris/syncer/commit/d880c02c1213b24012622c29aa229a74926f487c))
+
+Repos needing cloning were handled per-repo but invisible in the summary. Dry-run now shows "N to
+  clone" and real runs show "N cloned".
+
+- Add clonable/cloned counters to sync_repos - Append clone entries to summary_parts in correct
+  order - Add cloned field to RunSummary (default 0 for backwards compat) - Show cloned count in
+  stats recent runs display - Add missing-repo scenario to demo setup
+
+
 ## v1.4.1 (2026-02-17)
 
 ### Bug Fixes
