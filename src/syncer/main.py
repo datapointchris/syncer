@@ -64,6 +64,7 @@ def doctor(
     config_name = ctx.obj.get('config_name')
     syncer_config = resolve_config(config_name)
     search_paths = [Path(p).expanduser() for p in syncer_config.search_paths]
+    claimed_paths = {Path(rc.path).expanduser() for rc in syncer_config.repos}
 
     issues_found = 0
     config_changed = False
@@ -76,7 +77,7 @@ def doctor(
 
         # Path mismatch or missing
         if not path.exists():
-            found = find_repo_in_search_paths(repo_config.name, search_paths)
+            found = find_repo_in_search_paths(repo_config.name, search_paths, claimed_paths)
             if found:
                 console.print(_status_line(ICON_MOVE, label, 'path mismatch', 'yellow'))
                 console.print(f'    found at {found} (run syncer doctor --fix)')

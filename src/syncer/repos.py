@@ -263,23 +263,27 @@ class Repo:
         return result.returncode == 0
 
 
-def find_repo_in_search_paths(name: str, search_paths: list[Path]) -> Path | None:
+def find_repo_in_search_paths(
+    name: str, search_paths: list[Path], claimed_paths: set[Path] | None = None
+) -> Path | None:
+    claimed = claimed_paths or set()
     for search_path in search_paths:
         if not search_path.exists():
             continue
         for item in search_path.iterdir():
-            if item.is_dir() and item.name == name and (item / '.git').is_dir():
+            if item.is_dir() and item.name == name and (item / '.git').is_dir() and item not in claimed:
                 return item
         for item in search_path.iterdir():
             if item.is_dir() and not item.name.startswith('.'):
                 for sub in item.iterdir():
-                    if sub.is_dir() and sub.name == name and (sub / '.git').is_dir():
+                    if sub.is_dir() and sub.name == name and (sub / '.git').is_dir() and sub not in claimed:
                         return sub
     return None
 
 
 def sync_repos(config: SyncerConfig, dry_run: bool = False, config_name: str = '') -> None:
     search_paths = [Path(p).expanduser() for p in config.search_paths]
+    claimed_paths = {Path(rc.path).expanduser() for rc in config.repos}
     start = time.monotonic()
 
     console.print()
@@ -303,7 +307,7 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False, config_name: str = '
         repo = Repo(name=repo_config.name, path=path, owner=config.owner, host=config.host)
 
         if not repo.exists:
-            found = find_repo_in_search_paths(repo.name, search_paths)
+            found = find_repo_in_search_paths(repo.name, search_paths, claimed_paths)
             if found:
                 console.print(_status_line(ICON_MOVE, label, 'path mismatch', 'yellow'))
                 console.print(f'    found at {found} (run syncer doctor --fix)')

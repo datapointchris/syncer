@@ -411,3 +411,19 @@ class TestFindRepoInSearchPaths:
     def test_skip_nonexistent_search_path(self, tmp_path):
         result = find_repo_in_search_paths('myrepo', [tmp_path / 'nonexistent'])
         assert result is None
+
+    def test_skip_claimed_path_direct(self, tmp_path):
+        repo_dir = tmp_path / 'code' / 'myrepo'
+        repo_dir.mkdir(parents=True)
+        (repo_dir / '.git').mkdir()
+
+        result = find_repo_in_search_paths('myrepo', [tmp_path / 'code'], claimed_paths={repo_dir})
+        assert result is None
+
+    def test_skip_claimed_path_nested(self, tmp_path):
+        repo_dir = tmp_path / 'code' / 'subdir' / 'myrepo'
+        repo_dir.mkdir(parents=True)
+        (repo_dir / '.git').mkdir()
+
+        result = find_repo_in_search_paths('myrepo', [tmp_path / 'code'], claimed_paths={repo_dir})
+        assert result is None
