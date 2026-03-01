@@ -288,9 +288,11 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False, config_name: str = '
         console.print()
 
     synced = 0
+    cloned = 0
     pulled = 0
     pushed = 0
     issues = 0
+    clonable = 0
     pullable = 0
     pushable = 0
     snapshots: list[RepoSnapshot] = []
@@ -312,12 +314,14 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False, config_name: str = '
                 if not dry_run:
                     if repo.clone():
                         console.print(f'    cloned to {path}')
+                        cloned += 1
                         snapshots.append(RepoSnapshot(name=repo.name, path=repo_config.path, status='cloned'))
                     else:
                         console.print('    clone failed')
                         issues += 1
                         snapshots.append(RepoSnapshot(name=repo.name, path=repo_config.path, status='missing'))
                 else:
+                    clonable += 1
                     snapshots.append(RepoSnapshot(name=repo.name, path=repo_config.path, status='missing'))
             console.print()
             continue
@@ -408,6 +412,10 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False, config_name: str = '
         console.print()
 
     summary_parts = [f'[green]{ICON_OK}  {synced} synced[/green]']
+    if dry_run and clonable:
+        summary_parts.append(f'[cyan]{ICON_DOWNLOAD}  {clonable} to clone[/cyan]')
+    if cloned:
+        summary_parts.append(f'[green]{ICON_DOWNLOAD}  {cloned} cloned[/green]')
     if dry_run and pullable:
         summary_parts.append(f'[cyan]{ICON_PULL}  {pullable} pullable[/cyan]')
     if pulled:
@@ -431,6 +439,7 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False, config_name: str = '
             summary=RunSummary(
                 total=len(snapshots),
                 synced=synced,
+                cloned=cloned,
                 pulled=pulled,
                 pushed=pushed,
                 issues=issues,

@@ -27,6 +27,7 @@ class RepoSnapshot(BaseModel):
 class RunSummary(BaseModel):
     total: int
     synced: int
+    cloned: int = 0
     pulled: int
     pushed: int
     issues: int

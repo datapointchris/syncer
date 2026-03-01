@@ -267,6 +267,8 @@ def _show_recent_runs(events: list[SyncRunEvent]) -> None:
         parts = []
         if event.summary.synced:
             parts.append(f'{event.summary.synced} synced')
+        if event.summary.cloned:
+            parts.append(f'{event.summary.cloned} cloned')
         if event.summary.pulled:
             parts.append(f'{event.summary.pulled} pulled')
         if event.summary.pushed:

@@ -286,12 +286,18 @@ def _setup_demo_repos(base: Path) -> SyncerConfig:
     _git(no_remote, 'add', '.')
     _git(no_remote, 'commit', '-m', 'init')
 
+    # 8. Missing repo (not yet cloned)
+    missing_path = base / 'repos' / 'missing-repo'
+    # Don't create the directory — it simulates a repo that needs cloning
+
     repos_dir = base / 'repos'
+    existing = [RepoConfig(name=d.name, path=str(d)) for d in sorted(repos_dir.iterdir()) if d.is_dir()]
+    existing.append(RepoConfig(name='missing-repo', path=str(missing_path)))
     return SyncerConfig(
         owner='demo',
         host='https://github.com',
         search_paths=[],
-        repos=[RepoConfig(name=d.name, path=str(d)) for d in sorted(repos_dir.iterdir()) if d.is_dir()],
+        repos=existing,
     )
 
 
