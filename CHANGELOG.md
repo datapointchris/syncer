@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v1.5.3 (2026-03-09)
+
+### Bug Fixes
+
+- Exclude renamed repo paths from stale repo detection
+  ([`1172595`](https://github.com/datapointchris/syncer/commit/1172595f2e509943d3286ee01037a40ecef34176))
+
+The find_stale_repos function now filters candidates against the latest event's repo paths, so old
+  paths from renamed or removed repos no longer appear as permanently stale.
+
+
 ## v1.5.2 (2026-03-01)
 
 ### Bug Fixes
