@@ -82,9 +82,15 @@ def find_stale_repos(events: list[SyncRunEvent], threshold_days: int = 3) -> lis
                 # Clean in this run — reset tracking
                 repo_dirty_since.pop(snap.path, None)
 
+    # Only report repos that exist in the most recent event (current config).
+    # Old paths from renamed/removed repos would otherwise stay dirty forever.
+    current_paths = {snap.path for snap in sorted_events[-1].repos}
+
     now = datetime.now(UTC)
     stale = []
     for path, since in repo_dirty_since.items():
+        if path not in current_paths:
+            continue
         days = (now - since).days
         if days >= threshold_days:
             stale.append((path, days))

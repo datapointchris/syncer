@@ -179,3 +179,16 @@ class TestFindStaleRepos:
         # older should be first (more days stale)
         assert stale[0][0] == '~/code/older'
         assert stale[1][0] == '~/code/newer'
+
+    def test_renamed_repo_path_not_stale(self):
+        """A repo path that was dirty but no longer appears in the latest event is ignored."""
+        old = datetime.now(UTC) - timedelta(days=10)
+        recent = datetime.now(UTC) - timedelta(hours=1)
+        old_snap = RepoSnapshot(name='myrepo', path='~/code/old-dir/myrepo', status='issues', uncommitted=1)
+        new_snap = RepoSnapshot(name='myrepo', path='~/code/new-dir/myrepo', status='synced', uncommitted=0)
+        events = [
+            _make_event(repos=[old_snap], timestamp=old),
+            _make_event(repos=[new_snap], timestamp=recent),
+        ]
+        stale = find_stale_repos(events, threshold_days=3)
+        assert stale == []
