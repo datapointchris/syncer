@@ -31,7 +31,9 @@ def load_config(name: str) -> SyncerConfig:
         console.print(f'[red]Config file not found: {config_file}[/red]')
         sys.exit(1)
     data = json.loads(config_file.read_text())
-    return SyncerConfig(**data)
+    config = SyncerConfig(**data)
+    config.repos.sort(key=lambda r: r.path)
+    return config
 
 
 def resolve_config(name: str | None = None) -> SyncerConfig:
