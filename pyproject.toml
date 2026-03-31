@@ -109,7 +109,7 @@ branch = "main"
 commit_message = "build(release): {version}"
 build_command = """
     pip install uv
-    uv lock --upgrade-package "$PACKAGE_NAME"
+    uv lock --upgrade-package syncer
     git add uv.lock
 """
 
