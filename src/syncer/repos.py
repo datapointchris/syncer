@@ -176,6 +176,14 @@ class Repo:
         result = self._git('pull', '--ff-only')
         return result.returncode == 0
 
+    def pull_rebase(self) -> bool:
+        result = self._git('pull', '--rebase')
+        return result.returncode == 0
+
+    def rebase_abort(self) -> bool:
+        result = self._git('rebase', '--abort')
+        return result.returncode == 0
+
     def push(self) -> bool:
         result = self._git('push')
         return result.returncode == 0
@@ -263,9 +271,7 @@ class Repo:
         return result.returncode == 0
 
 
-def find_repo_in_search_paths(
-    name: str, search_paths: list[Path], claimed_paths: set[Path] | None = None
-) -> Path | None:
+def find_repo_in_search_paths(name: str, search_paths: list[Path], claimed_paths: set[Path] | None = None) -> Path | None:
     claimed = claimed_paths or set()
     for search_path in search_paths:
         if not search_path.exists():
@@ -295,10 +301,12 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False, config_name: str = '
     cloned = 0
     pulled = 0
     pushed = 0
+    pull_pushed = 0
     issues = 0
     clonable = 0
     pullable = 0
     pushable = 0
+    pull_pushable = 0
     snapshots: list[RepoSnapshot] = []
 
     for repo_config in config.repos:
@@ -351,6 +359,40 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False, config_name: str = '
         behind = repo.behind_remote
         stashes = repo.stash_count
         branch = repo.default_branch or '?'
+
+        # Auto-sync if diverged: behind remote and unpushed commits with no uncommitted changes
+        if ahead and behind and not changes:
+            if dry_run:
+                pull_pushable += 1
+            else:
+                if repo.pull_rebase():
+                    if repo.push():
+                        console.print(_status_line(ICON_MOVE, label, f'pulled {behind}, pushed {ahead} commit(s)', 'green', branch=branch))
+                        pull_pushed += 1
+                        snapshots.append(RepoSnapshot(name=repo.name, path=repo_config.path, status='pull_pushed', branch=branch))
+                        console.print()
+                        continue
+                    # Rebase succeeded but push failed — fall through to issues
+                else:
+                    repo.rebase_abort()
+                    console.print(_status_line(ICON_ERR, label, 'rebase conflict (resolve manually)', 'red', branch=branch))
+                    for line in repo.unpushed_commit_lines:
+                        console.print(f'    {line}')
+                    for line in repo.behind_commit_lines:
+                        console.print(f'    {line}')
+                    issues += 1
+                    snapshots.append(
+                        RepoSnapshot(
+                            name=repo.name,
+                            path=repo_config.path,
+                            status='issues',
+                            branch=branch,
+                            unpushed=ahead,
+                            behind=behind,
+                        )
+                    )
+                    console.print()
+                    continue
 
         # Auto-pull if safe: behind remote with no local changes
         if behind and not changes and not ahead:
@@ -428,6 +470,10 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False, config_name: str = '
         summary_parts.append(f'[cyan]{ICON_PUSH}  {pushable} pushable[/cyan]')
     if pushed:
         summary_parts.append(f'[green]{ICON_PUSH}  {pushed} pushed[/green]')
+    if dry_run and pull_pushable:
+        summary_parts.append(f'[cyan]{ICON_MOVE}  {pull_pushable} diverged (syncable)[/cyan]')
+    if pull_pushed:
+        summary_parts.append(f'[green]{ICON_MOVE}  {pull_pushed} pull+pushed[/green]')
     if issues:
         summary_parts.append(f'[yellow]{ICON_WARN}  {issues} need attention[/yellow]')
     console.print()
@@ -446,6 +492,7 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False, config_name: str = '
                 cloned=cloned,
                 pulled=pulled,
                 pushed=pushed,
+                pull_pushed=pull_pushed,
                 issues=issues,
                 duration_ms=duration_ms,
             ),

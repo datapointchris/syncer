@@ -16,7 +16,7 @@ EVENTS_FILE = DATA_DIR / 'events.jsonl'
 class RepoSnapshot(BaseModel):
     name: str
     path: str
-    status: Literal['synced', 'issues', 'pulled', 'pushed', 'cloned', 'missing', 'not_git', 'no_remote', 'path_mismatch']
+    status: Literal['synced', 'issues', 'pulled', 'pushed', 'pull_pushed', 'cloned', 'missing', 'not_git', 'no_remote', 'path_mismatch']
     branch: str | None = None
     uncommitted: int = 0
     unpushed: int = 0
@@ -30,6 +30,7 @@ class RunSummary(BaseModel):
     cloned: int = 0
     pulled: int
     pushed: int
+    pull_pushed: int = 0
     issues: int
     duration_ms: int
 
