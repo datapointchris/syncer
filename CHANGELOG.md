@@ -1,6 +1,18 @@
 # CHANGELOG
 
 
+## v1.7.1 (2026-03-31)
+
+### Bug Fixes
+
+- Hardcode package name in release build_command
+  ([`470e45b`](https://github.com/datapointchris/syncer/commit/470e45b9da034aa02ed2801fc5f857503e3a7fad))
+
+$PACKAGE_NAME is not set by python-semantic-release, so uv lock --upgrade-package was silently
+  no-oping every release, leaving uv.lock out of sync. Also includes the stale uv.lock from the
+  1.6.0 release.
+
+
 ## v1.7.0 (2026-03-31)
 
 ### Features
