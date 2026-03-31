@@ -1,6 +1,22 @@
 # CHANGELOG
 
 
+## v1.6.0 (2026-03-31)
+
+### Chores
+
+- Add .planning to gitignore
+  ([`8cd9faa`](https://github.com/datapointchris/syncer/commit/8cd9faa25a92d48d460a8904f7fa2153a4d72d58))
+
+### Features
+
+- Auto-sync diverged repos with pull --rebase then push
+  ([`fbdf7de`](https://github.com/datapointchris/syncer/commit/fbdf7de3b0e44a882c69fbc84219dc6838afe9af))
+
+When a repo has both unpushed and behind commits (with no uncommitted changes), attempt git pull
+  --rebase followed by git push. On rebase conflict, abort and report for manual resolution.
+
+
 ## v1.5.3 (2026-03-09)
 
 ### Bug Fixes
