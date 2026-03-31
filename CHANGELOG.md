@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v1.7.0 (2026-03-31)
+
+### Features
+
+- Sort repos alphabetically by path for consistent output
+  ([`25ca2f2`](https://github.com/datapointchris/syncer/commit/25ca2f213bcb273b8ff217ebf4e46b9d447d4291))
+
+Repos are sorted at config load time so all commands (sync, doctor, stats) process them in the same
+  order, grouped by parent directory.
+
+
 ## v1.6.0 (2026-03-31)
 
 ### Chores
