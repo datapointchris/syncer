@@ -13,6 +13,5 @@ build/
 .coverage
 htmlcov/
 .DS_Store
-.planning/
 TESTING.*
 .planning
