@@ -1,6 +1,24 @@
 # CHANGELOG
 
 
+## v2.0.0 (2026-04-03)
+
+### Chores
+
+- Deduplicate .planning gitignore entry
+  ([`bcbf766`](https://github.com/datapointchris/syncer/commit/bcbf7668e069af03e8aeaeb0cb7a244c5f9db724))
+
+### Features
+
+- Read repos from external registry via config.toml
+  ([`bf7b062`](https://github.com/datapointchris/syncer/commit/bf7b0625a66a07cdf8ef9a130218fab76f18c1e1))
+
+Config now reads ~/.config/syncer/config.toml with repos_file pointing to ~/dev/repos.json instead
+  of looking for JSON files in the config dir. Each repo has a status field
+  (active/dormant/retired). Retired repos are filtered from sync operations. Legacy fallback with
+  deprecation warning for migration.
+
+
 ## v1.7.1 (2026-03-31)
 
 ### Bug Fixes
