@@ -12,9 +12,10 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
-from syncer.config import CONFIG_DIR
+from syncer.config import TOOL_CONFIG_PATH
 from syncer.config import RepoConfig
 from syncer.config import SyncerConfig
+from syncer.config import get_repos_file_path
 from syncer.config import resolve_config
 from syncer.repos import ICON_ERR
 from syncer.repos import ICON_MOVE
@@ -28,31 +29,19 @@ from syncer.stats import show_stats
 app = typer.Typer(invoke_without_command=True)
 console = Console()
 
-TEMPLATE_CONFIG = {
-    'owner': '',
-    'host': 'https://github.com',
-    'search_paths': ['~/code', '~/tools'],
-    'repos': [
-        {'name': 'example-repo', 'path': '~/code/example-repo'},
-    ],
-}
-
 
 @app.callback()
 def main(
     ctx: typer.Context,
-    config: Annotated[str | None, typer.Option('--config', '-c', help='Config name to use')] = None,
     dry_run: Annotated[bool, typer.Option('--dry-run', '-n', help='Show what would happen without making changes')] = False,
 ) -> None:
     """Syncer — check if local git repos are fully synced."""
     ctx.ensure_object(dict)
-    ctx.obj['config_name'] = config
     ctx.obj['dry_run'] = dry_run
 
     if ctx.invoked_subcommand is None:
-        syncer_config = resolve_config(config)
-        resolved_name = config or _get_default_config_name()
-        sync_repos(syncer_config, dry_run=dry_run, config_name=resolved_name)
+        syncer_config = resolve_config()
+        sync_repos(syncer_config, dry_run=dry_run)
 
 
 @app.command()
@@ -61,8 +50,7 @@ def doctor(
     fix: Annotated[bool, typer.Option('--fix', help='Automatically update config with fixes')] = False,
 ) -> None:
     """Reconcile config vs filesystem using search_paths."""
-    config_name = ctx.obj.get('config_name')
-    syncer_config = resolve_config(config_name)
+    syncer_config = resolve_config()
     search_paths = [Path(p).expanduser() for p in syncer_config.search_paths]
     claimed_paths = {Path(rc.path).expanduser() for rc in syncer_config.repos}
 
@@ -139,9 +127,9 @@ def doctor(
 
     # Save config if changed
     if fix and config_changed:
-        config_file = CONFIG_DIR / f'{config_name or _get_default_config_name()}.json'
-        config_file.write_text(json.dumps(syncer_config.model_dump(), indent=2) + '\n')
-        console.print(f'\n[green] Config updated: {config_file}[/green]')
+        repos_file = get_repos_file_path()
+        repos_file.write_text(json.dumps(syncer_config.model_dump(), indent=2) + '\n')
+        console.print(f'\n[green] Config updated: {repos_file}[/green]')
 
     console.print()
     if issues_found == 0:
@@ -155,8 +143,7 @@ def doctor(
 @app.command()
 def stats(ctx: typer.Context) -> None:
     """Show sync statistics and repo insights."""
-    config_name = ctx.obj.get('config_name')
-    syncer_config = resolve_config(config_name)
+    syncer_config = resolve_config()
     show_stats(syncer_config)
 
 
@@ -199,16 +186,15 @@ def update() -> None:
 
 
 @app.command()
-def init(name: Annotated[str, typer.Argument(help='Config name')]) -> None:
-    """Create a template config file."""
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    config_file = CONFIG_DIR / f'{name}.json'
-    if config_file.exists():
-        console.print(f'[red]Config already exists: {config_file}[/red]')
+def init() -> None:
+    """Create the syncer tool config if it doesn't exist."""
+    if TOOL_CONFIG_PATH.exists():
+        console.print(f'[red]Config already exists: {TOOL_CONFIG_PATH}[/red]')
         sys.exit(1)
-    config_file.write_text(json.dumps(TEMPLATE_CONFIG, indent=2) + '\n')
-    console.print(f'[green]Created config: {config_file}[/green]')
-    console.print('[yellow]Edit the file to add your repos and owner.[/yellow]')
+    TOOL_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    TOOL_CONFIG_PATH.write_text('repos_file = "~/dev/repos.json"\n')
+    console.print(f'[green]Created config: {TOOL_CONFIG_PATH}[/green]')
+    console.print('[yellow]Edit repos_file to point to your repo registry.[/yellow]')
 
 
 def _git(path: Path, *args: str) -> None:
@@ -311,13 +297,6 @@ def demo() -> None:
         sync_repos(config)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-
-
-def _get_default_config_name() -> str:
-    config_files = list(CONFIG_DIR.glob('*.json'))
-    if config_files:
-        return config_files[0].stem
-    return 'default'
 
 
 if __name__ == '__main__':

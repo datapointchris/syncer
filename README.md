@@ -33,7 +33,13 @@ syncer init name        # create a template config file
 
 ## Config
 
-Config files live at `~/.config/syncer/<name>.json`.
+Syncer reads its tool config from `~/.config/syncer/config.toml`, which points to the repo registry:
+
+```toml
+repos_file = "~/dev/repos.json"
+```
+
+The repo registry is a JSON file listing all repos:
 
 ```json
 {
@@ -41,11 +47,11 @@ Config files live at `~/.config/syncer/<name>.json`.
   "host": "https://github.com",
   "search_paths": ["~/code", "~/tools"],
   "repos": [
-    {"name": "my-repo", "path": "~/code/my-repo"}
+    {"name": "my-repo", "path": "~/code/my-repo", "status": "active"}
   ]
 }
 ```
 
-If there's only one config file, syncer uses it automatically. With multiple configs, use `--config name` to select one.
+Each repo has a `status` field: `active` (default), `dormant`, or `retired`. Retired repos are skipped during sync.
 
 `search_paths` are used by `syncer doctor` to find repos that moved or aren't tracked in the config.

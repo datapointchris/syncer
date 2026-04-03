@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import json
 import sys
+import tomllib
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel
 from rich.console import Console
 
-CONFIG_DIR = Path.home() / '.config' / 'syncer'
+TOOL_CONFIG_PATH = Path.home() / '.config' / 'syncer' / 'config.toml'
 DATA_DIR = Path.home() / '.local' / 'share' / 'syncer'
+
+# Legacy path for deprecation fallback
+_LEGACY_CONFIG_DIR = Path.home() / '.config' / 'syncer'
 
 console = Console()
 
@@ -16,6 +21,7 @@ console = Console()
 class RepoConfig(BaseModel):
     name: str
     path: str
+    status: Literal['active', 'dormant', 'retired'] = 'active'
 
 
 class SyncerConfig(BaseModel):
@@ -25,37 +31,38 @@ class SyncerConfig(BaseModel):
     repos: list[RepoConfig]
 
 
-def load_config(name: str) -> SyncerConfig:
-    config_file = CONFIG_DIR / f'{name}.json'
-    if not config_file.exists():
-        console.print(f'[red]Config file not found: {config_file}[/red]')
+def _load_repos_file(path: Path) -> SyncerConfig:
+    """Load the repo registry from a JSON file."""
+    if not path.exists():
+        console.print(f'[red]Repos file not found: {path}[/red]')
         sys.exit(1)
-    data = json.loads(config_file.read_text())
+    data = json.loads(path.read_text())
     config = SyncerConfig(**data)
     config.repos.sort(key=lambda r: r.path)
     return config
 
 
-def resolve_config(name: str | None = None) -> SyncerConfig:
-    if name:
-        return load_config(name)
+def get_repos_file_path() -> Path:
+    """Resolve the repos file path from the tool config or legacy fallback."""
+    if TOOL_CONFIG_PATH.exists():
+        tool_config = tomllib.loads(TOOL_CONFIG_PATH.read_text())
+        repos_file = tool_config.get('repos_file')
+        if repos_file:
+            return Path(repos_file).expanduser()
 
-    if not CONFIG_DIR.exists():
-        console.print(f'[red]Config directory not found: {CONFIG_DIR}[/red]')
-        console.print('[yellow]Create a config with: syncer init <name>[/yellow]')
-        sys.exit(1)
+    # Legacy fallback: look for JSON files in ~/.config/syncer/
+    legacy_files = list(_LEGACY_CONFIG_DIR.glob('*.json')) if _LEGACY_CONFIG_DIR.exists() else []
+    if legacy_files:
+        console.print(
+            f'[yellow]Warning: using legacy config at {legacy_files[0]}. '
+            f'Migrate to {TOOL_CONFIG_PATH} with repos_file pointing to ~/dev/repos.json[/yellow]'
+        )
+        return legacy_files[0]
 
-    config_files = list(CONFIG_DIR.glob('*.json'))
-
-    if not config_files:
-        console.print(f'[red]No config files found in {CONFIG_DIR}[/red]')
-        console.print('[yellow]Create a config with: syncer init <name>[/yellow]')
-        sys.exit(1)
-
-    if len(config_files) == 1:
-        return load_config(config_files[0].stem)
-
-    console.print('[red]Multiple config files found. Specify one with --config:[/red]')
-    for f in sorted(config_files):
-        console.print(f'  [cyan]{f.stem}[/cyan]')
+    console.print(f'[red]No config found. Create {TOOL_CONFIG_PATH} with repos_file = "~/dev/repos.json"[/red]')
     sys.exit(1)
+
+
+def resolve_config() -> SyncerConfig:
+    repos_file = get_repos_file_path()
+    return _load_repos_file(repos_file)

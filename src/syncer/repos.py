@@ -287,9 +287,10 @@ def find_repo_in_search_paths(name: str, search_paths: list[Path], claimed_paths
     return None
 
 
-def sync_repos(config: SyncerConfig, dry_run: bool = False, config_name: str = '') -> None:
+def sync_repos(config: SyncerConfig, dry_run: bool = False) -> None:
+    active_repos = [r for r in config.repos if r.status != 'retired']
     search_paths = [Path(p).expanduser() for p in config.search_paths]
-    claimed_paths = {Path(rc.path).expanduser() for rc in config.repos}
+    claimed_paths = {Path(rc.path).expanduser() for rc in active_repos}
     start = time.monotonic()
 
     console.print()
@@ -309,7 +310,7 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False, config_name: str = '
     pull_pushable = 0
     snapshots: list[RepoSnapshot] = []
 
-    for repo_config in config.repos:
+    for repo_config in active_repos:
         path = Path(repo_config.path).expanduser()
         label = repo_config.path if repo_config.path.startswith('~') else repo_config.name
         repo = Repo(name=repo_config.name, path=path, owner=config.owner, host=config.host)
@@ -479,12 +480,12 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False, config_name: str = '
     console.print()
     console.print('  │  '.join(summary_parts))
 
-    # Emit tracking event (skip dry runs and demo runs)
+    # Emit tracking event (skip dry runs)
     duration_ms = int((time.monotonic() - start) * 1000)
-    if config_name and not dry_run:
+    if not dry_run:
         event = SyncRunEvent(
             timestamp=datetime.now(UTC),
-            config_name=config_name,
+            config_name=config.owner,
             repos=snapshots,
             summary=RunSummary(
                 total=len(snapshots),
