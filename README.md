@@ -24,8 +24,7 @@ This fetches the latest GitHub release and reinstalls via `uv tool install`.
 syncer                  # sync all repos (auto-detects config)
 syncer --dry-run        # show what would happen without making changes
 syncer --config name    # use a specific config
-syncer doctor           # check for path mismatches, missing/untracked repos, master branches
-syncer doctor --fix     # auto-fix issues (update paths, add untracked, rename master to main)
+syncer issues            # report path mismatches, missing/untracked repos, master branches
 syncer demo             # run against temp repos to show each status state
 syncer version          # print installed version
 syncer init name        # create a template config file
@@ -54,4 +53,4 @@ The repo registry is a JSON file listing all repos:
 
 Each repo has a `status` field: `active` (default), `dormant`, or `retired`. Retired repos are skipped during sync.
 
-`search_paths` are used by `syncer doctor` to find repos that moved or aren't tracked in the config.
+`search_paths` are used by `syncer issues` to find repos that moved or aren't tracked in the config. The repo registry is the source of truth — syncer never writes to it.

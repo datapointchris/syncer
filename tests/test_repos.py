@@ -50,24 +50,6 @@ def git_repo_with_remote(tmp_path):
     return repo_path
 
 
-@pytest.fixture
-def master_repo_with_remote(tmp_path):
-    """Create a git repo on master branch with a bare remote."""
-    bare = tmp_path / 'remote' / 'test-repo.git'
-    bare.mkdir(parents=True)
-    subprocess.run(['git', 'init', '--bare', '--initial-branch=master', str(bare)], capture_output=True)
-
-    repo_path = tmp_path / 'test-repo'
-    subprocess.run(['git', 'clone', str(bare), str(repo_path)], capture_output=True)
-    _git(repo_path, 'config', 'user.email', 'test@test.com')
-    _git(repo_path, 'config', 'user.name', 'Test')
-    (repo_path / 'README.md').write_text('# Test\n')
-    _git(repo_path, 'add', '.')
-    _git(repo_path, 'commit', '-m', 'init')
-    _git(repo_path, 'push')
-    return repo_path
-
-
 def _make_repo(path: Path, **kwargs) -> Repo:
     return Repo(name='test-repo', path=path, owner='user', host='https://github.com', **kwargs)
 
@@ -276,92 +258,6 @@ class TestDefaultBranchStaleRef:
         """Repo with no remote should still detect default branch from local refs."""
         repo = _make_repo(git_repo)
         assert repo.default_branch in ('main', 'master')
-
-
-class TestSetOriginHead:
-    def test_updates_ref(self, git_repo_with_remote):
-        repo = _make_repo(git_repo_with_remote)
-        current = repo.default_branch
-        assert repo.set_origin_head(current) is True
-        # Verify it's set correctly
-        result = subprocess.run(
-            ['git', 'symbolic-ref', 'refs/remotes/origin/HEAD'],
-            cwd=git_repo_with_remote,
-            capture_output=True,
-            text=True,
-        )
-        assert current in result.stdout
-
-
-class TestRenameMasterToMain:
-    def test_full_rename(self, master_repo_with_remote):
-        """Full rename from clean master state."""
-        repo = _make_repo(master_repo_with_remote)
-        assert repo.current_branch == 'master'
-
-        with patch.object(repo, 'set_default_branch_on_github', return_value=True):
-            ok, steps = repo.rename_master_to_main()
-
-        assert ok is True
-        assert 'renamed local' in steps
-        assert repo.current_branch == 'main'
-
-    def test_already_renamed_locally(self, master_repo_with_remote):
-        """If local is already main but remote still has master, handle it."""
-        repo = _make_repo(master_repo_with_remote)
-        # Rename locally first
-        _git(master_repo_with_remote, 'branch', '-m', 'master', 'main')
-        assert repo.current_branch == 'main'
-
-        with patch.object(repo, 'set_default_branch_on_github', return_value=True):
-            ok, steps = repo.rename_master_to_main()
-
-        assert ok is True
-        assert 'renamed local' not in steps  # Was already renamed
-        assert 'pushed main' in steps
-
-    def test_fully_done_is_idempotent(self, master_repo_with_remote):
-        """Running rename on an already-completed rename should succeed."""
-        repo = _make_repo(master_repo_with_remote)
-
-        # Do the full rename first
-        with patch.object(repo, 'set_default_branch_on_github', return_value=True):
-            ok1, _ = repo.rename_master_to_main()
-        assert ok1 is True
-
-        # Run again — should be idempotent
-        with patch.object(repo, 'set_default_branch_on_github', return_value=True):
-            ok2, steps = repo.rename_master_to_main()
-        assert ok2 is True
-        assert 'renamed local' not in steps
-        assert 'pushed main' not in steps
-
-    def test_no_master_or_main(self, git_repo_with_remote):
-        """Repo with neither master nor main branch fails gracefully."""
-        # Create a branch with a different name and delete the default
-        current = subprocess.run(
-            ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
-            cwd=git_repo_with_remote,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        _git(git_repo_with_remote, 'checkout', '-b', 'develop')
-        _git(git_repo_with_remote, 'branch', '-D', current)
-
-        repo = _make_repo(git_repo_with_remote)
-        with patch.object(repo, 'set_default_branch_on_github', return_value=True):
-            ok, steps = repo.rename_master_to_main()
-        assert ok is False
-        assert 'no master or main branch found' in steps
-
-    def test_github_default_failure_stops(self, master_repo_with_remote):
-        """If setting GitHub default fails, stop and report."""
-        repo = _make_repo(master_repo_with_remote)
-
-        with patch.object(repo, 'set_default_branch_on_github', return_value=False):
-            ok, steps = repo.rename_master_to_main()
-        assert ok is False
-        assert 'set GitHub default failed' in steps
 
 
 class TestIsFork:

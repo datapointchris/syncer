@@ -188,70 +188,6 @@ class Repo:
         result = self._git('push')
         return result.returncode == 0
 
-    def rename_branch(self, old: str, new: str) -> bool:
-        result = self._git('branch', '-m', old, new)
-        return result.returncode == 0
-
-    def push_branch(self, branch: str) -> bool:
-        result = self._git('push', '-u', 'origin', branch)
-        return result.returncode == 0
-
-    def delete_remote_branch(self, branch: str) -> bool:
-        result = self._git('push', 'origin', '--delete', branch)
-        return result.returncode == 0
-
-    def set_default_branch_on_github(self, branch: str) -> bool:
-        result = subprocess.run(  # nosec B607
-            ['gh', 'repo', 'edit', f'{self.owner}/{self.name}', '--default-branch', branch],
-            capture_output=True,
-            text=True,
-        )
-        return result.returncode == 0
-
-    def set_origin_head(self, branch: str) -> bool:
-        result = self._git('remote', 'set-head', 'origin', branch)
-        return result.returncode == 0
-
-    def rename_master_to_main(self) -> tuple[bool, list[str]]:
-        """Rename master→main, handling partial states from previous attempts."""
-        steps: list[str] = []
-
-        # Check local state
-        has_local_master = self._git('rev-parse', '--verify', 'refs/heads/master').returncode == 0
-        has_local_main = self._git('rev-parse', '--verify', 'refs/heads/main').returncode == 0
-
-        if has_local_master and not has_local_main:
-            if not self.rename_branch('master', 'main'):
-                return False, ['local rename failed']
-            steps.append('renamed local')
-        elif not has_local_master and not has_local_main:
-            return False, ['no master or main branch found']
-
-        # Check remote state (single call)
-        remote_refs = self._git('ls-remote', '--heads', 'origin').stdout
-        remote_has_main = 'refs/heads/main' in remote_refs
-        remote_has_master = 'refs/heads/master' in remote_refs
-
-        if not remote_has_main:
-            if not self.push_branch('main'):
-                return False, steps + ['push to remote failed']
-            steps.append('pushed main')
-
-        # Set GitHub default (idempotent)
-        if not self.set_default_branch_on_github('main'):
-            return False, steps + ['set GitHub default failed']
-        steps.append('set default')
-
-        # Delete remote master if it still exists
-        if remote_has_master and self.delete_remote_branch('master'):
-            steps.append('deleted remote master')
-
-        # Update local origin/HEAD ref
-        self.set_origin_head('main')
-        steps.append('updated ref')
-
-        return True, steps
-
     @property
     def is_fork(self) -> bool:
         result = subprocess.run(  # nosec B607
@@ -319,7 +255,7 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False) -> None:
             found = find_repo_in_search_paths(repo.name, search_paths, claimed_paths)
             if found:
                 console.print(_status_line(ICON_MOVE, label, 'path mismatch', 'yellow'))
-                console.print(f'    found at {found} (run syncer doctor --fix)')
+                console.print(f'    found at {found} (update repos.json manually)')
                 issues += 1
                 snapshots.append(RepoSnapshot(name=repo.name, path=repo_config.path, status='path_mismatch'))
             else:
