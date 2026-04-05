@@ -1,6 +1,18 @@
 # CHANGELOG
 
 
+## v3.0.0 (2026-04-05)
+
+### Refactoring
+
+- Rename doctor to issues, remove all writes to repos.json
+  ([`4d56170`](https://github.com/datapointchris/syncer/commit/4d56170f5f0f6d6a9a3a604718ac87fbf8c3dd16))
+
+repos.json is shared infrastructure — syncer reads it but no longer writes to it. Renamed doctor to
+  issues (report-only, no --fix flag). Removed rename_master_to_main and helper methods (moved to
+  forge die). Added description field to RepoConfig for forward compatibility.
+
+
 ## v2.0.0 (2026-04-03)
 
 ### Chores
