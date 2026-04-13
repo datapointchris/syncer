@@ -1,6 +1,18 @@
 # CHANGELOG
 
 
+## v3.1.0 (2026-04-13)
+
+### Features
+
+- Support per-repo owner for cloning reference repos
+  ([`b1558c6`](https://github.com/datapointchris/syncer/commit/b1558c68166bff1efc6607a21350308e0c33424b))
+
+RepoConfig now reads the optional owner field from repos.json. When set, it overrides the top-level
+  owner for URL construction, enabling syncer to clone third-party repos (e.g. tiangolo/fastapi)
+  instead of always assuming datapointchris/<name>.
+
+
 ## v3.0.0 (2026-04-05)
 
 ### Refactoring
