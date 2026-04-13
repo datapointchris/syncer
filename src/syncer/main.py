@@ -70,7 +70,8 @@ def issues() -> None:
         if not (path / '.git').is_dir():
             continue
 
-        repo = Repo(name=repo_config.name, path=path, owner=syncer_config.owner, host=syncer_config.host)
+        owner = repo_config.owner or syncer_config.owner
+        repo = Repo(name=repo_config.name, path=path, owner=owner, host=syncer_config.host)
 
         if repo.default_branch == 'master':
             if repo.is_fork:

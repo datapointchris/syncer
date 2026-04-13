@@ -77,7 +77,8 @@ def _show_commits_graph(config: SyncerConfig) -> None:
         path = Path(repo_config.path).expanduser()
         if not path.exists() or not (path / '.git').is_dir():
             continue
-        repo = Repo(name=repo_config.name, path=path, owner=config.owner, host=config.host)
+        owner = repo_config.owner or config.owner
+        repo = Repo(name=repo_config.name, path=path, owner=owner, host=config.host)
         try:
             is_fork = repo.is_fork
         except Exception:
@@ -111,7 +112,8 @@ def _show_repo_age(config: SyncerConfig) -> None:
         path = Path(repo_config.path).expanduser()
         if not path.exists() or not (path / '.git').is_dir():
             continue
-        repo = Repo(name=repo_config.name, path=path, owner=config.owner, host=config.host)
+        owner = repo_config.owner or config.owner
+        repo = Repo(name=repo_config.name, path=path, owner=owner, host=config.host)
         try:
             is_fork = repo.is_fork
         except Exception:
@@ -226,7 +228,8 @@ def _show_all_repos(config: SyncerConfig, events: list[SyncRunEvent]) -> None:
         last_dt: datetime | None = None
 
         if path.exists() and (path / '.git').is_dir():
-            repo = Repo(name=repo_config.name, path=path, owner=config.owner, host=config.host)
+            owner = repo_config.owner or config.owner
+            repo = Repo(name=repo_config.name, path=path, owner=owner, host=config.host)
             commits = str(repo.total_commits)
             last_date = repo.last_commit_date
             if last_date:

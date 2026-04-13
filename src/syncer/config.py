@@ -23,6 +23,7 @@ class RepoConfig(BaseModel):
     path: str
     status: Literal['active', 'dormant', 'retired'] = 'active'
     description: str | None = None
+    owner: str | None = None
 
 
 class SyncerConfig(BaseModel):

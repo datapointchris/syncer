@@ -249,7 +249,8 @@ def sync_repos(config: SyncerConfig, dry_run: bool = False) -> None:
     for repo_config in active_repos:
         path = Path(repo_config.path).expanduser()
         label = repo_config.path if repo_config.path.startswith('~') else repo_config.name
-        repo = Repo(name=repo_config.name, path=path, owner=config.owner, host=config.host)
+        owner = repo_config.owner or config.owner
+        repo = Repo(name=repo_config.name, path=path, owner=owner, host=config.host)
 
         if not repo.exists:
             found = find_repo_in_search_paths(repo.name, search_paths, claimed_paths)
