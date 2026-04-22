@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Annotated
 
+import httpx
 import typer
 from rich.console import Console
 
@@ -123,16 +124,16 @@ def update() -> None:
         text=True,
     )
     if result.returncode != 0:
-        console.print('[red]Failed to fetch latest release tag[/red]')
+        console.print('✗ syncer upgrade failed: could not fetch latest release tag')
         sys.exit(1)
 
     tag = result.stdout.strip()
     current = importlib.metadata.version('syncer')
-    if tag.lstrip('v') == current:
-        console.print(f'[green]Already at latest release: {tag}[/green]')
-        return
+    before_tag = f'v{current}' if not current.startswith('v') else current
 
-    console.print(f'Updating [cyan]{current}[/cyan] → [cyan]{tag}[/cyan]')
+    if tag.lstrip('v') == current.lstrip('v'):
+        console.print(f'✓ syncer already at latest: {tag}')
+        return
 
     install = subprocess.run(  # nosec B607
         ['uv', 'tool', 'install', '--force', f'git+https://github.com/datapointchris/syncer.git@{tag}'],
@@ -140,9 +141,36 @@ def update() -> None:
         text=True,
     )
     if install.returncode != 0:
-        console.print(f'[red]Install failed:[/red] {install.stderr}')
+        console.print(f'✗ syncer upgrade failed: {install.stderr.strip()}')
         sys.exit(1)
-    console.print(f'[green]Updated to {tag}[/green]')
+
+    console.print(f'✓ syncer upgraded: {before_tag} → {tag}')
+
+    subjects = fetch_github_changes('datapointchris', 'syncer', before_tag, tag)
+    if subjects:
+        console.print()
+        console.print('Changes:')
+        for s in subjects:
+            console.print(f'  • {s}')
+
+
+def fetch_github_changes(owner: str, repo: str, from_ref: str, to_ref: str) -> list[str]:
+    """Fetch commit subjects between two refs via GitHub compare API."""
+    url = f'https://api.github.com/repos/{owner}/{repo}/compare/{from_ref}...{to_ref}'
+    try:
+        resp = httpx.get(url, headers={'Accept': 'application/vnd.github+json'}, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+    except (httpx.HTTPError, ValueError):
+        return []
+
+    subjects: list[str] = []
+    for c in data.get('commits', []):
+        message = c.get('commit', {}).get('message', '')
+        subject = message.split('\n', 1)[0].strip()
+        if subject:
+            subjects.append(subject)
+    return subjects
 
 
 @app.command()
