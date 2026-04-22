@@ -93,7 +93,7 @@ repos:
 
   # Python refactoring suggestions
   - repo: https://github.com/dosisod/refurb
-    rev: v2.1.0
+    rev: v2.3.1
     hooks:
       - id: refurb
         stages: [pre-commit]
