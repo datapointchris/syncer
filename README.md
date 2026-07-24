@@ -29,9 +29,10 @@ syncer -j 8             # limit concurrency to 8 repos at a time (default 16)
 syncer issues            # report path mismatches, missing/untracked repos, master branches
 syncer branches          # per-branch report only (no lifecycle/clone, no event tracking)
 syncer branches --apply  # execute the decided action per branch
+syncer stats             # run history and repo insights (commits, age, dirty, stale)
 syncer demo             # run against temp repos to show each status state
 syncer version          # print installed version
-syncer init name        # create a template config file
+syncer init             # create the tool config (~/.config/syncer/config.toml)
 ```
 
 The default `syncer` run and `syncer branches` share the same policy engine and concurrency; the difference is that the default run also handles repo lifecycle (clone missing repos, flag moved/untracked/no-remote repos), records a run in the history (`syncer stats`), and warns about repos left dirty for days.
