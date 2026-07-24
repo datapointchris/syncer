@@ -239,6 +239,34 @@ class Repo:
         result = self._git('push')
         return result.returncode == 0
 
+    def merge_ff_only(self, upstream: str) -> tuple[bool, str]:
+        """Fast-forward the current branch to its upstream. Fails (never merges) if the
+        upstream is not strictly ahead."""
+        result = self._git('merge', '--ff-only', upstream)
+        return result.returncode == 0, result.stderr.strip()
+
+    def update_ref(self, branch: str, target: str) -> tuple[bool, str]:
+        """Advance a (non-current) local branch ref to `target` without a checkout."""
+        result = self._git('update-ref', f'refs/heads/{branch}', target)
+        return result.returncode == 0, result.stderr.strip()
+
+    def push_branch(self, branch: str, set_upstream: bool = False) -> tuple[bool, str]:
+        """Push a specific branch with an explicit refspec (never 'whatever is checked out')."""
+        args = ['push']
+        if set_upstream:
+            args += ['-u', 'origin', branch]
+        else:
+            args += ['origin', f'{branch}:{branch}']
+        result = self._git(*args)
+        return result.returncode == 0, result.stderr.strip()
+
+    def delete_local_branch(self, branch: str) -> tuple[bool, str]:
+        """Delete a local branch. Uses -D because a GONE branch has no upstream for git's
+        own merged-check to consult — safety is enforced upstream by the delete_local guard
+        (merged-into-default, not current, not default, clean), not by git's -d heuristic."""
+        result = self._git('branch', '-D', branch)
+        return result.returncode == 0, result.stderr.strip()
+
     @property
     def is_fork(self) -> bool:
         result = subprocess.run(  # nosec B607

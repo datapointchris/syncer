@@ -106,11 +106,16 @@ def issues() -> None:
 @app.command()
 def branches(
     policy: Annotated[str | None, typer.Option('--policy', '-p', help='Override the resolved policy for every repo')] = None,
+    apply: Annotated[bool, typer.Option('--apply', help='Execute the decided action per branch (safe actions only)')] = False,
 ) -> None:
-    """Per-branch sync report across all local branches (read-only, no mutation)."""
+    """Per-branch sync report across all local branches.
+
+    Read-only by default; --apply executes each policy's decided action, enforcing the hard
+    safety invariants (never force, never touch a dirty tree, refuse rather than force).
+    """
     syncer_config = resolve_config()
     tool_config = load_tool_config()
-    report_branches(syncer_config, tool_config, cli_policy=policy)
+    report_branches(syncer_config, tool_config, cli_policy=policy, apply=apply)
 
 
 @app.command()

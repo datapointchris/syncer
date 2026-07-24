@@ -27,6 +27,7 @@ syncer --config name    # use a specific config
 syncer issues            # report path mismatches, missing/untracked repos, master branches
 syncer branches          # per-branch sync report across all local branches (read-only)
 syncer branches -p observe  # override the resolved policy for the report
+syncer branches --apply  # execute each policy's decided action (safe actions only)
 syncer demo             # run against temp repos to show each status state
 syncer version          # print installed version
 syncer init name        # create a template config file
@@ -59,7 +60,9 @@ Each repo has a `status` field: `active` (default), `dormant`, or `retired`. Ret
 
 ## Sync policies
 
-`syncer branches` classifies every branch (per-branch `ahead`/`behind`/`gone`/`no_upstream`/…, computed after `fetch --prune` and repointing `origin/HEAD`) and reports the action a policy *would* take. Policies are **machine-local** and live in `config.toml`, so the same repo can sync aggressively on an always-on box and report-only on a laptop.
+`syncer branches` classifies every branch (per-branch `ahead`/`behind`/`gone`/`no_upstream`/…, computed after `fetch --prune` and repointing `origin/HEAD`) and reports the action a policy *would* take. `syncer branches --apply` then executes those actions. Policies are **machine-local** and live in `config.toml`, so the same repo can sync aggressively on an always-on box and report-only on a laptop.
+
+`--apply` is safe by construction: it enforces hard invariants no policy can override — never `--force`, never mutate a dirty working tree, fast-forward only under strict ancestry, `rebase_push` aborts cleanly on conflict, and any precondition that fails at write time is refused (never forced) rather than mutated.
 
 Three policies are built in: `standard` (default-branch auto-sync, feature branches report-only), `observe` (report everything, mutate nothing), and `mirror` (auto everything safe, opt-in). Define your own under `[policies.<name>]` with a `scope` (`default`/`current`/`tracked`/`all`) and a rule table keyed by `<selector>:<state>`:
 

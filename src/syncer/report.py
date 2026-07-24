@@ -12,6 +12,8 @@ from syncer.config import SyncerConfig
 from syncer.config import ToolConfig
 from syncer.config import resolve_policies
 from syncer.config import resolve_policy_name
+from syncer.execute import Outcome
+from syncer.execute import execute
 from syncer.policy import Action
 from syncer.policy import BranchState
 from syncer.policy import PrimaryState
@@ -44,7 +46,8 @@ _STATE_LABEL = {
 }
 
 
-def _branch_line(state: BranchState, action: Action) -> str:
+def _branch_prefix(state: BranchState) -> str:
+    """The colored state part of a line (icon, branch, flags, detail) without the action arrow."""
     icon, color = _STATE_STYLE.get(state.primary, (ICON_WARN, 'blue'))
 
     # For ahead/behind/diverged the commit counts carry the meaning; elsewhere use a label.
@@ -69,10 +72,36 @@ def _branch_line(state: BranchState, action: Action) -> str:
         flags.append('current')
     flag_str = f' ({", ".join(flags)})' if flags else ''
 
-    return f'  [{color}]{icon}  {state.branch}{flag_str} — {detail}[/{color}] [blue]→ {action.value}[/blue]'
+    return f'  [{color}]{icon}  {state.branch}{flag_str} — {detail}[/{color}]'
 
 
-def report_branches(config: SyncerConfig, tool_config: ToolConfig, cli_policy: str | None = None) -> None:
+def _branch_line(state: BranchState, action: Action) -> str:
+    return f'{_branch_prefix(state)} [blue]→ {action.value}[/blue]'
+
+
+_OUTCOME_COLOR = {
+    'done': 'green',
+    'refused': 'yellow',
+    'failed': 'red',
+    'skipped': 'blue',
+    'reported': 'blue',
+}
+
+
+def _outcome_suffix(outcome: Outcome) -> str:
+    color = _OUTCOME_COLOR.get(outcome.status, 'blue')
+    text = f'{outcome.action.value}: {outcome.status}'
+    if outcome.message:
+        text += f' ({outcome.message})'
+    return f'[{color}]→ {text}[/{color}]'
+
+
+def report_branches(
+    config: SyncerConfig,
+    tool_config: ToolConfig,
+    cli_policy: str | None = None,
+    apply: bool = False,
+) -> None:
     policies = resolve_policies(tool_config)
     active_repos = [repo for repo in config.repos if repo.status != 'retired']
 
@@ -94,7 +123,13 @@ def report_branches(config: SyncerConfig, tool_config: ToolConfig, cli_policy: s
             continue
 
         states = classify_repo(repo, policy)
-        console.print(f'[bold]{label}[/bold] [blue](policy: {policy_name})[/blue]')
+        mode = 'apply' if apply else 'report-only'
+        console.print(f'[bold]{label}[/bold] [blue](policy: {policy_name}, {mode})[/blue]')
         for state in states:
-            console.print(_branch_line(state, decide(state, policy)))
+            action = decide(state, policy)
+            if apply:
+                outcome = execute(action, state, repo)
+                console.print(f'{_branch_prefix(state)} {_outcome_suffix(outcome)}')
+            else:
+                console.print(_branch_line(state, action))
         console.print()
