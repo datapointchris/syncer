@@ -27,11 +27,26 @@ from syncer.repos import find_repo_in_search_paths
 from syncer.stats import show_stats
 from syncer.sync import run_sync
 
-app = typer.Typer(invoke_without_command=True)
+app = typer.Typer(invoke_without_command=True, rich_markup_mode='rich')
 console = Console()
 
+_EPILOG = (
+    '[bold]Examples[/bold]\n\n'
+    '[cyan]syncer[/cyan] — report every repo across all branches (read-only)\n\n'
+    "[cyan]syncer --apply[/cyan] — pull, push, fast-forward, and clone what's safe\n\n"
+    '[cyan]syncer -p mirror --apply[/cyan] — run the aggressive mirror policy this once\n\n'
+    '[cyan]syncer branches[/cyan] — quick per-branch view, no lifecycle or history\n\n'
+    '[cyan]syncer issues[/cyan] — find moved, missing, or untracked repos'
+)
 
-@app.callback()
+
+def _version_callback(value: bool) -> None:
+    if value:
+        console.print(f'syncer {importlib.metadata.version("syncer")}')
+        raise typer.Exit()
+
+
+@app.callback(epilog=_EPILOG)
 def main(
     ctx: typer.Context,
     apply: Annotated[
@@ -40,11 +55,14 @@ def main(
     dry_run: Annotated[bool, typer.Option('--dry-run', '-n', help='Force report-only, even with --apply')] = False,
     policy: Annotated[str | None, typer.Option('--policy', '-p', help='Override the resolved policy for every repo')] = None,
     jobs: Annotated[int, typer.Option('--jobs', '-j', help='Max repos to process concurrently')] = DEFAULT_JOBS,
+    version: Annotated[
+        bool, typer.Option('--version', '-V', callback=_version_callback, is_eager=True, help='Show the installed version and exit')
+    ] = False,
 ) -> None:
     """Check whether local git repos are synced, across every branch.
 
-    Running `syncer` with no command reports the state of every repo (read-only).
-    Add --apply to execute each policy's safe actions. Repos are checked concurrently
+    Running [bold]syncer[/bold] with no command reports the state of every repo (read-only).
+    Add [bold]--apply[/bold] to execute each policy's safe actions. Repos are checked concurrently
     and shown least-to-most urgent, so anything needing attention sits nearest the prompt.
     """
     ctx.ensure_object(dict)
@@ -144,6 +162,18 @@ def stats(ctx: typer.Context) -> None:
 
 
 @app.command(rich_help_panel='Manage')
+def init() -> None:
+    """Create the syncer tool config (~/.config/syncer/config.toml) if it doesn't exist."""
+    if TOOL_CONFIG_PATH.exists():
+        console.print(f'[red]Config already exists: {TOOL_CONFIG_PATH}[/red]')
+        sys.exit(1)
+    TOOL_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    TOOL_CONFIG_PATH.write_text('repos_file = "~/dev/repos.json"\n')
+    console.print(f'[green]Created config: {TOOL_CONFIG_PATH}[/green]')
+    console.print('[yellow]Edit repos_file to point to your repo registry.[/yellow]')
+
+
+@app.command(rich_help_panel='Manage')
 def version() -> None:
     """Print the installed version of syncer."""
     v = importlib.metadata.version('syncer')
@@ -206,18 +236,6 @@ def fetch_github_changes(owner: str, repo: str, from_ref: str, to_ref: str) -> l
         if subject:
             subjects.append(subject)
     return subjects
-
-
-@app.command(rich_help_panel='Manage')
-def init() -> None:
-    """Create the syncer tool config (~/.config/syncer/config.toml) if it doesn't exist."""
-    if TOOL_CONFIG_PATH.exists():
-        console.print(f'[red]Config already exists: {TOOL_CONFIG_PATH}[/red]')
-        sys.exit(1)
-    TOOL_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    TOOL_CONFIG_PATH.write_text('repos_file = "~/dev/repos.json"\n')
-    console.print(f'[green]Created config: {TOOL_CONFIG_PATH}[/green]')
-    console.print('[yellow]Edit repos_file to point to your repo registry.[/yellow]')
 
 
 def _git(path: Path, *args: str) -> None:
