@@ -1,6 +1,147 @@
 # CHANGELOG
 
 
+## v4.0.0 (2026-07-24)
+
+### Chores
+
+- **pre-commit**: Bump refurb to v2.3.1
+  ([`7f28132`](https://github.com/datapointchris/syncer/commit/7f2813280f826015746f7441b10333aa326ecac9))
+
+v2.1.0 crashes on newer mypy: AttributeError for allow_redefinition. v2.3.1 uses the renamed
+  allow_redefinition_new attribute.
+
+- **pre-commit**: Restrict hooks to pre-commit stage
+  ([`835d7c4`](https://github.com/datapointchris/syncer/commit/835d7c4a92e112180e2fd020e0097d6d67b03a96))
+
+Add default_stages: [pre-commit] so hooks without an explicit stages: run only at the pre-commit
+  stage. Without it, unrestricted hooks (ruff, codespell, bandit, etc.) also ran at the
+  prepare-commit-msg and commit-msg stages, firing multiple times per commit.
+
+### Documentation
+
+- **cli**: Add examples, --version flag, and richer help styling
+  ([`16fad2d`](https://github.com/datapointchris/syncer/commit/16fad2d94344c29b5173a81b5f372850acf2f2af))
+
+- Add an Examples block (epilog) covering the common workflows. - Add a top-level --version/-V eager
+  flag alongside the version command. - Enable rich markup so key flags render emphasized in the
+  description. - Order the Manage panel setup-first (init, version, update).
+
+- **cli**: Group help into panels and sharpen descriptions
+  ([`826e59b`](https://github.com/datapointchris/syncer/commit/826e59b5617c452bbd2105b8cfecc9ec83319726))
+
+Organize commands into Sync / Inspect / Manage / Examples panels (Sync first) instead of a flat
+  definition-ordered list, tighten the top description so it stops wrapping mid-phrase, and give
+  issues/stats/init help text that says what they actually check or create.
+
+### Features
+
+- Add policy executor and 'branches --apply'
+  ([`2049197`](https://github.com/datapointchris/syncer/commit/2049197e024c8c69e47e42ec95859c4bd10048d9))
+
+Second slice of the sync_policy feature: the impure execute() half of the classify -> decide ->
+  execute pipeline, plus an opt-in mutation surface. The default 'syncer branches' stays read-only;
+  --apply runs each policy's decided action.
+
+execute(action, state, repo) enforces the 7 hard invariants no policy can override, re-verifying
+  every precondition live immediately before the write and refusing (never forcing) on failure: -
+  never --force / -f / --force-with-lease - never mutate a dirty working tree - pull_ff / ff_ref
+  require strict ancestry, re-checked at write time - rebase_push aborts cleanly on conflict ->
+  refusal, never half-rebase - delete_local only under GONE and merged and not-current and
+  not-default and clean - acts on the classified branch via explicit refspecs / ref names
+
+repos.py gains branch-explicit primitives (merge_ff_only, update_ref, push_branch,
+  delete_local_branch) that fix the decision/mutation branch mismatch — they never act on 'whatever
+  is checked out'.
+
+19 new tests: L3 effect + refusal per action, and L4 invariant sweep that spies on git argv to prove
+  no --force* is ever issued, the dirty tree is never mutated, and a rebase conflict leaves a clean
+  tree.
+
+- Add sync-policy engine and per-branch report
+  ([`390b2d7`](https://github.com/datapointchris/syncer/commit/390b2d7887076e7bd0803790cbd64120b7cdc4e9))
+
+First implementation slice of the sync_policy / multi-branch feature (observe-only). Adds the
+  classify -> decide pipeline; execute() is a later slice, so the existing sync_repos mutation path
+  is untouched.
+
+- policy.py: pure core — PrimaryState/Action/Scope enums, BranchState + Policy models, the pure
+  decide() rules engine with deterministic selector precedence (exact > glob > default > current >
+  *), and the built-in standard/observe/mirror policies. - classify.py: git -> BranchState per
+  branch, after fetch --prune and git remote set-head origin --auto (fixes the stale-master
+  resolution bug at its source). - report.py + 'syncer branches': read-only per-branch report
+  showing the action each resolved policy would take. - config.py: optional sync_policy hint on
+  RepoConfig; ToolConfig loading of [policies.*]/default_policy/[repo_overrides]; 5-level policy
+  resolution. - repos.py: multi-branch git reads (branch_upstream, ahead_behind, is_merged_into,
+  local_branches, fetch_prune, set_head_auto).
+
+90 new tests: full L1 decide() truth table per policy, selector precedence + validation, and L2
+  classify() fixtures for every state including the stale-origin/HEAD regression.
+
+- Drive the default syncer run with the policy engine
+  ([`b6e4696`](https://github.com/datapointchris/syncer/commit/b6e4696481b227929a5a34c44768c5e55c35b3de))
+
+The default no-args run now uses the concurrent classify -> decide -> execute pipeline across all
+  branches, replacing the old sequential default-branch-only loop (sync_repos is removed). It is
+  report-first: 'syncer' shows what each policy would do, 'syncer --apply' executes the safe
+  actions. --dry-run forces report-only even with --apply.
+
+Output is ordered by attention — synced, then operations, then warnings, then errors — so repos
+  needing action land at the bottom nearest the prompt (least scrolling). Repos are processed
+  concurrently (default 16, -j to tune) as with 'branches'.
+
+The default run and 'syncer branches' now share one core (report.gather_reports + render_report):
+  the default run adds repo lifecycle (clone missing, flag not-git/no-remote/path-mismatch), event
+  emission, and stale warnings via include_lifecycle=True.
+
+events.jsonl gains per-branch detail additively: RepoSnapshot keeps every repo-level field (stats.py
+  untouched) and adds an optional 'policy' and 'branches: list[BranchSnapshot]', both defaulting
+  empty so older event lines still validate.
+
+BREAKING CHANGE: 'syncer' with no flags no longer mutates; use 'syncer --apply' to pull/push/clone.
+
+- Process repos concurrently in 'syncer branches'
+  ([`d3c8a16`](https://github.com/datapointchris/syncer/commit/d3c8a1648fe9ad950f7b637d2bb6c33ff045f850))
+
+Fetch and classify/apply repos on a thread pool (default 16, -j to tune) instead of sequentially.
+  Git calls are I/O-bound and release the GIL, so a run over many repos takes roughly as long as the
+  slowest repo rather than the sum — removing the friction of running it repeatedly.
+
+- All git work runs in worker threads (each repo is independent); rendering stays on the main thread
+  in path order via order-preserving pool.map, so concurrent output never interleaves. - A bounded
+  per-task random jitter (<=0.3s) staggers the initial fetch burst so N fetches don't hit the remote
+  at the same instant. Bounded per task, so there's no N*delay floor on large repo sets; the pool
+  itself is the rolling queue for repos beyond the concurrency cap.
+
+Adds the -j/--jobs flag. report_branches now returns via a thread-safe _build_repo_report worker + a
+  RepoBranchReport dataclass.
+
+### Refactoring
+
+- **update**: Unify upgrade output and show changelog
+  ([`fd71d8e`](https://github.com/datapointchris/syncer/commit/fd71d8e3d78587a1d407794ead12553dc400fc18))
+
+Drop the "Updating X → Y" preamble and route all outcomes through consistent status glyphs: `✓
+  syncer already at latest: <tag>`, `✓ syncer upgraded: <before> → <after>`, `✗ syncer upgrade
+  failed: <reason>`. After a successful upgrade, fetch commit subjects between the old and new tags
+  from GitHub's compare API and print them under "Changes:". Add httpx dependency for the GitHub
+  call.
+
+### Testing
+
+- Add L5 regression for the master/main incident
+  ([`47150cf`](https://github.com/datapointchris/syncer/commit/47150cfb90b0683875b5f57c157b9eba9c0c8fc5))
+
+End-to-end reproduction of the 2026-07 incident that motivated the feature: a clone left on local
+  master tracking a stale origin/master, origin/HEAD still pointing at it, origin/main ahead,
+  untracked file present. Asserts classify_repo prunes the stale ref, repoints origin/HEAD, resolves
+  the real default (main), and surfaces the orphaned master as GONE instead of a false 'synced'.
+
+### Breaking Changes
+
+- 'syncer' with no flags no longer mutates; use 'syncer --apply' to pull/push/clone.
+
+
 ## v3.1.0 (2026-04-13)
 
 ### Features
