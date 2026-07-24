@@ -17,6 +17,7 @@ from syncer.config import RepoConfig
 from syncer.config import SyncerConfig
 from syncer.config import load_tool_config
 from syncer.config import resolve_config
+from syncer.report import DEFAULT_JOBS
 from syncer.report import report_branches
 from syncer.repos import ICON_MOVE
 from syncer.repos import ICON_WARN
@@ -107,15 +108,17 @@ def issues() -> None:
 def branches(
     policy: Annotated[str | None, typer.Option('--policy', '-p', help='Override the resolved policy for every repo')] = None,
     apply: Annotated[bool, typer.Option('--apply', help='Execute the decided action per branch (safe actions only)')] = False,
+    jobs: Annotated[int, typer.Option('--jobs', '-j', help='Max repos to process concurrently')] = DEFAULT_JOBS,
 ) -> None:
     """Per-branch sync report across all local branches.
 
-    Read-only by default; --apply executes each policy's decided action, enforcing the hard
-    safety invariants (never force, never touch a dirty tree, refuse rather than force).
+    Repos are processed concurrently. Read-only by default; --apply executes each policy's
+    decided action, enforcing the hard safety invariants (never force, never touch a dirty
+    tree, refuse rather than force).
     """
     syncer_config = resolve_config()
     tool_config = load_tool_config()
-    report_branches(syncer_config, tool_config, cli_policy=policy, apply=apply)
+    report_branches(syncer_config, tool_config, cli_policy=policy, apply=apply, jobs=jobs)
 
 
 @app.command()
