@@ -24,8 +24,8 @@ from syncer.repos import ICON_WARN
 from syncer.repos import Repo
 from syncer.repos import _status_line
 from syncer.repos import find_repo_in_search_paths
-from syncer.repos import sync_repos
 from syncer.stats import show_stats
+from syncer.sync import run_sync
 
 app = typer.Typer(invoke_without_command=True)
 console = Console()
@@ -34,15 +34,26 @@ console = Console()
 @app.callback()
 def main(
     ctx: typer.Context,
-    dry_run: Annotated[bool, typer.Option('--dry-run', '-n', help='Show what would happen without making changes')] = False,
+    apply: Annotated[
+        bool, typer.Option('--apply', help='Execute the decided actions (pull/push/ff/clone); default is report-only')
+    ] = False,
+    dry_run: Annotated[bool, typer.Option('--dry-run', '-n', help='Force report-only, even with --apply')] = False,
+    policy: Annotated[str | None, typer.Option('--policy', '-p', help='Override the resolved policy for every repo')] = None,
+    jobs: Annotated[int, typer.Option('--jobs', '-j', help='Max repos to process concurrently')] = DEFAULT_JOBS,
 ) -> None:
-    """Syncer — check if local git repos are fully synced."""
+    """Syncer — check if local git repos are fully synced across all branches.
+
+    Report-only by default; --apply executes each policy's safe actions. Repos are processed
+    concurrently and rendered least-to-most urgent, so anything needing attention lands at the
+    bottom nearest the prompt.
+    """
     ctx.ensure_object(dict)
     ctx.obj['dry_run'] = dry_run
 
     if ctx.invoked_subcommand is None:
         syncer_config = resolve_config()
-        sync_repos(syncer_config, dry_run=dry_run)
+        tool_config = load_tool_config()
+        run_sync(syncer_config, tool_config, cli_policy=policy, apply=apply and not dry_run, jobs=jobs)
 
 
 @app.command()
@@ -302,7 +313,7 @@ def demo() -> None:
     tmp = Path(tempfile.mkdtemp(prefix='syncer-demo-'))
     try:
         config = _setup_demo_repos(tmp)
-        sync_repos(config)
+        run_sync(config, load_tool_config(), apply=True, jitter=0.0)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

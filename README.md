@@ -2,7 +2,7 @@
 
 Check if local git repos are fully synced before switching machines.
 
-Syncer fetches each configured repo, checks for uncommitted changes, unpushed/behind commits, and stashes, then auto-pulls or auto-pushes when safe.
+Syncer fetches every configured repo concurrently, classifies each branch (ahead/behind/gone/…), and shows what a per-machine [sync policy](#sync-policies) would do. It's **report-only by default**; `syncer --apply` executes the safe actions (fast-forward, push, clone, prune). Output is ordered so anything needing attention lands at the bottom, nearest the prompt.
 
 ## Installing
 
@@ -21,18 +21,20 @@ This fetches the latest GitHub release and reinstalls via `uv tool install`.
 ## Usage
 
 ```bash
-syncer                  # sync all repos (auto-detects config)
-syncer --dry-run        # show what would happen without making changes
-syncer --config name    # use a specific config
+syncer                  # report-only: classify every repo/branch, show what would happen
+syncer --apply          # execute each policy's safe actions (pull/push/ff/clone)
+syncer --dry-run        # force report-only, even with --apply
+syncer -p observe       # override the resolved policy for this run
+syncer -j 8             # limit concurrency to 8 repos at a time (default 16)
 syncer issues            # report path mismatches, missing/untracked repos, master branches
-syncer branches          # per-branch sync report across all local branches (read-only)
-syncer branches -p observe  # override the resolved policy for the report
-syncer branches --apply  # execute each policy's decided action (safe actions only)
-syncer branches -j 8     # limit concurrency to 8 repos at a time (default 16)
+syncer branches          # per-branch report only (no lifecycle/clone, no event tracking)
+syncer branches --apply  # execute the decided action per branch
 syncer demo             # run against temp repos to show each status state
 syncer version          # print installed version
 syncer init name        # create a template config file
 ```
+
+The default `syncer` run and `syncer branches` share the same policy engine and concurrency; the difference is that the default run also handles repo lifecycle (clone missing repos, flag moved/untracked/no-remote repos), records a run in the history (`syncer stats`), and warns about repos left dirty for days.
 
 ## Config
 
@@ -61,7 +63,7 @@ Each repo has a `status` field: `active` (default), `dormant`, or `retired`. Ret
 
 ## Sync policies
 
-`syncer branches` classifies every branch (per-branch `ahead`/`behind`/`gone`/`no_upstream`/…, computed after `fetch --prune` and repointing `origin/HEAD`) and reports the action a policy *would* take. `syncer branches --apply` then executes those actions. Policies are **machine-local** and live in `config.toml`, so the same repo can sync aggressively on an always-on box and report-only on a laptop.
+Both `syncer` and `syncer branches` classify every branch (per-branch `ahead`/`behind`/`gone`/`no_upstream`/…, computed after `fetch --prune` and repointing `origin/HEAD`) and report the action a policy *would* take; `--apply` executes those actions. Policies are **machine-local** and live in `config.toml`, so the same repo can sync aggressively on an always-on box and report-only on a laptop.
 
 `--apply` is safe by construction: it enforces hard invariants no policy can override — never `--force`, never mutate a dirty working tree, fast-forward only under strict ancestry, `rebase_push` aborts cleanly on conflict, and any precondition that fails at write time is refused (never forced) rather than mutated.
 

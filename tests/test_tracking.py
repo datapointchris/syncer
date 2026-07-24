@@ -5,6 +5,7 @@ from datetime import timedelta
 import pytest
 from pydantic import ValidationError
 
+from syncer.tracking import BranchSnapshot
 from syncer.tracking import RepoSnapshot
 from syncer.tracking import RunSummary
 from syncer.tracking import SyncRunEvent
@@ -43,6 +44,35 @@ class TestRepoSnapshot:
         snap = RepoSnapshot(name='r', path='/r', status='issues', branch='main', uncommitted=3, unpushed=1, behind=2, stashes=1)
         assert snap.uncommitted == 3
         assert snap.branch == 'main'
+
+    def test_branches_default_empty(self):
+        snap = RepoSnapshot(name='r', path='/r', status='synced')
+        assert snap.branches == []
+        assert snap.policy is None
+
+    def test_legacy_event_without_branches_still_parses(self):
+        # Events written before the per-branch schema have no `branches`/`policy` keys.
+        legacy = (
+            '{"timestamp": "2026-01-01T00:00:00+00:00", "config_name": "me", '
+            '"repos": [{"name": "r", "path": "~/r", "status": "synced", "uncommitted": 0}], '
+            '"summary": {"total": 1, "synced": 1, "pulled": 0, "pushed": 0, "issues": 0, "duration_ms": 5}}'
+        )
+        event = SyncRunEvent.model_validate_json(legacy)
+        assert event.repos[0].branches == []
+        assert event.repos[0].policy is None
+
+    def test_per_branch_snapshot_round_trip(self):
+        snap = RepoSnapshot(
+            name='r',
+            path='~/r',
+            status='synced',
+            policy='standard',
+            branches=[BranchSnapshot(branch='main', primary='synced', is_default=True, action='skip', outcome='skipped')],
+        )
+        restored = RepoSnapshot.model_validate_json(snap.model_dump_json())
+        assert restored.policy == 'standard'
+        assert restored.branches[0].branch == 'main'
+        assert restored.branches[0].outcome == 'skipped'
 
     def test_all_statuses(self):
         for status in ('synced', 'issues', 'pulled', 'pushed', 'cloned', 'missing', 'not_git', 'no_remote', 'path_mismatch'):

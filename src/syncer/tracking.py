@@ -13,6 +13,19 @@ from syncer.config import DATA_DIR
 EVENTS_FILE = DATA_DIR / 'events.jsonl'
 
 
+class BranchSnapshot(BaseModel):
+    """Per-branch detail captured on a run. Added additively — older events have none."""
+
+    branch: str
+    primary: str
+    ahead: int = 0
+    behind: int = 0
+    is_default: bool = False
+    is_current: bool = False
+    action: str | None = None
+    outcome: str | None = None
+
+
 class RepoSnapshot(BaseModel):
     name: str
     path: str
@@ -22,6 +35,9 @@ class RepoSnapshot(BaseModel):
     unpushed: int = 0
     behind: int = 0
     stashes: int = 0
+    # Additive per-branch fields (default empty → old events still validate, stats.py unaffected).
+    policy: str | None = None
+    branches: list[BranchSnapshot] = []
 
 
 class RunSummary(BaseModel):

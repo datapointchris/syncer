@@ -8,7 +8,24 @@ from syncer.config import resolve_policies
 from syncer.policy import Action
 from syncer.policy import PrimaryState
 from syncer.report import _build_repo_report
+from syncer.report import gather_reports
 from syncer.report import report_branches
+
+
+def _build(repo_config, config, *, cli_policy=None, apply=False, include_lifecycle=True):
+    """Call the worker with sensible test defaults for its many keyword args."""
+    return _build_repo_report(
+        repo_config,
+        config=config,
+        tool_config=ToolConfig(),
+        policies=resolve_policies(ToolConfig()),
+        cli_policy=cli_policy,
+        apply=apply,
+        jitter=0.0,
+        include_lifecycle=include_lifecycle,
+        search_paths=[],
+        claimed_paths=set(),
+    )
 
 
 def _git(path: Path, *args: str) -> None:
@@ -42,21 +59,27 @@ class TestBuildRepoReport:
     def test_returns_rows_for_real_repo(self, tmp_path):
         repo_path = _make_cloned_repo(tmp_path, 'alpha')
         config = _config_for([repo_path])
-        report = _build_repo_report(config.repos[0], config, ToolConfig(), resolve_policies(ToolConfig()), 'observe', False, 0.0)
+        report = _build(config.repos[0], config, cli_policy='observe')
         assert report is not None
         assert report.policy_name == 'observe'
         assert any(row.state.branch == 'main' for row in report.rows)
 
-    def test_skips_missing_repo(self, tmp_path):
+    def test_skips_missing_repo_without_lifecycle(self, tmp_path):
         config = _config_for([tmp_path / 'does-not-exist'])
-        report = _build_repo_report(config.repos[0], config, ToolConfig(), resolve_policies(ToolConfig()), None, False, 0.0)
+        report = _build(config.repos[0], config, include_lifecycle=False)
         assert report is None
+
+    def test_surfaces_missing_repo_as_lifecycle(self, tmp_path):
+        config = _config_for([tmp_path / 'does-not-exist'])
+        report = _build(config.repos[0], config)  # _build defaults include_lifecycle=True
+        assert report is not None
+        assert report.lifecycle == 'would_clone'
 
     def test_apply_attaches_outcomes(self, tmp_path):
         repo_path = _make_cloned_repo(tmp_path, 'beta')
         _git(repo_path, 'commit', '--allow-empty', '-m', 'unpushed')
         config = _config_for([repo_path])
-        report = _build_repo_report(config.repos[0], config, ToolConfig(), resolve_policies(ToolConfig()), 'mirror', True, 0.0)
+        report = _build(config.repos[0], config, cli_policy='mirror', apply=True)
         assert report is not None
         main_row = next(row for row in report.rows if row.state.branch == 'main')
         assert main_row.state.primary == PrimaryState.AHEAD
@@ -66,16 +89,31 @@ class TestBuildRepoReport:
 
 
 class TestReportOrdering:
-    def test_output_preserves_config_order(self, tmp_path, capsys):
-        # Deliberately out of alphabetical order to prove pool.map preserves submission order
-        # (real configs are path-sorted at load time, so this yields directory order).
+    def test_reports_sorted_by_path_within_same_severity(self, tmp_path):
+        # Submit out of alphabetical order; all synced (same severity) → path-sorted output.
         names = ['charlie', 'alpha', 'bravo']
         paths = [_make_cloned_repo(tmp_path, name) for name in names]
         config = _config_for(paths)
-        report_branches(config, ToolConfig(default_policy='observe'), jitter=0.0)
-        out = capsys.readouterr().out
-        positions = [out.index(name) for name in names]
-        assert positions == sorted(positions)  # appear in the order submitted
+        reports = gather_reports(config, ToolConfig(default_policy='observe'), jitter=0.0)
+        assert [report.name for report in reports] == ['alpha', 'bravo', 'charlie']
+
+    def test_repos_needing_attention_sort_to_the_bottom(self, tmp_path):
+        synced = _make_cloned_repo(tmp_path, 'aaa-synced')
+        behind = _make_cloned_repo(tmp_path, 'zzz-behind')
+        # Move zzz-behind behind its remote via a second clone push.
+        second = tmp_path / 'second'
+        subprocess.run(['git', 'clone', str(tmp_path / 'zzz-behind.git'), str(second)], capture_output=True)
+        _git(second, 'config', 'user.email', 't@t.com')
+        _git(second, 'config', 'user.name', 'T')
+        (second / 'x.txt').write_text('x\n')
+        _git(second, 'add', '.')
+        _git(second, 'commit', '-m', 'ahead')
+        _git(second, 'push')
+        config = _config_for([synced, behind])
+        reports = gather_reports(config, ToolConfig(default_policy='observe'), jitter=0.0)
+        # Even though 'aaa' < 'zzz' by path, severity dominates: synced first, behind (warning) last.
+        assert reports[0].name == 'aaa-synced'
+        assert reports[-1].name == 'zzz-behind'
 
     def test_all_repos_processed_concurrently(self, tmp_path, capsys):
         paths = [_make_cloned_repo(tmp_path, f'repo{i}') for i in range(5)]
