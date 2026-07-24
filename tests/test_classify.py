@@ -193,3 +193,49 @@ class TestClassifyRepoRemediation:
         classify_repo(repo, BUILTIN_POLICIES['standard'])
         # After set-head --auto, default resolves to the real default (main), never 'master'.
         assert repo.default_branch == 'main'
+
+    def test_original_master_incident_end_to_end(self, cloned_repo, tmp_path):
+        """L5 regression — the 2026-07 incident that motivated this feature.
+
+        A clone is left on a local `master` tracking `origin/master`; the remote's `master`
+        was renamed away (deleted) so `origin/master` is stale, `origin/HEAD` still points at
+        it, `origin/main` is ahead, and an untracked file is present. The old logic resolved
+        the default to `master`, compared master↔origin/master (both frozen), and reported a
+        false "synced". Assert classify_repo now (a) prunes the stale ref and repoints
+        origin/HEAD, (b) resolves the real default, (c) surfaces the orphaned master as GONE.
+        """
+        # Local master tracking origin/master; origin/HEAD points at master (pre-rename default).
+        _git(cloned_repo, 'checkout', '-b', 'master')
+        _git(cloned_repo, 'push', '-u', 'origin', 'master')
+        _git(cloned_repo, 'remote', 'set-head', 'origin', 'master')
+
+        # A second clone advances origin/main and deletes master on the remote, so THIS clone's
+        # origin/master stays stale until it prunes (deleting via this clone would clean it now).
+        second = tmp_path / 'second'
+        subprocess.run(['git', 'clone', '-b', 'main', str(tmp_path / 'remote.git'), str(second)], capture_output=True)
+        _git(second, 'config', 'user.email', 'test@test.com')
+        _git(second, 'config', 'user.name', 'Test')
+        _commit(second, 'ahead.txt', 'ahead on main')
+        _git(second, 'push')
+        _git(second, 'push', 'origin', '--delete', 'master')
+
+        # Clone left on master with an untracked file.
+        (cloned_repo / 'uv.lock').write_text('lock\n')
+        _git(cloned_repo, 'checkout', 'master')
+        repo = _make_repo(cloned_repo)
+
+        # Precondition: the stale ref and stale origin/HEAD are present before remediation.
+        assert repo._git('rev-parse', '--verify', 'refs/remotes/origin/master').returncode == 0
+        assert repo._git('symbolic-ref', 'refs/remotes/origin/HEAD').stdout.strip().endswith('origin/master')
+
+        states = classify_repo(repo, BUILTIN_POLICIES['standard'])
+
+        # (a) stale ref pruned
+        assert repo._git('rev-parse', '--verify', 'refs/remotes/origin/master').returncode != 0
+        # (b) real default resolved (never the stale master)
+        assert repo.default_branch == 'main'
+        # (c) orphaned master surfaced as GONE, and main is behind — not a false "synced"
+        by_branch = {state.branch: state for state in states}
+        assert by_branch['master'].primary == PrimaryState.GONE
+        assert by_branch['main'].primary == PrimaryState.BEHIND
+        assert by_branch['main'].is_default is True
