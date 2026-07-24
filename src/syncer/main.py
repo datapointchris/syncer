@@ -41,11 +41,11 @@ def main(
     policy: Annotated[str | None, typer.Option('--policy', '-p', help='Override the resolved policy for every repo')] = None,
     jobs: Annotated[int, typer.Option('--jobs', '-j', help='Max repos to process concurrently')] = DEFAULT_JOBS,
 ) -> None:
-    """Syncer — check if local git repos are fully synced across all branches.
+    """Check whether local git repos are synced, across every branch.
 
-    Report-only by default; --apply executes each policy's safe actions. Repos are processed
-    concurrently and rendered least-to-most urgent, so anything needing attention lands at the
-    bottom nearest the prompt.
+    Running `syncer` with no command reports the state of every repo (read-only).
+    Add --apply to execute each policy's safe actions. Repos are checked concurrently
+    and shown least-to-most urgent, so anything needing attention sits nearest the prompt.
     """
     ctx.ensure_object(dict)
     ctx.obj['dry_run'] = dry_run
@@ -56,9 +56,30 @@ def main(
         run_sync(syncer_config, tool_config, cli_policy=policy, apply=apply and not dry_run, jobs=jobs)
 
 
-@app.command()
+@app.command(rich_help_panel='Sync')
+def branches(
+    policy: Annotated[str | None, typer.Option('--policy', '-p', help='Override the resolved policy for every repo')] = None,
+    apply: Annotated[bool, typer.Option('--apply', help='Execute the decided action per branch (safe actions only)')] = False,
+    jobs: Annotated[int, typer.Option('--jobs', '-j', help='Max repos to process concurrently')] = DEFAULT_JOBS,
+) -> None:
+    """Per-branch report only — like the default run without lifecycle, cloning, or history.
+
+    Classifies every local branch (ahead/behind/gone/no-upstream/…) and shows the action the
+    resolved policy would take. Read-only by default; --apply executes it, enforcing the hard
+    safety invariants (never force, never touch a dirty tree, refuse rather than force).
+    """
+    syncer_config = resolve_config()
+    tool_config = load_tool_config()
+    report_branches(syncer_config, tool_config, cli_policy=policy, apply=apply, jobs=jobs)
+
+
+@app.command(rich_help_panel='Inspect')
 def issues() -> None:
-    """Report config vs filesystem issues. Does not modify repos.json."""
+    """Flag repos that moved, went missing, aren't tracked, or still default to master.
+
+    Compares repos.json against the filesystem and search_paths. Read-only — never writes
+    repos.json; fix the reported paths yourself.
+    """
     syncer_config = resolve_config()
     search_paths = [Path(p).expanduser() for p in syncer_config.search_paths]
     claimed_paths = {Path(rc.path).expanduser() for rc in syncer_config.repos}
@@ -115,38 +136,21 @@ def issues() -> None:
         console.print(f'[yellow] {issues_found} issue(s) found.[/yellow]')
 
 
-@app.command()
-def branches(
-    policy: Annotated[str | None, typer.Option('--policy', '-p', help='Override the resolved policy for every repo')] = None,
-    apply: Annotated[bool, typer.Option('--apply', help='Execute the decided action per branch (safe actions only)')] = False,
-    jobs: Annotated[int, typer.Option('--jobs', '-j', help='Max repos to process concurrently')] = DEFAULT_JOBS,
-) -> None:
-    """Per-branch sync report across all local branches.
-
-    Repos are processed concurrently. Read-only by default; --apply executes each policy's
-    decided action, enforcing the hard safety invariants (never force, never touch a dirty
-    tree, refuse rather than force).
-    """
-    syncer_config = resolve_config()
-    tool_config = load_tool_config()
-    report_branches(syncer_config, tool_config, cli_policy=policy, apply=apply, jobs=jobs)
-
-
-@app.command()
+@app.command(rich_help_panel='Inspect')
 def stats(ctx: typer.Context) -> None:
-    """Show sync statistics and repo insights."""
+    """Show run history and repo insights: sync summary, commits, age, dirty and stale repos."""
     syncer_config = resolve_config()
     show_stats(syncer_config)
 
 
-@app.command()
+@app.command(rich_help_panel='Manage')
 def version() -> None:
     """Print the installed version of syncer."""
     v = importlib.metadata.version('syncer')
     console.print(f'syncer {v}')
 
 
-@app.command()
+@app.command(rich_help_panel='Manage')
 def update() -> None:
     """Update syncer to the latest GitHub release."""
     result = subprocess.run(  # nosec B607
@@ -204,9 +208,9 @@ def fetch_github_changes(owner: str, repo: str, from_ref: str, to_ref: str) -> l
     return subjects
 
 
-@app.command()
+@app.command(rich_help_panel='Manage')
 def init() -> None:
-    """Create the syncer tool config if it doesn't exist."""
+    """Create the syncer tool config (~/.config/syncer/config.toml) if it doesn't exist."""
     if TOOL_CONFIG_PATH.exists():
         console.print(f'[red]Config already exists: {TOOL_CONFIG_PATH}[/red]')
         sys.exit(1)
@@ -307,9 +311,9 @@ def _setup_demo_repos(base: Path) -> SyncerConfig:
     )
 
 
-@app.command()
+@app.command(rich_help_panel='Examples')
 def demo() -> None:
-    """Run sync against real temp repos to show each status state."""
+    """Run a full sync against throwaway temp repos to show every status state."""
     tmp = Path(tempfile.mkdtemp(prefix='syncer-demo-'))
     try:
         config = _setup_demo_repos(tmp)
