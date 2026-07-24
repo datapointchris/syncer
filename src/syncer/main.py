@@ -15,7 +15,9 @@ from rich.console import Console
 from syncer.config import TOOL_CONFIG_PATH
 from syncer.config import RepoConfig
 from syncer.config import SyncerConfig
+from syncer.config import load_tool_config
 from syncer.config import resolve_config
+from syncer.report import report_branches
 from syncer.repos import ICON_MOVE
 from syncer.repos import ICON_WARN
 from syncer.repos import Repo
@@ -99,6 +101,16 @@ def issues() -> None:
         console.print('[blue] All repos healthy.[/blue]')
     else:
         console.print(f'[yellow] {issues_found} issue(s) found.[/yellow]')
+
+
+@app.command()
+def branches(
+    policy: Annotated[str | None, typer.Option('--policy', '-p', help='Override the resolved policy for every repo')] = None,
+) -> None:
+    """Per-branch sync report across all local branches (read-only, no mutation)."""
+    syncer_config = resolve_config()
+    tool_config = load_tool_config()
+    report_branches(syncer_config, tool_config, cli_policy=policy)
 
 
 @app.command()

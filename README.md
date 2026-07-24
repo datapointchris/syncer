@@ -25,6 +25,8 @@ syncer                  # sync all repos (auto-detects config)
 syncer --dry-run        # show what would happen without making changes
 syncer --config name    # use a specific config
 syncer issues            # report path mismatches, missing/untracked repos, master branches
+syncer branches          # per-branch sync report across all local branches (read-only)
+syncer branches -p observe  # override the resolved policy for the report
 syncer demo             # run against temp repos to show each status state
 syncer version          # print installed version
 syncer init name        # create a template config file
@@ -54,3 +56,25 @@ The repo registry is a JSON file listing all repos:
 Each repo has a `status` field: `active` (default), `dormant`, or `retired`. Retired repos are skipped during sync.
 
 `search_paths` are used by `syncer issues` to find repos that moved or aren't tracked in the config. The repo registry is the source of truth — syncer never writes to it.
+
+## Sync policies
+
+`syncer branches` classifies every branch (per-branch `ahead`/`behind`/`gone`/`no_upstream`/…, computed after `fetch --prune` and repointing `origin/HEAD`) and reports the action a policy *would* take. Policies are **machine-local** and live in `config.toml`, so the same repo can sync aggressively on an always-on box and report-only on a laptop.
+
+Three policies are built in: `standard` (default-branch auto-sync, feature branches report-only), `observe` (report everything, mutate nothing), and `mirror` (auto everything safe, opt-in). Define your own under `[policies.<name>]` with a `scope` (`default`/`current`/`tracked`/`all`) and a rule table keyed by `<selector>:<state>`:
+
+```toml
+default_policy = "standard"
+
+[policies.laptop]
+scope = "all"
+fallback = "report"
+[policies.laptop.rules]
+"default:behind" = "pull_ff"
+"*:behind"       = "ff_ref"    # advance non-current branch refs, no checkout
+
+[repo_overrides]
+"some-shared-repo" = "observe"   # per-repo, per-machine
+```
+
+Policy per repo resolves in order: CLI `--policy` → machine `repo_overrides` → optional `sync_policy` hint in `repos.json` → machine `default_policy` → built-in `standard`. See `.planning/sync-policy-design.md` for the full state taxonomy, action catalog, and safety invariants.

@@ -9,6 +9,9 @@ from typing import Literal
 from pydantic import BaseModel
 from rich.console import Console
 
+from syncer.policy import BUILTIN_POLICIES
+from syncer.policy import Policy
+
 TOOL_CONFIG_PATH = Path.home() / '.config' / 'syncer' / 'config.toml'
 DATA_DIR = Path.home() / '.local' / 'share' / 'syncer'
 
@@ -24,6 +27,10 @@ class RepoConfig(BaseModel):
     status: Literal['active', 'dormant', 'retired'] = 'active'
     description: str | None = None
     owner: str | None = None
+    # Weak, portable policy hint. Sits at precedence level 3 — below the CLI flag and
+    # machine-local repo_overrides, above the machine default_policy. The one
+    # policy-adjacent field allowed in the otherwise pure identity registry.
+    sync_policy: str | None = None
 
 
 class SyncerConfig(BaseModel):
@@ -31,6 +38,19 @@ class SyncerConfig(BaseModel):
     host: str
     search_paths: list[str] = []
     repos: list[RepoConfig]
+
+
+class ToolConfig(BaseModel):
+    """Machine-local tool config from ~/.config/syncer/config.toml.
+
+    Policies live here (never in repos.json) because they are per-machine: the same
+    repo can sync aggressively on an always-on box and report-only on a laptop.
+    """
+
+    repos_file: str | None = None
+    default_policy: str = 'standard'
+    policies: dict[str, Policy] = {}
+    repo_overrides: dict[str, str] = {}
 
 
 def _load_repos_file(path: Path) -> SyncerConfig:
@@ -44,13 +64,51 @@ def _load_repos_file(path: Path) -> SyncerConfig:
     return config
 
 
+def load_tool_config() -> ToolConfig:
+    """Load the machine-local tool config, injecting each policy's name from its table key.
+
+    Returns an empty ToolConfig when no config file exists. Malformed policies (unknown
+    action names, bad scope, invalid rule keys) raise loudly via pydantic validation.
+    """
+    if not TOOL_CONFIG_PATH.exists():
+        return ToolConfig()
+    raw = tomllib.loads(TOOL_CONFIG_PATH.read_text())
+    policies = {name: Policy(name=name, **body) for name, body in raw.get('policies', {}).items()}
+    return ToolConfig(
+        repos_file=raw.get('repos_file'),
+        default_policy=raw.get('default_policy', 'standard'),
+        policies=policies,
+        repo_overrides=raw.get('repo_overrides', {}),
+    )
+
+
+def resolve_policies(tool_config: ToolConfig) -> dict[str, Policy]:
+    """Built-in policies overlaid with any user-defined policies of the same name."""
+    merged = dict(BUILTIN_POLICIES)
+    merged.update(tool_config.policies)
+    return merged
+
+
+def resolve_policy_name(repo_config: RepoConfig, tool_config: ToolConfig, cli_policy: str | None = None) -> str:
+    """Resolve which policy applies to a repo (first hit wins):
+
+    1. CLI --policy   2. machine repo_overrides   3. repos.json sync_policy hint
+    4. machine default_policy   5. built-in 'standard'
+    """
+    if cli_policy:
+        return cli_policy
+    if repo_config.name in tool_config.repo_overrides:
+        return tool_config.repo_overrides[repo_config.name]
+    if repo_config.sync_policy:
+        return repo_config.sync_policy
+    return tool_config.default_policy or 'standard'
+
+
 def get_repos_file_path() -> Path:
     """Resolve the repos file path from the tool config or legacy fallback."""
-    if TOOL_CONFIG_PATH.exists():
-        tool_config = tomllib.loads(TOOL_CONFIG_PATH.read_text())
-        repos_file = tool_config.get('repos_file')
-        if repos_file:
-            return Path(repos_file).expanduser()
+    tool_config = load_tool_config()
+    if tool_config.repos_file:
+        return Path(tool_config.repos_file).expanduser()
 
     # Legacy fallback: look for JSON files in ~/.config/syncer/
     legacy_files = list(_LEGACY_CONFIG_DIR.glob('*.json')) if _LEGACY_CONFIG_DIR.exists() else []

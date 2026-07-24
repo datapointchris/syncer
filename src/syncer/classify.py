@@ -1,0 +1,110 @@
+"""Impure half of the pipeline: turn real git state into BranchState objects.
+
+classify_repo() runs the read-side remediation the design calls for — fetch --prune
+plus `git remote set-head origin --auto` — so a renamed default resolves correctly and
+stale remote-tracking refs are gone before anything is classified. It performs no
+mutation of local branches; that is execute()'s job (a later slice).
+"""
+
+from __future__ import annotations
+
+from syncer.policy import BranchState
+from syncer.policy import Policy
+from syncer.policy import PrimaryState
+from syncer.policy import Scope
+from syncer.repos import Repo
+
+
+def _primary_from_counts(ahead: int, behind: int) -> PrimaryState:
+    if ahead == behind == 0:
+        return PrimaryState.SYNCED
+    if behind == 0:
+        return PrimaryState.AHEAD
+    if ahead == 0:
+        return PrimaryState.BEHIND
+    return PrimaryState.DIVERGED
+
+
+def classify_branch(
+    repo: Repo,
+    branch: str,
+    *,
+    default: str | None,
+    current: str,
+    dirty_current: bool,
+    stashed: bool,
+) -> BranchState:
+    is_current = branch == current
+    is_default = branch == default
+    # dirty only gates the *current* branch — a non-current branch's tree isn't checked out.
+    dirty = dirty_current and is_current
+    upstream_short, gone = repo.branch_upstream(branch)
+
+    ahead = 0
+    behind = 0
+    merged_into_default = False
+    if not upstream_short:
+        primary = PrimaryState.NO_UPSTREAM
+    elif gone:
+        primary = PrimaryState.GONE
+        if default:
+            merged_into_default = repo.is_merged_into(branch, default)
+    else:
+        ahead, behind = repo.ahead_behind(branch, upstream_short)
+        primary = _primary_from_counts(ahead, behind)
+
+    return BranchState(
+        branch=branch,
+        primary=primary,
+        ahead=ahead,
+        behind=behind,
+        is_current=is_current,
+        is_default=is_default,
+        dirty=dirty,
+        stashed=stashed,
+        upstream=upstream_short or None,
+        merged_into_default=merged_into_default,
+    )
+
+
+def _branches_in_scope(repo: Repo, scope: Scope, default: str | None, current: str, detached: bool) -> list[str]:
+    if scope == Scope.DEFAULT:
+        return [default] if default else []
+    if scope == Scope.CURRENT:
+        return [] if detached else [current]
+    if scope == Scope.TRACKED:
+        return [branch for branch in repo.local_branches() if repo.branch_upstream(branch)[0]]
+    return repo.local_branches()
+
+
+def classify_repo(repo: Repo, policy: Policy) -> list[BranchState]:
+    """Classify every branch the policy's scope selects, after prune + set-head."""
+    if policy.prune:
+        repo.fetch_prune()
+    else:
+        repo.fetch()
+    repo.set_head_auto()
+
+    default = repo.default_branch
+    current = repo.current_branch
+    detached = current == 'HEAD'
+    dirty_current = bool(repo.uncommitted_changes)
+    stashed = repo.stash_count > 0
+
+    states = [
+        classify_branch(repo, branch, default=default, current=current, dirty_current=dirty_current, stashed=stashed)
+        for branch in _branches_in_scope(repo, policy.scope, default, current, detached)
+    ]
+
+    if detached and policy.scope in (Scope.CURRENT, Scope.ALL):
+        states.append(
+            BranchState(
+                branch='(detached)',
+                primary=PrimaryState.DETACHED,
+                is_current=True,
+                dirty=dirty_current,
+                stashed=stashed,
+            )
+        )
+
+    return states

@@ -96,9 +96,49 @@ class Repo:
         return None
 
     @property
+    def is_detached(self) -> bool:
+        return self.current_branch == 'HEAD'
+
+    @property
     def uncommitted_changes(self) -> list[str]:
         result = self._git('status', '--porcelain')
         return [line for line in result.stdout.strip().splitlines() if line]
+
+    def local_branches(self) -> list[str]:
+        result = self._git('for-each-ref', '--format=%(refname:short)', 'refs/heads/')
+        if result.returncode != 0:
+            return []
+        return [line for line in result.stdout.splitlines() if line]
+
+    def branch_upstream(self, branch: str) -> tuple[str, bool]:
+        """Return (upstream_short, is_gone) for a branch.
+
+        upstream_short is '' when the branch has no tracking config (NO_UPSTREAM).
+        is_gone is True when the tracking config exists but the remote branch was
+        deleted (post-prune) — git reports this as an '[gone]' upstream:track.
+        """
+        result = self._git('for-each-ref', '--format=%(upstream:short)%09%(upstream:track)', f'refs/heads/{branch}')
+        if result.returncode != 0 or not result.stdout.strip():
+            return '', False
+        upstream_short, _, track = result.stdout.rstrip('\n').partition('\t')
+        return upstream_short, track.strip() == '[gone]'
+
+    def ahead_behind(self, branch: str, upstream: str) -> tuple[int, int]:
+        """Return (ahead, behind) commit counts of `branch` relative to `upstream`."""
+        result = self._git('rev-list', '--left-right', '--count', f'{branch}...{upstream}')
+        if result.returncode != 0:
+            return 0, 0
+        parts = result.stdout.split()
+        if len(parts) != 2:
+            return 0, 0
+        return int(parts[0]), int(parts[1])
+
+    def is_merged_into(self, branch: str, target: str) -> bool:
+        """True if `branch` is an ancestor of `target` (prefer origin/<target> if present)."""
+        ref = f'origin/{target}'
+        if self._git('rev-parse', '--verify', ref).returncode != 0:
+            ref = target
+        return self._git('merge-base', '--is-ancestor', branch, ref).returncode == 0
 
     @property
     def unpushed_commits(self) -> int:
@@ -171,6 +211,17 @@ class Repo:
     def fetch(self) -> bool:
         result = self._git('fetch', '--quiet')
         return result.returncode == 0
+
+    def fetch_prune(self) -> bool:
+        result = self._git('fetch', '--prune', '--quiet')
+        return result.returncode == 0
+
+    def set_head_auto(self) -> None:
+        """Repoint origin/HEAD to the remote's real default (fixes stale ref after a
+        default-branch rename). No-op when there's no remote."""
+        if not self.has_remote:
+            return
+        self._git('remote', 'set-head', 'origin', '--auto')
 
     def pull(self) -> bool:
         result = self._git('pull', '--ff-only')

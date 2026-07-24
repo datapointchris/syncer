@@ -4,9 +4,15 @@ import pytest
 
 from syncer.config import RepoConfig
 from syncer.config import SyncerConfig
+from syncer.config import ToolConfig
 from syncer.config import _load_repos_file
 from syncer.config import get_repos_file_path
+from syncer.config import load_tool_config
 from syncer.config import resolve_config
+from syncer.config import resolve_policies
+from syncer.config import resolve_policy_name
+from syncer.policy import Action
+from syncer.policy import Scope
 
 
 @pytest.fixture
@@ -60,6 +66,95 @@ class TestRepoConfig:
     def test_invalid_status_rejected(self):
         with pytest.raises(ValueError):
             RepoConfig(name='test', path='~/code/test', status='invalid')
+
+    def test_sync_policy_defaults_to_none(self):
+        repo = RepoConfig(name='test', path='~/code/test')
+        assert repo.sync_policy is None
+
+    def test_sync_policy_hint(self):
+        repo = RepoConfig(name='test', path='~/code/test', sync_policy='observe')
+        assert repo.sync_policy == 'observe'
+
+
+class TestLoadToolConfig:
+    def test_missing_config_returns_defaults(self, tool_config):
+        # tool_config fixture monkeypatches the path but doesn't write it
+        loaded = load_tool_config()
+        assert loaded.repos_file is None
+        assert loaded.default_policy == 'standard'
+        assert loaded.policies == {}
+
+    def test_parses_repos_file_and_default_policy(self, tool_config):
+        tool_config.write_text('repos_file = "~/dev/repos.json"\ndefault_policy = "observe"\n')
+        loaded = load_tool_config()
+        assert loaded.repos_file == '~/dev/repos.json'
+        assert loaded.default_policy == 'observe'
+
+    def test_parses_custom_policy_with_injected_name(self, tool_config):
+        tool_config.write_text(
+            'default_policy = "laptop"\n'
+            '[policies.laptop]\n'
+            'scope = "all"\n'
+            'prune = true\n'
+            'fallback = "report"\n'
+            '[policies.laptop.rules]\n'
+            '"default:behind" = "pull_ff"\n'
+        )
+        loaded = load_tool_config()
+        policy = loaded.policies['laptop']
+        assert policy.name == 'laptop'
+        assert policy.scope == Scope.ALL
+        assert policy.rules['default:behind'] == 'pull_ff'
+
+    def test_invalid_policy_action_fails_loudly(self, tool_config):
+        tool_config.write_text('[policies.bad]\n[policies.bad.rules]\n"default:behind" = "nuke"\n')
+        with pytest.raises(ValueError, match='unknown action'):
+            load_tool_config()
+
+    def test_parses_repo_overrides(self, tool_config):
+        tool_config.write_text('[repo_overrides]\n"shared-repo" = "observe"\n')
+        loaded = load_tool_config()
+        assert loaded.repo_overrides == {'shared-repo': 'observe'}
+
+
+class TestResolvePolicies:
+    def test_builtins_available_with_no_user_policies(self):
+        merged = resolve_policies(ToolConfig())
+        assert set(merged) >= {'standard', 'observe', 'mirror'}
+
+    def test_user_policy_overrides_builtin_by_name(self, tool_config):
+        tool_config.write_text('[policies.standard]\nscope = "all"\nfallback = "skip"\n')
+        merged = resolve_policies(load_tool_config())
+        assert merged['standard'].scope == Scope.ALL
+        assert merged['standard'].fallback == Action.SKIP
+
+
+class TestResolvePolicyName:
+    def _repo(self, **kwargs):
+        return RepoConfig(name='myrepo', path='~/code/myrepo', **kwargs)
+
+    def test_cli_flag_wins(self):
+        tc = ToolConfig(default_policy='standard', repo_overrides={'myrepo': 'observe'})
+        repo = self._repo(sync_policy='mirror')
+        assert resolve_policy_name(repo, tc, cli_policy='standard') == 'standard'
+
+    def test_repo_override_beats_hint_and_default(self):
+        tc = ToolConfig(default_policy='standard', repo_overrides={'myrepo': 'observe'})
+        repo = self._repo(sync_policy='mirror')
+        assert resolve_policy_name(repo, tc) == 'observe'
+
+    def test_repos_json_hint_beats_default(self):
+        tc = ToolConfig(default_policy='standard')
+        repo = self._repo(sync_policy='mirror')
+        assert resolve_policy_name(repo, tc) == 'mirror'
+
+    def test_machine_default_used_when_no_hint(self):
+        tc = ToolConfig(default_policy='observe')
+        assert resolve_policy_name(self._repo(), tc) == 'observe'
+
+    def test_falls_back_to_standard(self):
+        tc = ToolConfig(default_policy='')
+        assert resolve_policy_name(self._repo(), tc) == 'standard'
 
 
 class TestSyncerConfig:
