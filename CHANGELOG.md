@@ -1,6 +1,42 @@
 # CHANGELOG
 
 
+## v4.1.0 (2026-07-25)
+
+### Documentation
+
+- Correct init usage, add stats, add repo CLAUDE.md
+  ([`b883d44`](https://github.com/datapointchris/syncer/commit/b883d44ea91417da9d5075b015c3dff24aa1f2c1))
+
+Fix the stale 'syncer init name' example (init takes no arg and writes ~/.config/syncer/config.toml)
+  and add the missing 'syncer stats' entry to the usage list. Add a CLAUDE.md documenting the
+  pure/impure pipeline split, the two-file config model, and the execute-time safety invariants.
+
+### Features
+
+- Treat each repo registry as a separate set
+  ([`2231148`](https://github.com/datapointchris/syncer/commit/2231148612b1e503854799dd82a19822392df838))
+
+Moving the twenty exemplar clones out of repos.json into their own registry stopped anything from
+  pulling them, and nothing said so. Three gaps combined to hide it.
+
+--repos-file/-c did not exist: the registry came only from config.toml, so a second registry could
+  not be run at all. `owner` and `host` were required, but an all-third-party registry has no single
+  owner — each clone names its own.
+
+The untracked scan only looked at direct children of each search path, so every repo one level
+  deeper was invisible to it: ~/code/refs, ~/code/python-projects, ~/code/sql, ~/code/zmk. That
+  check exists precisely to catch repos falling out of a registry, and it stayed silent while twenty
+  did. It now recurses, matches on resolved path rather than name, and stops descending at a repo.
+
+Recursing surfaced repos that are deliberately unregistered, so a registry can now disclaim a
+  subtree with `exclude_paths`: ~/code/refs belongs to the exemplar registry, ~/code/1904labs to no
+  personal registry at all.
+
+The `using master` check now applies only to repos we own. Upstream's default branch is not
+  something we can act on, so every exemplar clone would have reported it forever.
+
+
 ## v4.0.0 (2026-07-24)
 
 ### Chores
