@@ -4,6 +4,7 @@ import json
 import sys
 import tomllib
 from pathlib import Path
+from typing import Any
 from typing import Literal
 
 from pydantic import BaseModel
@@ -29,8 +30,13 @@ class RepoConfig(BaseModel):
     owner: str | None = None
     # Weak, portable policy hint. Sits at precedence level 3 — below the CLI flag and
     # machine-local repo_overrides, above the machine default_policy. The one
-    # policy-adjacent field allowed in the otherwise pure identity registry.
+    # policy-adjacent field in the registry — syncer reads nothing else here.
     sync_policy: str | None = None
+    # Declared build surface (components, sql_dialect), owned and consumed by forge.
+    # syncer neither reads nor validates the shape; it is modelled only so the
+    # registry schema documents what is actually in the file. Kept as a dict so
+    # forge can extend it without touching syncer.
+    toolchain: dict[str, Any] | None = None
 
 
 class SyncerConfig(BaseModel):

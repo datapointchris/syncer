@@ -64,9 +64,18 @@ that re-checks its own preconditions live. Never add an unsafe primitive to the 
 
 - **`repos.json`** (default `~/dev/repos.json`, path set in `config.toml`) — the repo **identity
   registry**: `owner`, `host`, `search_paths`, `exclude_paths`, and per-repo `{name, path, status,
-  description, owner?, sync_policy?}`. Portable across machines. **syncer never writes to it** —
-  it's shared infrastructure (also read by `forge` and `indy`). `issues` reports drift but tells
-  you to fix paths by hand.
+  description, owner?, sync_policy?, toolchain?}`. Portable across machines. **syncer never writes
+  to it** — it's shared infrastructure (also read by `forge` and `indy`). `issues` reports drift but
+  tells you to fix paths by hand.
+
+  **It is no longer purely identity.** `toolchain` declares a repo's build surface — `components`
+  (a `stack` and the `dir` it lives in) and `sql_dialect` — and is owned entirely by forge, which
+  generates pre-commit configs and CI workflows from it. syncer models it as an opaque dict and
+  never reads it. It lives here rather than in a forge-local file because a separate file would have
+  to be keyed by repo name, and repo names are not unique across registries — that exact join
+  already misattributed one repo's planning docs to another. Attaching the data to the entry avoids
+  the join. Anything added here must be a **portable fact about the repo itself**, never
+  machine-local state; that still belongs in `config.toml`.
 
   **A registry is a self-contained set.** `--repos-file/-c` swaps the entire working set; it never
   merges with the default. `owner` and `host` are optional so an all-third-party registry works —
