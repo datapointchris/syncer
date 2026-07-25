@@ -34,9 +34,19 @@ class RepoConfig(BaseModel):
 
 
 class SyncerConfig(BaseModel):
-    owner: str
-    host: str
+    # Fallback owner for repos that don't name their own. Optional because a
+    # registry can be entirely third-party — the exemplar clones each carry their
+    # own upstream owner, so there is no single owner for the file.
+    owner: str = ''
+    host: str = 'https://github.com'
+    # Directories to scan for repos that exist on disk but aren't registered.
+    # A registry that isn't a claim over any directory leaves this empty.
     search_paths: list[str] = []
+    # Subtrees inside search_paths that this registry explicitly does not claim,
+    # so they are never reported as untracked. Registries are separate sets: the
+    # exemplar clones under ~/code/refs belong to exemplar-repos.json, and work
+    # repos belong to no personal registry at all.
+    exclude_paths: list[str] = []
     repos: list[RepoConfig]
 
 
@@ -104,8 +114,10 @@ def resolve_policy_name(repo_config: RepoConfig, tool_config: ToolConfig, cli_po
     return tool_config.default_policy or 'standard'
 
 
-def get_repos_file_path() -> Path:
-    """Resolve the repos file path from the tool config or legacy fallback."""
+def get_repos_file_path(override: Path | None = None) -> Path:
+    """Resolve the repos file path: explicit override, then tool config, then legacy."""
+    if override is not None:
+        return override.expanduser()
     tool_config = load_tool_config()
     if tool_config.repos_file:
         return Path(tool_config.repos_file).expanduser()
@@ -123,6 +135,7 @@ def get_repos_file_path() -> Path:
     sys.exit(1)
 
 
-def resolve_config() -> SyncerConfig:
-    repos_file = get_repos_file_path()
-    return _load_repos_file(repos_file)
+def resolve_config(repos_file: Path | None = None) -> SyncerConfig:
+    """Load a repo registry. Each registry is a self-contained set of repos: passing
+    a different file swaps the whole working set, it does not merge with the default."""
+    return _load_repos_file(get_repos_file_path(repos_file))

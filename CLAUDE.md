@@ -63,9 +63,20 @@ that re-checks its own preconditions live. Never add an unsafe primitive to the 
 ## Config: two files, deliberately split
 
 - **`repos.json`** (default `~/dev/repos.json`, path set in `config.toml`) — the repo **identity
-  registry**: `owner`, `host`, `search_paths`, and per-repo `{name, path, status, description,
-  owner?, sync_policy?}`. Portable across machines. **syncer never writes to it** — it's shared
-  infrastructure (also read by `forge`). `issues` reports drift but tells you to fix paths by hand.
+  registry**: `owner`, `host`, `search_paths`, `exclude_paths`, and per-repo `{name, path, status,
+  description, owner?, sync_policy?}`. Portable across machines. **syncer never writes to it** —
+  it's shared infrastructure (also read by `forge` and `indy`). `issues` reports drift but tells
+  you to fix paths by hand.
+
+  **A registry is a self-contained set.** `--repos-file/-c` swaps the entire working set; it never
+  merges with the default. `owner` and `host` are optional so an all-third-party registry works —
+  `~/dev/exemplar-repos.json` holds twenty upstream clones that each name their own owner. Repos
+  whose owner isn't the registry owner are treated as not ours: the `using master` check is skipped
+  for them, because upstream's default branch is not something we can act on.
+
+  `exclude_paths` lets a registry disclaim a subtree inside its own `search_paths`, so the subtree
+  is never reported as untracked. `~/code/refs` belongs to the exemplar registry and `~/code/1904labs`
+  belongs to no personal registry at all.
 - **`config.toml`** (`~/.config/syncer/config.toml`) — **machine-local** tool config: `repos_file`
   pointer, `default_policy`, custom `[policies.*]`, and `[repo_overrides]`.
 

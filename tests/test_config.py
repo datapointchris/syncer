@@ -229,3 +229,44 @@ class TestResolveConfig:
         tool_config.write_text(f'repos_file = "{repos_file}"\n')
         config = resolve_config()
         assert config.owner == 'testuser'
+
+
+class TestRegistryIndependence:
+    """A registry is a self-contained set: a different file swaps the whole working
+    set rather than merging with the default."""
+
+    def test_owner_and_host_are_optional(self):
+        """An all-third-party registry has no single owner — every repo names its own."""
+        config = SyncerConfig.model_validate({'repos': [{'name': 'bubbletea', 'path': '~/code/refs/bubbletea', 'owner': 'charmbracelet'}]})
+        assert config.owner == ''
+        assert config.host == 'https://github.com'
+        assert config.repos[0].owner == 'charmbracelet'
+
+    def test_search_and_exclude_paths_default_empty(self):
+        """A registry that claims no directory scans nothing and excludes nothing."""
+        config = SyncerConfig.model_validate({'owner': 'me', 'host': 'https://github.com', 'repos': []})
+        assert config.search_paths == []
+        assert config.exclude_paths == []
+
+    def test_exclude_paths_round_trip(self):
+        config = SyncerConfig.model_validate({'owner': 'me', 'host': 'https://github.com', 'exclude_paths': ['~/code/refs'], 'repos': []})
+        assert config.exclude_paths == ['~/code/refs']
+
+    def test_unknown_fields_are_ignored(self):
+        """The exemplar registry carries fields syncer has no use for."""
+        config = SyncerConfig.model_validate(
+            {
+                'purpose': 'read, not worked in',
+                'clone_root': '~/code/refs',
+                'repos': [
+                    {
+                        'name': 'chi',
+                        'path': '~/code/refs/chi',
+                        'owner': 'go-chi',
+                        'exemplary_for': 'middleware composition',
+                        'index_exclude': ['testdata/**'],
+                    }
+                ],
+            }
+        )
+        assert config.repos[0].name == 'chi'

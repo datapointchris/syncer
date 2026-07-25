@@ -55,6 +55,10 @@ def main(
     dry_run: Annotated[bool, typer.Option('--dry-run', '-n', help='Force report-only, even with --apply')] = False,
     policy: Annotated[str | None, typer.Option('--policy', '-p', help='Override the resolved policy for every repo')] = None,
     jobs: Annotated[int, typer.Option('--jobs', '-j', help='Max repos to process concurrently')] = DEFAULT_JOBS,
+    repos_file: Annotated[
+        Path | None,
+        typer.Option('--repos-file', '-c', help='Use a different repo registry; replaces the default set entirely'),
+    ] = None,
     version: Annotated[
         bool, typer.Option('--version', '-V', callback=_version_callback, is_eager=True, help='Show the installed version and exit')
     ] = False,
@@ -69,7 +73,7 @@ def main(
     ctx.obj['dry_run'] = dry_run
 
     if ctx.invoked_subcommand is None:
-        syncer_config = resolve_config()
+        syncer_config = resolve_config(repos_file)
         tool_config = load_tool_config()
         run_sync(syncer_config, tool_config, cli_policy=policy, apply=apply and not dry_run, jobs=jobs)
 
@@ -79,6 +83,10 @@ def branches(
     policy: Annotated[str | None, typer.Option('--policy', '-p', help='Override the resolved policy for every repo')] = None,
     apply: Annotated[bool, typer.Option('--apply', help='Execute the decided action per branch (safe actions only)')] = False,
     jobs: Annotated[int, typer.Option('--jobs', '-j', help='Max repos to process concurrently')] = DEFAULT_JOBS,
+    repos_file: Annotated[
+        Path | None,
+        typer.Option('--repos-file', '-c', help='Use a different repo registry; replaces the default set entirely'),
+    ] = None,
 ) -> None:
     """Per-branch report only — like the default run without lifecycle, cloning, or history.
 
@@ -86,19 +94,57 @@ def branches(
     resolved policy would take. Read-only by default; --apply executes it, enforcing the hard
     safety invariants (never force, never touch a dirty tree, refuse rather than force).
     """
-    syncer_config = resolve_config()
+    syncer_config = resolve_config(repos_file)
     tool_config = load_tool_config()
     report_branches(syncer_config, tool_config, cli_policy=policy, apply=apply, jobs=jobs)
 
 
+def find_untracked_repos(search_path: Path, known_paths: set[Path], excluded: set[Path] | None = None, max_depth: int = 3) -> list[Path]:
+    """Find git repos under search_path that no registry entry claims.
+
+    Recurses, because repos are routinely nested more than one level down
+    (~/code/python-projects/, ~/code/sql/, ~/code/refs/). Scanning only direct
+    children silently passed every one of those — which is exactly how twenty
+    reference clones dropped out of tracking without a word.
+
+    Matches on resolved path, not name: two repos can share a basename.
+    Descent stops at a repo, so nested worktrees and vendored checkouts are not
+    reported separately.
+    """
+    excluded = excluded or set()
+    if max_depth <= 0 or not search_path.is_dir() or search_path.resolve() in excluded:
+        return []
+
+    found: list[Path] = []
+    try:
+        entries = sorted(search_path.iterdir())
+    except PermissionError:
+        return []
+
+    for item in entries:
+        if not item.is_dir() or item.is_symlink() or item.name.startswith('.'):
+            continue
+        if (item / '.git').exists():
+            if item.resolve() not in known_paths:
+                found.append(item)
+            continue
+        found.extend(find_untracked_repos(item, known_paths, excluded, max_depth - 1))
+    return found
+
+
 @app.command(rich_help_panel='Inspect')
-def issues() -> None:
+def issues(
+    repos_file: Annotated[
+        Path | None,
+        typer.Option('--repos-file', '-c', help='Use a different repo registry; replaces the default set entirely'),
+    ] = None,
+) -> None:
     """Flag repos that moved, went missing, aren't tracked, or still default to master.
 
     Compares repos.json against the filesystem and search_paths. Read-only — never writes
     repos.json; fix the reported paths yourself.
     """
-    syncer_config = resolve_config()
+    syncer_config = resolve_config(repos_file)
     search_paths = [Path(p).expanduser() for p in syncer_config.search_paths]
     claimed_paths = {Path(rc.path).expanduser() for rc in syncer_config.repos}
 
@@ -127,7 +173,11 @@ def issues() -> None:
         owner = repo_config.owner or syncer_config.owner
         repo = Repo(name=repo_config.name, path=path, owner=owner, host=syncer_config.host)
 
-        if repo.default_branch == 'master':
+        # Only nag about master on repos we control. A third-party clone's default
+        # branch is upstream's decision — every exemplar clone would report it
+        # forever and there is nothing to do about any of them.
+        is_ours = bool(syncer_config.owner) and owner == syncer_config.owner
+        if is_ours and repo.default_branch == 'master':
             if repo.is_fork:
                 console.print(_status_line(ICON_WARN, label, 'using master (fork)', 'yellow', branch='master'))
             else:
@@ -136,16 +186,14 @@ def issues() -> None:
             console.print()
 
     # Check for untracked repos in search paths
-    known_names = {r.name for r in syncer_config.repos}
+    known_paths = {Path(r.path).expanduser().resolve() for r in syncer_config.repos}
+    excluded = {Path(p).expanduser().resolve() for p in syncer_config.exclude_paths}
     for search_path in search_paths:
-        if not search_path.exists():
-            continue
-        for item in search_path.iterdir():
-            if item.is_dir() and (item / '.git').is_dir() and item.name not in known_names:
-                item_path = str(item).replace(str(Path.home()), '~')
-                console.print(_status_line(ICON_WARN, item_path, 'untracked (not in repos.json)', 'yellow'))
-                console.print()
-                issues_found += 1
+        for found in find_untracked_repos(search_path, known_paths, excluded):
+            item_path = str(found).replace(str(Path.home()), '~')
+            console.print(_status_line(ICON_WARN, item_path, 'untracked (not in the registry)', 'yellow'))
+            console.print()
+            issues_found += 1
 
     console.print()
     if issues_found == 0:
