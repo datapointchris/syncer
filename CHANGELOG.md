@@ -1,6 +1,28 @@
 # CHANGELOG
 
 
+## v4.2.0 (2026-07-25)
+
+### Features
+
+- **config**: Model the toolchain field on registry entries
+  ([`fae9302`](https://github.com/datapointchris/syncer/commit/fae9302f9b851f2604a31b204da0528cbcfb2e53))
+
+repos.json entries now carry a `toolchain` block declaring a repo's build surface — components (a
+  stack and the dir it lives in) and sql_dialect. forge owns and consumes it to generate pre-commit
+  configs and CI workflows; syncer neither reads nor validates the shape.
+
+It is modelled as an opaque dict so the registry schema documents what is actually in the file, and
+  so forge can extend it without touching syncer. Pydantic was already ignoring it silently, which
+  left the docs claiming a purity the file no longer had.
+
+The registry is no longer purely identity, and CLAUDE.md now says so. It lives here rather than in a
+  forge-local file because a separate file would be keyed by repo name, and repo names are not
+  unique across registries — that join already misattributed one repo's planning docs to another.
+  The bar for anything added here stays: a portable fact about the repo itself, never machine-local
+  state.
+
+
 ## v4.1.0 (2026-07-25)
 
 ### Documentation
