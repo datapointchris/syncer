@@ -8,8 +8,10 @@ import tempfile
 from pathlib import Path
 from typing import Annotated
 
-import httpx
 import typer
+from pyselfupdate import Config
+from pyselfupdate import notify
+from pyselfupdate.typercmd import run_update
 from rich.console import Console
 
 from syncer.config import TOOL_CONFIG_PATH
@@ -29,6 +31,10 @@ from syncer.sync import run_sync
 
 app = typer.Typer(invoke_without_command=True, rich_markup_mode='rich')
 console = Console()
+
+# Shared by the `update` command and the daily check in the callback below, so
+# the notice cannot name a release the update command would not install.
+UPDATE_CONFIG = Config(tool='syncer', owner='datapointchris')
 
 _EPILOG = (
     '[bold]Examples[/bold]\n\n'
@@ -71,6 +77,13 @@ def main(
     """
     ctx.ensure_object(dict)
     ctx.obj['dry_run'] = dry_run
+
+    # Never raises and never prints an error; the notice is deferred to exit so
+    # it lands after the command's own output. `syncer update` is the only place
+    # an update failure is reported. Skipped for `update` itself, which is about
+    # to do the thing the notice would suggest.
+    if ctx.invoked_subcommand != 'update':
+        notify(UPDATE_CONFIG)
 
     if ctx.invoked_subcommand is None:
         syncer_config = resolve_config(repos_file)
@@ -229,61 +242,11 @@ def version() -> None:
 
 
 @app.command(rich_help_panel='Manage')
-def update() -> None:
+def update(
+    check_only: Annotated[bool, typer.Option('--check', help='Report whether an update is available without installing it')] = False,
+) -> None:
     """Update syncer to the latest GitHub release."""
-    result = subprocess.run(  # nosec B607
-        ['gh', 'release', '--repo', 'datapointchris/syncer', 'view', '--json', 'tagName', '--jq', '.tagName'],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        console.print('✗ syncer upgrade failed: could not fetch latest release tag')
-        sys.exit(1)
-
-    tag = result.stdout.strip()
-    current = importlib.metadata.version('syncer')
-    before_tag = f'v{current}' if not current.startswith('v') else current
-
-    if tag.lstrip('v') == current.lstrip('v'):
-        console.print(f'✓ syncer already at latest: {tag}')
-        return
-
-    install = subprocess.run(  # nosec B607
-        ['uv', 'tool', 'install', '--force', f'git+https://github.com/datapointchris/syncer.git@{tag}'],
-        capture_output=True,
-        text=True,
-    )
-    if install.returncode != 0:
-        console.print(f'✗ syncer upgrade failed: {install.stderr.strip()}')
-        sys.exit(1)
-
-    console.print(f'✓ syncer upgraded: {before_tag} → {tag}')
-
-    subjects = fetch_github_changes('datapointchris', 'syncer', before_tag, tag)
-    if subjects:
-        console.print()
-        console.print('Changes:')
-        for s in subjects:
-            console.print(f'  • {s}')
-
-
-def fetch_github_changes(owner: str, repo: str, from_ref: str, to_ref: str) -> list[str]:
-    """Fetch commit subjects between two refs via GitHub compare API."""
-    url = f'https://api.github.com/repos/{owner}/{repo}/compare/{from_ref}...{to_ref}'
-    try:
-        resp = httpx.get(url, headers={'Accept': 'application/vnd.github+json'}, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-    except (httpx.HTTPError, ValueError):
-        return []
-
-    subjects: list[str] = []
-    for c in data.get('commits', []):
-        message = c.get('commit', {}).get('message', '')
-        subject = message.split('\n', 1)[0].strip()
-        if subject:
-            subjects.append(subject)
-    return subjects
+    run_update(UPDATE_CONFIG, check_only=check_only)
 
 
 def _git(path: Path, *args: str) -> None:
