@@ -1,6 +1,31 @@
 # CHANGELOG
 
 
+## v4.4.0 (2026-07-27)
+
+### Features
+
+- **policy**: Prove branch integration against a configurable merge target
+  ([`7dc92e8`](https://github.com/datapointchris/syncer/commit/7dc92e8825677f6a84c27f853c40237b89c7c046))
+
+delete_local checked ancestry against the repo's default branch, so a flow that merges feature
+  branches into develop and only promotes to main at release time had every merged branch refused
+  forever. Ancestry also cannot see a squash merge, which is the default on Bitbucket and GitHub, so
+  even the right target was not enough on its own.
+
+Policy gains merge_target (None = the repo's default branch), and integration is now proven by
+  ancestry OR patch equivalence via git cherry. A multi-commit branch collapsed into one squash
+  commit has no matching patch-ids and is still refused — false negatives cost a refusal, which is
+  the safe direction.
+
+execute() takes the policy so the guard can read merge_target live; it can never widen what an
+  action may do. Deleting the merge target itself is refused explicitly, since contains_branch(x, x)
+  is trivially true.
+
+BranchState.merged_into_default becomes merged_into_target and classify resolves it against the same
+  target, so the reported state agrees with the guard.
+
+
 ## v4.3.1 (2026-07-27)
 
 ### Bug Fixes
