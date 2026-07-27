@@ -18,6 +18,7 @@ from syncer.config import TOOL_CONFIG_PATH
 from syncer.config import RepoConfig
 from syncer.config import SyncerConfig
 from syncer.config import load_tool_config
+from syncer.config import resolve_clone_url
 from syncer.config import resolve_config
 from syncer.report import DEFAULT_JOBS
 from syncer.report import report_branches
@@ -185,7 +186,14 @@ def issues(
             continue
 
         owner = repo_config.owner or syncer_config.owner
-        repo = Repo(name=repo_config.name, path=path, owner=owner, host=syncer_config.host, timeout=tool_config.git_timeout)
+        repo = Repo(
+            name=repo_config.name,
+            path=path,
+            owner=owner,
+            host=syncer_config.host,
+            timeout=tool_config.git_timeout,
+            url=resolve_clone_url(repo_config, syncer_config),
+        )
 
         # Only nag about master on repos we control. A third-party clone's default
         # branch is upstream's decision — every exemplar clone would report it

@@ -62,6 +62,20 @@ Each repo has a `status` field: `active` (default), `dormant`, or `retired`. Ret
 
 `search_paths` are used by `syncer issues` to find repos that moved or aren't tracked in the config. The repo registry is the source of truth — syncer never writes to it.
 
+Clone URLs default to `{host}/{owner}/{name}`. Hosts that path can't express — scp-style SSH has no slash after the host, Bitbucket Data Center wants a `/scm` prefix and a `.git` suffix — set `url_template` on the registry, or `clone_url` on a single repo that doesn't follow its host's convention:
+
+```json
+{
+  "owner": "myworkspace",
+  "host": "bitbucket.org",
+  "url_template": "git@{host}:{owner}/{name}.git",
+  "repos": [
+    {"name": "payments", "path": "~/code/work/payments"},
+    {"name": "odd-one", "path": "~/code/work/odd-one", "clone_url": "ssh://git@other:7999/x/odd-one.git"}
+  ]
+}
+```
+
 ## Sync policies
 
 Both `syncer` and `syncer branches` classify every branch (per-branch `ahead`/`behind`/`gone`/`no_upstream`/…, computed after `fetch --prune` and repointing `origin/HEAD`) and report the action a policy *would* take; `--apply` executes those actions. Policies are **machine-local** and live in `config.toml`, so the same repo can sync aggressively on an always-on box and report-only on a laptop.

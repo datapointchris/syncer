@@ -8,6 +8,7 @@ from syncer.config import ToolConfig
 from syncer.config import _load_repos_file
 from syncer.config import get_repos_file_path
 from syncer.config import load_tool_config
+from syncer.config import resolve_clone_url
 from syncer.config import resolve_config
 from syncer.config import resolve_policies
 from syncer.config import resolve_policy_name
@@ -121,6 +122,46 @@ class TestLoadToolConfig:
         tool_config.write_text('[repo_overrides]\n"shared-repo" = "observe"\n')
         loaded = load_tool_config()
         assert loaded.repo_overrides == {'shared-repo': 'observe'}
+
+
+class TestResolveCloneUrl:
+    """The default '{host}/{owner}/{name}' cannot express every host: scp-style SSH has no
+    slash after the host, and some servers want the .git suffix."""
+
+    def _config(self, **kwargs):
+        defaults = {'owner': 'datapointchris', 'host': 'https://github.com', 'repos': []}
+        return SyncerConfig(**{**defaults, **kwargs})
+
+    def test_default_three_part_path(self):
+        repo = RepoConfig(name='syncer', path='~/tools/syncer')
+        assert resolve_clone_url(repo, self._config()) == 'https://github.com/datapointchris/syncer'
+
+    def test_repo_owner_overrides_registry_owner(self):
+        repo = RepoConfig(name='vuetify', path='~/code/refs/vuetify', owner='vuetifyjs')
+        assert resolve_clone_url(repo, self._config()) == 'https://github.com/vuetifyjs/vuetify'
+
+    def test_template_renders_scp_style_ssh(self):
+        config = self._config(owner='myworkspace', host='bitbucket.org', url_template='git@{host}:{owner}/{name}.git')
+        repo = RepoConfig(name='payments', path='~/code/1904labs/payments')
+        assert resolve_clone_url(repo, config) == 'git@bitbucket.org:myworkspace/payments.git'
+
+    def test_template_renders_bitbucket_data_center(self):
+        config = self._config(owner='PROJ', host='https://bitbucket.corp.com', url_template='{host}/scm/{owner}/{name}.git')
+        repo = RepoConfig(name='payments', path='~/code/1904labs/payments')
+        assert resolve_clone_url(repo, config) == 'https://bitbucket.corp.com/scm/PROJ/payments.git'
+
+    def test_per_repo_clone_url_beats_template(self):
+        config = self._config(url_template='git@{host}:{owner}/{name}.git')
+        repo = RepoConfig(name='odd-one', path='~/code/odd', clone_url='ssh://git@other.host:7999/x/odd.git')
+        assert resolve_clone_url(repo, config) == 'ssh://git@other.host:7999/x/odd.git'
+
+    def test_template_without_name_rejected(self):
+        with pytest.raises(ValueError, match='must include'):
+            self._config(url_template='git@{host}:{owner}.git')
+
+    def test_template_with_unknown_placeholder_rejected(self):
+        with pytest.raises(ValueError, match='unknown placeholder'):
+            self._config(url_template='git@{host}:{project}/{name}.git')
 
 
 class TestResolvePolicies:

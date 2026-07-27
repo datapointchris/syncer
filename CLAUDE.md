@@ -91,6 +91,12 @@ current/non-current split needs the same treatment.
   the join. Anything added here must be a **portable fact about the repo itself**, never
   machine-local state; that still belongs in `config.toml`.
 
+  Clone URLs resolve as per-repo `clone_url` → registry `url_template` (`{host}`/`{owner}`/`{name}`)
+  → the default `{host}/{owner}/{name}`. The template exists because that default path cannot
+  express scp-style SSH (no slash after the host) or a required `.git` suffix, and a registry is
+  one host — so it belongs on the registry, not repeated on every entry. `url_template` is
+  validated at load time; an unknown placeholder fails loudly rather than producing a broken URL.
+
   **A registry is a self-contained set.** `--repos-file/-c` swaps the entire working set; it never
   merges with the default. `owner` and `host` are optional so an all-third-party registry works —
   `~/dev/exemplar-repos.json` holds twenty upstream clones that each name their own owner. Repos

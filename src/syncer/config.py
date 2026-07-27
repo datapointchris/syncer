@@ -8,6 +8,7 @@ from typing import Any
 from typing import Literal
 
 from pydantic import BaseModel
+from pydantic import field_validator
 from rich.console import Console
 
 from syncer.policy import BUILTIN_POLICIES
@@ -33,6 +34,9 @@ class RepoConfig(BaseModel):
     # machine-local repo_overrides, above the machine default_policy. The one
     # policy-adjacent field in the registry — syncer reads nothing else here.
     sync_policy: str | None = None
+    # Explicit clone URL, bypassing both url_template and the default three-part path. For the
+    # one repo in a registry that does not follow the host's own convention.
+    clone_url: str | None = None
     # Declared build surface (components, sql_dialect), owned and consumed by forge.
     # syncer neither reads nor validates the shape; it is modelled only so the
     # registry schema documents what is actually in the file. Kept as a dict so
@@ -54,7 +58,26 @@ class SyncerConfig(BaseModel):
     # exemplar clones under ~/code/refs belong to exemplar-repos.json, and work
     # repos belong to no personal registry at all.
     exclude_paths: list[str] = []
+    # Clone URL shape for this registry, in place of the default '{host}/{owner}/{name}'.
+    # Placeholders: {host}, {owner}, {name}. The default path cannot express every host —
+    # scp-style SSH (git@host:owner/repo.git) has no slash after the host, and Bitbucket Data
+    # Center wants the .git suffix — and a registry is one host, so this belongs here rather
+    # than repeated as a clone_url on all thirty entries.
+    url_template: str | None = None
     repos: list[RepoConfig]
+
+    @field_validator('url_template')
+    @classmethod
+    def validate_url_template(cls, template: str | None) -> str | None:
+        if template is None:
+            return template
+        if '{name}' not in template:
+            raise ValueError(f'url_template {template!r} must include {{name}}')
+        try:
+            template.format(host='host', owner='owner', name='name')
+        except (KeyError, IndexError) as exc:
+            raise ValueError(f'url_template {template!r} has an unknown placeholder: {exc}') from exc
+        return template
 
 
 class ToolConfig(BaseModel):
@@ -101,6 +124,17 @@ def load_tool_config() -> ToolConfig:
         repo_overrides=raw.get('repo_overrides', {}),
         git_timeout=raw.get('git_timeout', GIT_TIMEOUT_SECONDS),
     )
+
+
+def resolve_clone_url(repo_config: RepoConfig, config: SyncerConfig) -> str:
+    """Clone URL for one repo: per-repo override, then registry template, then the default
+    '{host}/{owner}/{name}'."""
+    if repo_config.clone_url:
+        return repo_config.clone_url
+    owner = repo_config.owner or config.owner
+    if config.url_template:
+        return config.url_template.format(host=config.host, owner=owner, name=repo_config.name)
+    return f'{config.host}/{owner}/{repo_config.name}'
 
 
 def resolve_policies(tool_config: ToolConfig) -> dict[str, Policy]:

@@ -31,6 +31,7 @@ from syncer.classify import classify_repo
 from syncer.config import RepoConfig
 from syncer.config import SyncerConfig
 from syncer.config import ToolConfig
+from syncer.config import resolve_clone_url
 from syncer.config import resolve_policies
 from syncer.config import resolve_policy_name
 from syncer.execute import Outcome
@@ -226,7 +227,14 @@ def _build_repo_report(
     path = Path(repo_config.path).expanduser()
     label = repo_config.path if repo_config.path.startswith('~') else repo_config.name
     owner = repo_config.owner or config.owner
-    repo = Repo(name=repo_config.name, path=path, owner=owner, host=config.host, timeout=tool_config.git_timeout)
+    repo = Repo(
+        name=repo_config.name,
+        path=path,
+        owner=owner,
+        host=config.host,
+        timeout=tool_config.git_timeout,
+        url=resolve_clone_url(repo_config, config),
+    )
 
     def lifecycle(status: str, detail: str | None = None) -> RepoBranchReport:
         return RepoBranchReport(label=label, path=repo_config.path, name=repo_config.name, lifecycle=status, lifecycle_detail=detail)

@@ -88,11 +88,11 @@ def _status_line(icon: str, name: str, msg: str, color: str, branch: str | None 
 
 
 class Repo:
-    def __init__(self, name: str, path: Path, owner: str, host: str, timeout: int = GIT_TIMEOUT_SECONDS):
+    def __init__(self, name: str, path: Path, owner: str, host: str, timeout: int = GIT_TIMEOUT_SECONDS, url: str | None = None):
         self.name = name
         self.path = path
         self.owner = owner
-        self.url = f'{host}/{owner}/{name}'
+        self.url = url or f'{host}/{owner}/{name}'
         self.timeout = timeout
 
     def _git(self, *args: str) -> subprocess.CompletedProcess[str]:
