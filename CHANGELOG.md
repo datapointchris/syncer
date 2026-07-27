@@ -1,6 +1,26 @@
 # CHANGELOG
 
 
+## v4.3.0 (2026-07-27)
+
+### Features
+
+- Adopt pyselfupdate for update and add a daily notice
+  ([`55a69ed`](https://github.com/datapointchris/syncer/commit/55a69edb05d0daad4ab045b31cb86b99245888e4))
+
+Replaces a hand-rolled update that shelled out to `gh release view` and carried its own
+  `fetch_github_changes` — a function that existed verbatim in relate as well, which is what made it
+  worth a library rather than a copy. Both are gone; the library resolves the release, compares
+  versions by semver rather than PEP 440, and reads uv's install receipt to refuse a checkout it
+  should not replace.
+
+Adds the once-a-day notice to the root callback, deferred to exit so it lands after the command's
+  own output. It never raises and never prints an error; `syncer update` is the only place a failure
+  surfaces.
+
+httpx was only ever there for the changelog fetch, so it leaves with it.
+
+
 ## v4.2.0 (2026-07-25)
 
 ### Features
