@@ -1,6 +1,24 @@
 # CHANGELOG
 
 
+## v4.5.0 (2026-07-27)
+
+### Features
+
+- **config**: Allow clone URLs the three-part path cannot express
+  ([`ba657d9`](https://github.com/datapointchris/syncer/commit/ba657d9365c6e68ba2f9c709fb68a5d6f5ef410b))
+
+Repo.url was hard-wired to '{host}/{owner}/{name}', with no .git suffix and no escape hatch. That
+  covers GitHub and Bitbucket Cloud over HTTPS and nothing else: scp-style SSH
+  (git@host:owner/repo.git) has no slash after the host, and Bitbucket Data Center wants both a /scm
+  prefix and the .git suffix.
+
+Registries gain url_template with {host}/{owner}/{name} placeholders, validated at load time so an
+  unknown placeholder fails loudly instead of producing a URL that only breaks at clone time.
+  Individual repos gain clone_url for the one entry that does not follow its host's convention. A
+  registry is a single host, so the template belongs there rather than repeated on every entry.
+
+
 ## v4.4.1 (2026-07-27)
 
 ### Bug Fixes
