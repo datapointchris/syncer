@@ -282,8 +282,8 @@ def _show_recent_runs(events: list[SyncRunEvent]) -> None:
         console.print(f'  {date_str}   {summary}')
 
 
-def show_stats(config: SyncerConfig) -> None:
-    events = read_events()
+def show_stats(config: SyncerConfig, events_file: Path) -> None:
+    events = read_events(events_file)
 
     console.print()
     console.print('[bold]Syncer Stats[/bold]')

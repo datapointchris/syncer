@@ -58,7 +58,7 @@ class TestShowStats:
             patch('syncer.stats.console', console),
             patch('syncer.stats.read_events', return_value=[]),
         ):
-            show_stats(config)
+            show_stats(config, tmp_path / 'events.jsonl')
 
     def test_with_events(self, tmp_path):
         """Stats with events should render all sections."""
@@ -87,7 +87,7 @@ class TestShowStats:
             patch('syncer.stats.console', console),
             patch('syncer.stats.read_events', return_value=events),
         ):
-            show_stats(config)
+            show_stats(config, tmp_path / 'events.jsonl')
         output = output_file.read_text()
         assert 'Summary' in output
         assert 'Total runs' in output
@@ -103,7 +103,7 @@ class TestShowStats:
             patch('syncer.stats.console', console),
             patch('syncer.stats.read_events', return_value=events),
         ):
-            show_stats(config)
+            show_stats(config, tmp_path / 'events.jsonl')
         output = output_file.read_text()
         assert 'Total runs:     5' in output
 
@@ -120,7 +120,7 @@ class TestShowStats:
             patch('syncer.stats.console', console),
             patch('syncer.stats.read_events', return_value=events),
         ):
-            show_stats(config)
+            show_stats(config, tmp_path / 'events.jsonl')
         output = output_file.read_text()
         # Jan 12 should appear before Jan 10
         pos_12 = output.find('Jan 12')
@@ -163,7 +163,7 @@ class TestShowStats:
                 return m
 
             MockRepo.side_effect = make_repo
-            show_stats(config)
+            show_stats(config, tmp_path / 'events.jsonl')
 
         output = output_file.read_text()
         # Find positions within the "All Repos" section specifically

@@ -20,6 +20,7 @@ from syncer.config import SyncerConfig
 from syncer.config import load_tool_config
 from syncer.config import resolve_clone_url
 from syncer.config import resolve_config
+from syncer.config import resolve_registry
 from syncer.report import DEFAULT_JOBS
 from syncer.report import report_branches
 from syncer.repos import ICON_MOVE
@@ -29,6 +30,8 @@ from syncer.repos import _status_line
 from syncer.repos import find_repo_in_search_paths
 from syncer.stats import show_stats
 from syncer.sync import run_sync
+from syncer.tracking import adopt_legacy_events
+from syncer.tracking import events_file_for
 
 app = typer.Typer(invoke_without_command=True, rich_markup_mode='rich')
 console = Console()
@@ -45,6 +48,15 @@ _EPILOG = (
     '[cyan]syncer branches[/cyan] — quick per-branch view, no lifecycle or history\n\n'
     '[cyan]syncer issues[/cyan] — find moved, missing, or untracked repos'
 )
+
+
+def _events_file(repos_path: Path, override: Path | None) -> Path:
+    """Event stream for the registry in play. The pre-split global stream is adopted only when
+    no --repos-file was given, since it is the default registry's history and nobody else's."""
+    events_file = events_file_for(repos_path)
+    if override is None:
+        adopt_legacy_events(events_file)
+    return events_file
 
 
 def _version_callback(value: bool) -> None:
@@ -87,9 +99,16 @@ def main(
         notify(UPDATE_CONFIG)
 
     if ctx.invoked_subcommand is None:
-        syncer_config = resolve_config(repos_file)
+        syncer_config, repos_path = resolve_registry(repos_file)
         tool_config = load_tool_config()
-        run_sync(syncer_config, tool_config, cli_policy=policy, apply=apply and not dry_run, jobs=jobs)
+        run_sync(
+            syncer_config,
+            tool_config,
+            _events_file(repos_path, repos_file),
+            cli_policy=policy,
+            apply=apply and not dry_run,
+            jobs=jobs,
+        )
 
 
 @app.command(rich_help_panel='Sync')
@@ -225,10 +244,18 @@ def issues(
 
 
 @app.command(rich_help_panel='Inspect')
-def stats(ctx: typer.Context) -> None:
-    """Show run history and repo insights: sync summary, commits, age, dirty and stale repos."""
-    syncer_config = resolve_config()
-    show_stats(syncer_config)
+def stats(
+    repos_file: Annotated[
+        Path | None,
+        typer.Option('--repos-file', '-c', help='Use a different repo registry; replaces the default set entirely'),
+    ] = None,
+) -> None:
+    """Show run history and repo insights: sync summary, commits, age, dirty and stale repos.
+
+    History is per registry, so this reports on the same working set the sync run used.
+    """
+    syncer_config, repos_path = resolve_registry(repos_file)
+    show_stats(syncer_config, _events_file(repos_path, repos_file))
 
 
 @app.command(rich_help_panel='Manage')
@@ -355,7 +382,8 @@ def demo() -> None:
     tmp = Path(tempfile.mkdtemp(prefix='syncer-demo-'))
     try:
         config = _setup_demo_repos(tmp)
-        run_sync(config, load_tool_config(), apply=True, jitter=0.0)
+        # Demo history is throwaway; it must never land in a real registry's event stream.
+        run_sync(config, load_tool_config(), tmp / 'events.jsonl', apply=True, jitter=0.0)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

@@ -180,7 +180,15 @@ def get_repos_file_path(override: Path | None = None) -> Path:
     sys.exit(1)
 
 
+def resolve_registry(repos_file: Path | None = None) -> tuple[SyncerConfig, Path]:
+    """Load a repo registry and report the file it came from. Each registry is a self-contained
+    set of repos: passing a different file swaps the whole working set, it does not merge with
+    the default. The path comes back because it is the registry's identity — what the per-registry
+    event stream is keyed on."""
+    path = get_repos_file_path(repos_file)
+    return _load_repos_file(path), path
+
+
 def resolve_config(repos_file: Path | None = None) -> SyncerConfig:
-    """Load a repo registry. Each registry is a self-contained set of repos: passing
-    a different file swaps the whole working set, it does not merge with the default."""
-    return _load_repos_file(get_repos_file_path(repos_file))
+    """The registry alone, for callers that do not record history."""
+    return resolve_registry(repos_file)[0]

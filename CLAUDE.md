@@ -145,8 +145,15 @@ Never call `subprocess.run` directly for a git or `gh` invocation.
 
 ## Run history
 
-The default run appends one `SyncRunEvent` per run to `~/.local/share/syncer/events.jsonl`
-(`DATA_DIR`); `syncer stats` reads it back. The schema (`tracking.py`) evolves **additively** —
+The default run appends one `SyncRunEvent` per run to `DATA_DIR/<registry-stem>-events.jsonl`;
+`syncer stats -c <registry>` reads the matching stream back. **One stream per registry**, keyed on
+the registry file, because two registries are two working sets: a shared file makes `stats` a blend
+of both, and `find_stale_repos` scopes to the paths in the most recent run, so alternating a
+personal and a work run would make each set's dirty-repo warnings vanish on the other's. The
+pre-split global `events.jsonl` is adopted (renamed, so exactly once) by the default registry —
+never by one named with `--repos-file`, which never contributed to that history.
+
+The schema (`tracking.py`) evolves **additively** —
 `RepoSnapshot` gained `policy` + `branches: list[BranchSnapshot]`, both defaulting empty so
 pre-existing event lines still validate. Never make an existing snapshot field required; add new
 fields with defaults and keep the legacy-parse test green (`test_tracking.py`).

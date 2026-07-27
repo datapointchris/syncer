@@ -10,7 +10,33 @@ from pydantic import BaseModel
 
 from syncer.config import DATA_DIR
 
-EVENTS_FILE = DATA_DIR / 'events.jsonl'
+# The single global stream that predates per-registry events. Adopted once by the default
+# registry (see adopt_legacy_events) rather than orphaned.
+LEGACY_EVENTS_FILE = DATA_DIR / 'events.jsonl'
+
+
+def events_file_for(repos_file: Path) -> Path:
+    """Event stream for one registry, keyed on the registry file that defines it.
+
+    One stream per registry, because a shared file makes `stats` a blend of two unrelated
+    working sets, and find_stale_repos() scopes to the paths in the most recent run — so
+    alternating registries would make each set's dirty-repo warnings vanish on the other's run.
+    """
+    return DATA_DIR / f'{repos_file.stem}-events.jsonl'
+
+
+def adopt_legacy_events(events_file: Path) -> None:
+    """Hand the pre-split global stream to the registry that actually wrote it.
+
+    A rename, not a copy, so it happens exactly once and no second registry can claim it.
+    Call only for the default registry; an explicit --repos-file names a set that never
+    contributed to that history.
+    """
+    if events_file.exists() or not LEGACY_EVENTS_FILE.exists():
+        return
+    events_file.parent.mkdir(parents=True, exist_ok=True)
+    LEGACY_EVENTS_FILE.rename(events_file)
+
 
 RepoStatus = Literal[
     'synced',
@@ -72,13 +98,13 @@ class SyncRunEvent(BaseModel):
     summary: RunSummary
 
 
-def emit_event(event: SyncRunEvent, events_file: Path = EVENTS_FILE) -> None:
+def emit_event(event: SyncRunEvent, events_file: Path) -> None:
     events_file.parent.mkdir(parents=True, exist_ok=True)
     with events_file.open('a') as f:
         f.write(event.model_dump_json() + '\n')
 
 
-def read_events(events_file: Path = EVENTS_FILE) -> list[SyncRunEvent]:
+def read_events(events_file: Path) -> list[SyncRunEvent]:
     if not events_file.exists():
         return []
     events = []

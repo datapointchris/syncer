@@ -1,6 +1,7 @@
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -10,7 +11,9 @@ from syncer.tracking import RepoSnapshot
 from syncer.tracking import RepoStatus
 from syncer.tracking import RunSummary
 from syncer.tracking import SyncRunEvent
+from syncer.tracking import adopt_legacy_events
 from syncer.tracking import emit_event
+from syncer.tracking import events_file_for
 from syncer.tracking import find_stale_repos
 from syncer.tracking import read_events
 
@@ -148,6 +151,53 @@ class TestEmitAndRead:
         assert restored_snap.uncommitted == 5
         assert restored_snap.stashes == 2
         assert restored_snap.branch == 'main'
+
+
+class TestPerRegistryEventStreams:
+    """Two registries are two working sets. Sharing one stream makes `stats` a blend of both,
+    and find_stale_repos() scopes to the paths in the most recent run — so alternating a
+    personal and a work run would make each set's dirty-repo warnings vanish on the other's."""
+
+    def test_stream_is_keyed_on_the_registry_file(self, tmp_path, monkeypatch):
+        monkeypatch.setattr('syncer.tracking.DATA_DIR', tmp_path)
+        personal = events_file_for(Path('~/dev/repos.json'))
+        work = events_file_for(Path('~/dev/work-repos.json'))
+        assert personal != work
+        assert personal.name == 'repos-events.jsonl'
+        assert work.name == 'work-repos-events.jsonl'
+
+    def test_separate_registries_do_not_share_history(self, tmp_path):
+        personal = tmp_path / 'repos-events.jsonl'
+        work = tmp_path / 'work-repos-events.jsonl'
+        emit_event(_make_event(config_name='personal'), personal)
+        emit_event(_make_event(config_name='work'), work)
+        assert [event.config_name for event in read_events(personal)] == ['personal']
+        assert [event.config_name for event in read_events(work)] == ['work']
+
+    def test_legacy_stream_is_adopted_once(self, tmp_path, monkeypatch):
+        legacy = tmp_path / 'events.jsonl'
+        monkeypatch.setattr('syncer.tracking.LEGACY_EVENTS_FILE', legacy)
+        emit_event(_make_event(config_name='history'), legacy)
+
+        default_stream = tmp_path / 'repos-events.jsonl'
+        adopt_legacy_events(default_stream)
+        assert not legacy.exists()  # renamed, so no second registry can claim it
+        assert [event.config_name for event in read_events(default_stream)] == ['history']
+
+        other_stream = tmp_path / 'work-repos-events.jsonl'
+        adopt_legacy_events(other_stream)
+        assert read_events(other_stream) == []
+
+    def test_adoption_never_overwrites_an_existing_stream(self, tmp_path, monkeypatch):
+        legacy = tmp_path / 'events.jsonl'
+        monkeypatch.setattr('syncer.tracking.LEGACY_EVENTS_FILE', legacy)
+        emit_event(_make_event(config_name='legacy'), legacy)
+        existing = tmp_path / 'repos-events.jsonl'
+        emit_event(_make_event(config_name='current'), existing)
+
+        adopt_legacy_events(existing)
+        assert [event.config_name for event in read_events(existing)] == ['current']
+        assert legacy.exists()
 
 
 class TestFindStaleRepos:

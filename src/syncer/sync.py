@@ -31,7 +31,6 @@ from syncer.repos import ICON_PULL
 from syncer.repos import ICON_PUSH
 from syncer.repos import ICON_WARN
 from syncer.repos import console
-from syncer.tracking import EVENTS_FILE
 from syncer.tracking import BranchSnapshot
 from syncer.tracking import RepoSnapshot
 from syncer.tracking import RunSummary
@@ -137,13 +136,12 @@ def _print_summary_line(summary: RunSummary) -> None:
 def run_sync(
     config: SyncerConfig,
     tool_config: ToolConfig,
+    events_file: Path,
     cli_policy: str | None = None,
     apply: bool = False,
     jobs: int = DEFAULT_JOBS,
     jitter: float = DEFAULT_JITTER_SECONDS,
-    events_file: Path | None = None,
 ) -> None:
-    events_file = events_file or EVENTS_FILE
     start = time.monotonic()
     reports = gather_reports(config, tool_config, cli_policy, apply, jobs, jitter, include_lifecycle=True)
     snapshots = [_snapshot(report) for report in reports]
