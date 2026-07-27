@@ -1,6 +1,27 @@
 # CHANGELOG
 
 
+## v4.6.0 (2026-07-27)
+
+### Features
+
+- **tracking**: Give each registry its own event stream
+  ([`2f82c1f`](https://github.com/datapointchris/syncer/commit/2f82c1ffbf94f7982b573b5a72846e61e988076b))
+
+Every run appended to one global events.jsonl regardless of which registry was in play, and stats
+  had no --repos-file at all, so a second working set was impossible to report on. Worse,
+  find_stale_repos scopes to the paths in the most recent run, so alternating a personal and a work
+  run made each set's dirty-repo warnings disappear on the other's run.
+
+Streams are now keyed on the registry file (<stem>-events.jsonl) and stats takes --repos-file, so it
+  reports on the same set the sync ran against. The pre-split events.jsonl is adopted by the default
+  registry with a rename — once, and never by a registry named with --repos-file, which never
+  contributed to it.
+
+events_file is a required argument on run_sync/show_stats rather than defaulting to a module
+  constant; demo now writes to its own temp file instead of polluting real history.
+
+
 ## v4.5.0 (2026-07-27)
 
 ### Features
