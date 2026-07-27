@@ -1,6 +1,23 @@
 # CHANGELOG
 
 
+## v4.6.1 (2026-07-27)
+
+### Bug Fixes
+
+- **issues**: Scope the master check to registries whose naming we control
+  ([`b6080c2`](https://github.com/datapointchris/syncer/commit/b6080c209fa6bd7281aaac6352b2bede476b3e03))
+
+is_ours gated the check on the repo owner matching the registry owner, which is true for a work
+  registry — so all thirty repos would be flagged for defaulting to master, something the org
+  decides and nobody here can change. Registries gain owns_branch_naming (default true) to turn the
+  check off as a set.
+
+is_fork also shelled out to gh unconditionally. gh cannot answer for a Bitbucket repo, so that was a
+  subprocess per flagged repo that always returned false; it now short-circuits on the resolved
+  clone URL.
+
+
 ## v4.6.0 (2026-07-27)
 
 ### Features
