@@ -1,11 +1,56 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
 from rich.console import Console
 
 console = Console(highlight=False)
+
+# Ceiling on a single git invocation. Generous enough for a fetch over a VPN; the point is that
+# a wedged call eventually reports instead of holding a worker thread forever.
+GIT_TIMEOUT_SECONDS = 120
+# Cloning a large repo legitimately takes minutes, and it happens once per repo.
+CLONE_TIMEOUT_SECONDS = 600
+# Exit code for a timeout, matching the shell's convention for a command killed by `timeout`.
+TIMEOUT_RETURNCODE = 124
+
+
+def _noninteractive_env() -> dict[str, str]:
+    """Git environment that fails fast rather than blocking on a prompt.
+
+    Prompting is what concurrency turns into a hang: git asks for credentials on /dev/tty, which
+    capture_output does not redirect, so an expired credential or an unknown host key would leave
+    every worker thread blocked on the same terminal with nothing explaining why. BatchMode covers
+    ssh's password *and* host-key confirmation prompts, and is appended to any GIT_SSH_COMMAND the
+    user already configured rather than replacing it.
+    """
+    env = os.environ.copy()
+    env['GIT_TERMINAL_PROMPT'] = '0'
+    ssh_command = env.get('GIT_SSH_COMMAND', 'ssh')
+    env['GIT_SSH_COMMAND'] = f'{ssh_command} -o BatchMode=yes'
+    return env
+
+
+def run_command(args: list[str], *, cwd: Path | None = None, timeout: int) -> subprocess.CompletedProcess[str]:
+    """Run a command non-interactively, turning a timeout into an ordinary non-zero result.
+
+    Every caller branches on returncode, so a timeout has to look like a failure — raising out of
+    a worker thread would lose the whole repo's report instead of the one call that hung.
+    """
+    try:
+        return subprocess.run(  # nosec B607
+            args,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            env=_noninteractive_env(),
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(args, returncode=TIMEOUT_RETURNCODE, stdout='', stderr=f'timed out after {timeout}s')
+
 
 # Nerd font icons
 ICON_OK = '\uf00c'
@@ -43,14 +88,15 @@ def _status_line(icon: str, name: str, msg: str, color: str, branch: str | None 
 
 
 class Repo:
-    def __init__(self, name: str, path: Path, owner: str, host: str):
+    def __init__(self, name: str, path: Path, owner: str, host: str, timeout: int = GIT_TIMEOUT_SECONDS):
         self.name = name
         self.path = path
         self.owner = owner
         self.url = f'{host}/{owner}/{name}'
+        self.timeout = timeout
 
     def _git(self, *args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(['git', *args], cwd=self.path, capture_output=True, text=True)  # nosec B607
+        return run_command(['git', *args], cwd=self.path, timeout=self.timeout)
 
     @property
     def exists(self) -> bool:
@@ -278,20 +324,15 @@ class Repo:
 
     @property
     def is_fork(self) -> bool:
-        result = subprocess.run(  # nosec B607
+        result = run_command(
             ['gh', 'repo', 'view', f'{self.owner}/{self.name}', '--json', 'isFork', '--jq', '.isFork'],
-            capture_output=True,
-            text=True,
+            timeout=self.timeout,
         )
         return result.returncode == 0 and result.stdout.strip() == 'true'
 
     def clone(self) -> bool:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        result = subprocess.run(  # nosec B607
-            ['git', 'clone', self.url, str(self.path)],
-            capture_output=True,
-            text=True,
-        )
+        result = run_command(['git', 'clone', self.url, str(self.path)], timeout=CLONE_TIMEOUT_SECONDS)
         return result.returncode == 0
 
 

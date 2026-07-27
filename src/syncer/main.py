@@ -158,6 +158,7 @@ def issues(
     repos.json; fix the reported paths yourself.
     """
     syncer_config = resolve_config(repos_file)
+    tool_config = load_tool_config()
     search_paths = [Path(p).expanduser() for p in syncer_config.search_paths]
     claimed_paths = {Path(rc.path).expanduser() for rc in syncer_config.repos}
 
@@ -184,7 +185,7 @@ def issues(
             continue
 
         owner = repo_config.owner or syncer_config.owner
-        repo = Repo(name=repo_config.name, path=path, owner=owner, host=syncer_config.host)
+        repo = Repo(name=repo_config.name, path=path, owner=owner, host=syncer_config.host, timeout=tool_config.git_timeout)
 
         # Only nag about master on repos we control. A third-party clone's default
         # branch is upstream's decision — every exemplar clone would report it

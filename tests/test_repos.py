@@ -7,10 +7,13 @@ import pytest
 from syncer.repos import ALL_ICONS
 from syncer.repos import ICON_ERR
 from syncer.repos import ICON_OK
+from syncer.repos import TIMEOUT_RETURNCODE
 from syncer.repos import Repo
 from syncer.repos import _display_width
+from syncer.repos import _noninteractive_env
 from syncer.repos import _status_line
 from syncer.repos import find_repo_in_search_paths
+from syncer.repos import run_command
 
 
 def _git(path: Path, *args: str) -> None:
@@ -280,6 +283,39 @@ class TestIsFork:
             assert repo.is_fork is False
 
 
+class TestNonInteractiveExecution:
+    """Git prompts on /dev/tty, which capture_output does not redirect, so a credential or
+    host-key prompt would block a worker thread indefinitely with nothing on screen."""
+
+    def test_disables_git_terminal_prompting(self, monkeypatch):
+        monkeypatch.delenv('GIT_TERMINAL_PROMPT', raising=False)
+        assert _noninteractive_env()['GIT_TERMINAL_PROMPT'] == '0'
+
+    def test_adds_ssh_batch_mode(self, monkeypatch):
+        monkeypatch.delenv('GIT_SSH_COMMAND', raising=False)
+        assert _noninteractive_env()['GIT_SSH_COMMAND'] == 'ssh -o BatchMode=yes'
+
+    def test_preserves_a_configured_ssh_command(self, monkeypatch):
+        monkeypatch.setenv('GIT_SSH_COMMAND', 'ssh -i /keys/work')
+        assert _noninteractive_env()['GIT_SSH_COMMAND'] == 'ssh -i /keys/work -o BatchMode=yes'
+
+    def test_environment_reaches_the_subprocess(self):
+        result = run_command(['sh', '-c', 'echo "$GIT_TERMINAL_PROMPT"'], timeout=10)
+        assert result.stdout.strip() == '0'
+
+    def test_timeout_becomes_a_non_zero_result_not_an_exception(self):
+        result = run_command(['sleep', '5'], timeout=1)
+        assert result.returncode == TIMEOUT_RETURNCODE
+        assert 'timed out' in result.stderr
+
+    def test_a_timed_out_git_call_reads_as_failure(self, git_repo):
+        repo = _make_repo(git_repo, timeout=1)
+        with patch('syncer.repos.subprocess.run', side_effect=subprocess.TimeoutExpired(cmd='git', timeout=1)):
+            assert repo.fetch_prune() is False
+            assert repo.local_branches() == []
+            assert repo.default_branch is None
+
+
 class TestContainsBranch:
     """Integration has two proofs: ancestry, and patch equivalence for squash/cherry-pick
     integration, which rewrites commits so ancestry can never see them."""
@@ -294,7 +330,7 @@ class TestContainsBranch:
     def test_ancestry_proves_a_merged_branch(self, git_repo):
         self._branch_with_commit(git_repo, 'feature', 'a.txt')
         _git(git_repo, 'merge', '--no-ff', '-m', 'merge feature', 'feature')
-        repo = Repo(name='test-repo', path=git_repo, owner='user', host='https://github.com')
+        repo = _make_repo(git_repo)
         assert repo.is_merged_into('feature', 'master' if repo.default_branch == 'master' else 'main') is True
         assert repo.contains_branch('feature', repo.default_branch) is True
 
@@ -302,7 +338,7 @@ class TestContainsBranch:
         self._branch_with_commit(git_repo, 'feature', 'a.txt')
         _git(git_repo, 'merge', '--squash', 'feature')
         _git(git_repo, 'commit', '-m', 'squash feature')
-        repo = Repo(name='test-repo', path=git_repo, owner='user', host='https://github.com')
+        repo = _make_repo(git_repo)
         default = repo.default_branch
         assert repo.is_merged_into('feature', default) is False  # a squash rewrites the commit
         assert repo.is_patch_applied_in('feature', default) is True
@@ -310,12 +346,12 @@ class TestContainsBranch:
 
     def test_unintegrated_branch_is_not_contained(self, git_repo):
         self._branch_with_commit(git_repo, 'feature', 'a.txt')
-        repo = Repo(name='test-repo', path=git_repo, owner='user', host='https://github.com')
+        repo = _make_repo(git_repo)
         assert repo.contains_branch('feature', repo.default_branch) is False
 
     def test_missing_target_is_not_contained(self, git_repo):
         self._branch_with_commit(git_repo, 'feature', 'a.txt')
-        repo = Repo(name='test-repo', path=git_repo, owner='user', host='https://github.com')
+        repo = _make_repo(git_repo)
         assert repo.contains_branch('feature', 'no-such-branch') is False
 
 

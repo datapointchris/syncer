@@ -12,6 +12,7 @@ from rich.console import Console
 
 from syncer.policy import BUILTIN_POLICIES
 from syncer.policy import Policy
+from syncer.repos import GIT_TIMEOUT_SECONDS
 
 TOOL_CONFIG_PATH = Path.home() / '.config' / 'syncer' / 'config.toml'
 DATA_DIR = Path.home() / '.local' / 'share' / 'syncer'
@@ -67,6 +68,9 @@ class ToolConfig(BaseModel):
     default_policy: str = 'standard'
     policies: dict[str, Policy] = {}
     repo_overrides: dict[str, str] = {}
+    # Ceiling on a single git call. Machine-local because it is a property of this box's network
+    # — a corporate VPN fetching a large monorepo needs more headroom than a home connection.
+    git_timeout: int = GIT_TIMEOUT_SECONDS
 
 
 def _load_repos_file(path: Path) -> SyncerConfig:
@@ -95,6 +99,7 @@ def load_tool_config() -> ToolConfig:
         default_policy=raw.get('default_policy', 'standard'),
         policies=policies,
         repo_overrides=raw.get('repo_overrides', {}),
+        git_timeout=raw.get('git_timeout', GIT_TIMEOUT_SECONDS),
     )
 
 

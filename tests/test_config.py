@@ -13,6 +13,7 @@ from syncer.config import resolve_policies
 from syncer.config import resolve_policy_name
 from syncer.policy import Action
 from syncer.policy import Scope
+from syncer.repos import GIT_TIMEOUT_SECONDS
 
 
 @pytest.fixture
@@ -110,6 +111,11 @@ class TestLoadToolConfig:
         tool_config.write_text('[policies.bad]\n[policies.bad.rules]\n"default:behind" = "nuke"\n')
         with pytest.raises(ValueError, match='unknown action'):
             load_tool_config()
+
+    def test_git_timeout_defaults_and_overrides(self, tool_config):
+        assert load_tool_config().git_timeout == GIT_TIMEOUT_SECONDS
+        tool_config.write_text('git_timeout = 300\n')
+        assert load_tool_config().git_timeout == 300
 
     def test_parses_repo_overrides(self, tool_config):
         tool_config.write_text('[repo_overrides]\n"shared-repo" = "observe"\n')

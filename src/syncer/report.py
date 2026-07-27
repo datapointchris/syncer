@@ -226,7 +226,7 @@ def _build_repo_report(
     path = Path(repo_config.path).expanduser()
     label = repo_config.path if repo_config.path.startswith('~') else repo_config.name
     owner = repo_config.owner or config.owner
-    repo = Repo(name=repo_config.name, path=path, owner=owner, host=config.host)
+    repo = Repo(name=repo_config.name, path=path, owner=owner, host=config.host, timeout=tool_config.git_timeout)
 
     def lifecycle(status: str, detail: str | None = None) -> RepoBranchReport:
         return RepoBranchReport(label=label, path=repo_config.path, name=repo_config.name, lifecycle=status, lifecycle_detail=detail)

@@ -128,6 +128,15 @@ task, so no cumulative N×delay floor on large repo sets.
 Output is sorted by attention ascending (`synced → operation → warning → error`, path-sorted
 within each group) so the repos needing action land at the bottom nearest the prompt.
 
+Every subprocess goes through `run_command` (`repos.py`), which is what makes that concurrency
+safe: git prompts for credentials on `/dev/tty`, which `capture_output` does **not** redirect, so
+an expired credential or an unknown SSH host key would leave N worker threads blocked on the same
+terminal with nothing on screen. `GIT_TERMINAL_PROMPT=0` plus `-o BatchMode=yes` makes those fail
+instead of ask, and a timeout (`git_timeout` in `config.toml`, default 120s; 600s for clones)
+backstops anything that still blocks. A timeout is returned as an ordinary non-zero result, never
+raised — raising out of a worker would lose the whole repo's report instead of the one wedged call.
+Never call `subprocess.run` directly for a git or `gh` invocation.
+
 ## Run history
 
 The default run appends one `SyncRunEvent` per run to `~/.local/share/syncer/events.jsonl`
