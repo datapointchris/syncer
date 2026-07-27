@@ -78,6 +78,7 @@ default_policy = "standard"
 [policies.laptop]
 scope = "all"
 fallback = "report"
+merge_target = "develop"   # branch a gone branch must be integrated into before delete_local
 [policies.laptop.rules]
 "*:behind"       = "fast_forward"   # merge --ff-only if checked out, update-ref if not
 "*:diverged"     = "report"

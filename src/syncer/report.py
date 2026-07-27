@@ -197,7 +197,7 @@ def build_branch_rows(repo: Repo, policy: Policy, apply: bool) -> list[BranchRow
     rows = []
     for state in classify_repo(repo, policy):
         action = decide(state, policy)
-        outcome = execute(action, state, repo) if apply else None
+        outcome = execute(action, state, repo, policy) if apply else None
         rows.append(BranchRow(state=state, action=action, outcome=outcome))
     return rows
 

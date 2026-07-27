@@ -33,22 +33,24 @@ def classify_branch(
     current: str,
     dirty_current: bool,
     stashed: bool,
+    merge_target: str | None = None,
 ) -> BranchState:
     is_current = branch == current
     is_default = branch == default
     # dirty only gates the *current* branch — a non-current branch's tree isn't checked out.
     dirty = dirty_current and is_current
     upstream_short, gone = repo.branch_upstream(branch)
+    target = merge_target or default
 
     ahead = 0
     behind = 0
-    merged_into_default = False
+    merged_into_target = False
     if not upstream_short:
         primary = PrimaryState.NO_UPSTREAM
     elif gone:
         primary = PrimaryState.GONE
-        if default:
-            merged_into_default = repo.is_merged_into(branch, default)
+        if target:
+            merged_into_target = repo.contains_branch(branch, target)
     else:
         ahead, behind = repo.ahead_behind(branch, upstream_short)
         primary = _primary_from_counts(ahead, behind)
@@ -63,7 +65,7 @@ def classify_branch(
         dirty=dirty,
         stashed=stashed,
         upstream=upstream_short or None,
-        merged_into_default=merged_into_default,
+        merged_into_target=merged_into_target,
     )
 
 
@@ -92,7 +94,15 @@ def classify_repo(repo: Repo, policy: Policy) -> list[BranchState]:
     stashed = repo.stash_count > 0
 
     states = [
-        classify_branch(repo, branch, default=default, current=current, dirty_current=dirty_current, stashed=stashed)
+        classify_branch(
+            repo,
+            branch,
+            default=default,
+            current=current,
+            dirty_current=dirty_current,
+            stashed=stashed,
+            merge_target=policy.merge_target,
+        )
         for branch in _branches_in_scope(repo, policy.scope, default, current, detached)
     ]
 

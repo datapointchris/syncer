@@ -280,6 +280,45 @@ class TestIsFork:
             assert repo.is_fork is False
 
 
+class TestContainsBranch:
+    """Integration has two proofs: ancestry, and patch equivalence for squash/cherry-pick
+    integration, which rewrites commits so ancestry can never see them."""
+
+    def _branch_with_commit(self, repo_path: Path, branch: str, filename: str) -> None:
+        _git(repo_path, 'checkout', '-b', branch)
+        (repo_path / filename).write_text(f'{filename}\n')
+        _git(repo_path, 'add', '.')
+        _git(repo_path, 'commit', '-m', f'work on {branch}')
+        _git(repo_path, 'checkout', '-')
+
+    def test_ancestry_proves_a_merged_branch(self, git_repo):
+        self._branch_with_commit(git_repo, 'feature', 'a.txt')
+        _git(git_repo, 'merge', '--no-ff', '-m', 'merge feature', 'feature')
+        repo = Repo(name='test-repo', path=git_repo, owner='user', host='https://github.com')
+        assert repo.is_merged_into('feature', 'master' if repo.default_branch == 'master' else 'main') is True
+        assert repo.contains_branch('feature', repo.default_branch) is True
+
+    def test_patch_equivalence_proves_a_squash_merged_branch(self, git_repo):
+        self._branch_with_commit(git_repo, 'feature', 'a.txt')
+        _git(git_repo, 'merge', '--squash', 'feature')
+        _git(git_repo, 'commit', '-m', 'squash feature')
+        repo = Repo(name='test-repo', path=git_repo, owner='user', host='https://github.com')
+        default = repo.default_branch
+        assert repo.is_merged_into('feature', default) is False  # a squash rewrites the commit
+        assert repo.is_patch_applied_in('feature', default) is True
+        assert repo.contains_branch('feature', default) is True
+
+    def test_unintegrated_branch_is_not_contained(self, git_repo):
+        self._branch_with_commit(git_repo, 'feature', 'a.txt')
+        repo = Repo(name='test-repo', path=git_repo, owner='user', host='https://github.com')
+        assert repo.contains_branch('feature', repo.default_branch) is False
+
+    def test_missing_target_is_not_contained(self, git_repo):
+        self._branch_with_commit(git_repo, 'feature', 'a.txt')
+        repo = Repo(name='test-repo', path=git_repo, owner='user', host='https://github.com')
+        assert repo.contains_branch('feature', 'no-such-branch') is False
+
+
 class TestFindRepoInSearchPaths:
     def test_find_direct(self, tmp_path):
         repo_dir = tmp_path / 'code' / 'myrepo'

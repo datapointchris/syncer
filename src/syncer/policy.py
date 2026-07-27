@@ -78,7 +78,7 @@ class BranchState(BaseModel):
     dirty: bool = False
     stashed: bool = False
     upstream: str | None = None
-    merged_into_default: bool = False
+    merged_into_target: bool = False
 
 
 class Policy(BaseModel):
@@ -93,6 +93,11 @@ class Policy(BaseModel):
     prune: bool = True
     rules: dict[str, str] = {}
     fallback: Action = Action.REPORT
+    # Branch that a gone branch must be integrated into before delete_local will touch it.
+    # None means the repo's default branch. Set it where the trunk you merge into is not the
+    # default — a develop-centric flow never makes a feature branch an ancestor of main until
+    # the release promotes it, so the default-branch guard refuses every merged branch forever.
+    merge_target: str | None = None
 
     @field_validator('rules')
     @classmethod

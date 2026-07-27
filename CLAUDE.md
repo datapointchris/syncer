@@ -51,9 +51,14 @@ time — and refuses rather than forces. Guaranteed independent of any policy:
 3. `fast_forward`/`pull_ff`/`ff_ref` require strict ancestry (upstream strictly ahead), re-checked
    at write time.
 4. `rebase_push` aborts on conflict and downgrades to a refusal — never a half-rebase.
-5. `delete_local` only under the full `GONE ∧ merged-into-default ∧ ¬current ∧ ¬default ∧ clean`
-   guard. Uses `branch -D` (not `-d`) because a GONE branch has no upstream for git's own
-   merged-heuristic to consult — safety comes from our explicit guard, not git's.
+5. `delete_local` only under the full `GONE ∧ integrated ∧ ¬current ∧ ¬default ∧ ¬merge-target ∧
+   clean` guard. Uses `branch -D` (not `-d`) because a GONE branch has no upstream for git's own
+   merged-heuristic to consult — safety comes from our explicit guard, not git's. *Integrated*
+   means the target provably holds the work, by ancestry **or** patch equivalence (`git cherry`),
+   never inferred from the remote branch having been deleted — a branch deleted without merging
+   must still be refused. The target is `policy.merge_target`, defaulting to the repo's default
+   branch; a develop-centric flow never makes a feature branch an ancestor of `main`, so
+   without this the guard refuses every genuinely merged branch forever.
 6. Any precondition that fails at execute time is refused and reported, never forced.
 7. Actions use explicit refspecs / ref names, so they always act on the classified branch, never
    the incidentally-checked-out one.

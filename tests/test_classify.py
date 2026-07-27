@@ -115,9 +115,9 @@ class TestClassifyBranchStates:
         state = classify_branch(repo, 'feature/gone', default='main', current='feature/gone', dirty_current=False, stashed=False)
         assert state.primary == PrimaryState.GONE
         # feature/gone was based on main + one commit, not merged into main
-        assert state.merged_into_default is False
+        assert state.merged_into_target is False
 
-    def test_gone_merged_into_default(self, cloned_repo):
+    def test_gone_merged_into_target(self, cloned_repo):
         # A branch pointing exactly at main (no extra commits) is an ancestor of main.
         _git(cloned_repo, 'checkout', '-b', 'feature/merged')
         _git(cloned_repo, 'push', '-u', 'origin', 'feature/merged')
@@ -127,7 +127,26 @@ class TestClassifyBranchStates:
         repo.fetch_prune()
         state = classify_branch(repo, 'feature/merged', default='main', current='main', dirty_current=False, stashed=False)
         assert state.primary == PrimaryState.GONE
-        assert state.merged_into_default is True
+        assert state.merged_into_target is True
+
+    def test_merge_target_overrides_the_default_branch(self, cloned_repo):
+        """The classified state has to agree with what the delete_local guard will decide,
+        so classify resolves integration against the policy's merge_target too."""
+        _git(cloned_repo, 'checkout', '-b', 'develop')
+        _git(cloned_repo, 'push', '-u', 'origin', 'develop')
+        _git(cloned_repo, 'checkout', '-b', 'feature/x')
+        _commit(cloned_repo, 'feature.py', 'feat')
+        _git(cloned_repo, 'push', '-u', 'origin', 'feature/x')
+        _git(cloned_repo, 'checkout', 'develop')
+        _git(cloned_repo, 'merge', '--no-ff', '-m', 'merge feature/x', 'feature/x')
+        _git(cloned_repo, 'push')
+        _git(cloned_repo, 'push', 'origin', '--delete', 'feature/x')
+        repo = _make_repo(cloned_repo)
+        repo.fetch_prune()
+
+        args = {'default': 'main', 'current': 'develop', 'dirty_current': False, 'stashed': False}
+        assert classify_branch(repo, 'feature/x', **args).merged_into_target is False
+        assert classify_branch(repo, 'feature/x', merge_target='develop', **args).merged_into_target is True
 
 
 class TestClassifyModifiers:

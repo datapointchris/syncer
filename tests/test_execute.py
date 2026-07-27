@@ -9,10 +9,15 @@ from syncer.execute import Outcome
 from syncer.execute import execute
 from syncer.policy import Action
 from syncer.policy import BranchState
+from syncer.policy import Policy
 from syncer.policy import PrimaryState
 from syncer.repos import Repo
 
 FORCE_FLAGS = ('--force', '-f', '--force-with-lease')
+
+# Executor tests exercise actions directly, so the policy only supplies guard settings
+# (merge_target); the default of None means 'the repo's default branch', as in the built-ins.
+POLICY = Policy(name='test')
 
 
 def _git(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -99,7 +104,7 @@ class TestExecuteEffects:
         repo.fetch_prune()
         state = _state_for(repo, 'main')
         assert state.primary == PrimaryState.BEHIND
-        outcome = execute(Action.PULL_FF, state, repo)
+        outcome = execute(Action.PULL_FF, state, repo, POLICY)
         assert outcome.status == 'done'
         assert _state_for(repo, 'main').primary == PrimaryState.SYNCED
 
@@ -120,7 +125,7 @@ class TestExecuteEffects:
         state = _state_for(repo, 'feature')
         assert state.primary == PrimaryState.BEHIND
         assert state.is_current is False
-        outcome = execute(Action.FF_REF, state, repo)
+        outcome = execute(Action.FF_REF, state, repo, POLICY)
         assert outcome.status == 'done'
         assert _state_for(repo, 'feature').primary == PrimaryState.SYNCED
 
@@ -129,7 +134,7 @@ class TestExecuteEffects:
         repo = _make_repo(cloned_repo)
         state = _state_for(repo, 'main')
         assert state.primary == PrimaryState.AHEAD
-        outcome = execute(Action.PUSH, state, repo)
+        outcome = execute(Action.PUSH, state, repo, POLICY)
         assert outcome.status == 'done'
         # After a successful push the remote-tracking ref advances → back to synced.
         assert _state_for(repo, 'main').primary == PrimaryState.SYNCED
@@ -141,7 +146,7 @@ class TestExecuteEffects:
         repo.fetch_prune()
         state = _state_for(repo, 'main')
         assert state.primary == PrimaryState.DIVERGED
-        outcome = execute(Action.REBASE_PUSH, state, repo)
+        outcome = execute(Action.REBASE_PUSH, state, repo, POLICY)
         assert outcome.status == 'done'
         assert _state_for(repo, 'main').primary == PrimaryState.SYNCED
 
@@ -151,7 +156,7 @@ class TestExecuteEffects:
         repo = _make_repo(cloned_repo)
         state = _state_for(repo, 'feature/new')
         assert state.primary == PrimaryState.NO_UPSTREAM
-        outcome = execute(Action.SET_UPSTREAM_PUSH, state, repo)
+        outcome = execute(Action.SET_UPSTREAM_PUSH, state, repo, POLICY)
         assert outcome.status == 'done'
         assert repo.branch_upstream('feature/new')[0] == 'origin/feature/new'
 
@@ -164,8 +169,8 @@ class TestExecuteEffects:
         repo.fetch_prune()
         state = _state_for(repo, 'feature/merged')
         assert state.primary == PrimaryState.GONE
-        assert state.merged_into_default is True
-        outcome = execute(Action.DELETE_LOCAL, state, repo)
+        assert state.merged_into_target is True
+        outcome = execute(Action.DELETE_LOCAL, state, repo, POLICY)
         assert outcome.status == 'done'
         assert 'feature/merged' not in repo.local_branches()
 
@@ -181,7 +186,7 @@ class TestFastForwardDispatchesOnCheckoutState:
         state = _state_for(repo, 'main')
         assert state.is_current is True
         assert state.primary == PrimaryState.BEHIND
-        outcome = execute(Action.FAST_FORWARD, state, repo)
+        outcome = execute(Action.FAST_FORWARD, state, repo, POLICY)
         assert outcome.status == 'done'
         assert outcome.action == Action.FAST_FORWARD
         assert _state_for(repo, 'main').primary == PrimaryState.SYNCED
@@ -202,7 +207,7 @@ class TestFastForwardDispatchesOnCheckoutState:
         state = _state_for(repo, 'feature')
         assert state.is_current is False
         assert state.primary == PrimaryState.BEHIND
-        outcome = execute(Action.FAST_FORWARD, state, repo)
+        outcome = execute(Action.FAST_FORWARD, state, repo, POLICY)
         assert outcome.status == 'done'
         assert outcome.action == Action.FAST_FORWARD
         assert _state_for(repo, 'feature').primary == PrimaryState.SYNCED
@@ -213,7 +218,7 @@ class TestFastForwardDispatchesOnCheckoutState:
         repo.fetch_prune()
         (cloned_repo / 'README.md').write_text('# dirty edit\n')
         before = _head(repo)
-        outcome = execute(Action.FAST_FORWARD, _state_for(repo, 'main'), repo)
+        outcome = execute(Action.FAST_FORWARD, _state_for(repo, 'main'), repo, POLICY)
         assert outcome.status == 'refused'
         assert 'dirty' in outcome.message
         assert _head(repo) == before
@@ -224,9 +229,79 @@ class TestFastForwardDispatchesOnCheckoutState:
         repo = _make_repo(cloned_repo)
         repo.fetch_prune()
         before = _head(repo)
-        outcome = execute(Action.FAST_FORWARD, _state_for(repo, 'main'), repo)
+        outcome = execute(Action.FAST_FORWARD, _state_for(repo, 'main'), repo, POLICY)
         assert outcome.status == 'refused'
         assert _head(repo) == before
+
+
+class TestDeleteLocalIntegrationProof:
+    """A develop-centric flow never makes a feature branch an ancestor of the default branch,
+    so the guard has to check the branch the work is actually integrated into — and has to
+    accept the squash merges that Bitbucket and GitHub perform by default."""
+
+    def _develop_flow(self, cloned_repo) -> None:
+        _git(cloned_repo, 'checkout', '-b', 'develop')
+        _git(cloned_repo, 'push', '-u', 'origin', 'develop')
+        _git(cloned_repo, 'checkout', '-b', 'feature/x')
+        _commit(cloned_repo, 'feature.py', 'feat')
+        _git(cloned_repo, 'push', '-u', 'origin', 'feature/x')
+        _git(cloned_repo, 'checkout', 'develop')
+
+    def test_merged_into_target_but_not_into_default(self, cloned_repo):
+        self._develop_flow(cloned_repo)
+        _git(cloned_repo, 'merge', '--no-ff', '-m', 'merge feature/x', 'feature/x')
+        _git(cloned_repo, 'push')
+        _git(cloned_repo, 'push', 'origin', '--delete', 'feature/x')
+        repo = _make_repo(cloned_repo)
+        repo.fetch_prune()
+        state = _state_for(repo, 'feature/x')
+        assert state.primary == PrimaryState.GONE
+        # Default target is the repo default (main), which the branch never reaches in this flow.
+        assert execute(Action.DELETE_LOCAL, state, repo, POLICY).status == 'refused'
+        assert 'feature/x' in repo.local_branches()
+        outcome = execute(Action.DELETE_LOCAL, state, repo, Policy(name='work', merge_target='develop'))
+        assert outcome.status == 'done'
+        assert 'feature/x' not in repo.local_branches()
+
+    def test_squash_merged_into_target(self, cloned_repo):
+        self._develop_flow(cloned_repo)
+        _git(cloned_repo, 'merge', '--squash', 'feature/x')
+        _git(cloned_repo, 'commit', '-m', 'squash feature/x')
+        _git(cloned_repo, 'push')
+        _git(cloned_repo, 'push', 'origin', '--delete', 'feature/x')
+        repo = _make_repo(cloned_repo)
+        repo.fetch_prune()
+        assert repo.is_merged_into('feature/x', 'develop') is False  # ancestry cannot see a squash
+        state = _state_for(repo, 'feature/x')
+        outcome = execute(Action.DELETE_LOCAL, state, repo, Policy(name='work', merge_target='develop'))
+        assert outcome.status == 'done'
+        assert 'feature/x' not in repo.local_branches()
+
+    def test_refused_when_absent_from_the_target(self, cloned_repo):
+        self._develop_flow(cloned_repo)
+        _git(cloned_repo, 'push', 'origin', '--delete', 'feature/x')  # deleted without merging
+        repo = _make_repo(cloned_repo)
+        repo.fetch_prune()
+        state = _state_for(repo, 'feature/x')
+        outcome = execute(Action.DELETE_LOCAL, state, repo, Policy(name='work', merge_target='develop'))
+        assert outcome.status == 'refused'
+        assert 'not integrated into develop' in outcome.message
+        assert 'feature/x' in repo.local_branches()
+
+    def test_refused_for_the_merge_target_itself(self, cloned_repo):
+        """contains_branch(develop, develop) is trivially true, so without an explicit guard a
+        deleted origin/develop would take the local trunk with it."""
+        self._develop_flow(cloned_repo)
+        _git(cloned_repo, 'checkout', 'main')
+        _git(cloned_repo, 'push', 'origin', '--delete', 'develop')
+        repo = _make_repo(cloned_repo)
+        repo.fetch_prune()
+        state = _state_for(repo, 'develop')
+        assert state.primary == PrimaryState.GONE
+        outcome = execute(Action.DELETE_LOCAL, state, repo, Policy(name='work', merge_target='develop'))
+        assert outcome.status == 'refused'
+        assert 'merge target' in outcome.message
+        assert 'develop' in repo.local_branches()
 
 
 # ---------- L3: refusals (out-of-precondition → no mutation) ---------- #
@@ -240,7 +315,7 @@ class TestExecuteRefusals:
         (cloned_repo / 'README.md').write_text('# dirty edit\n')
         before = _head(repo)
         state = _state_for(repo, 'main')
-        outcome = execute(Action.PULL_FF, state, repo)
+        outcome = execute(Action.PULL_FF, state, repo, POLICY)
         assert outcome.status == 'refused'
         assert 'dirty' in outcome.message
         assert _head(repo) == before  # invariant 2: tree/HEAD untouched
@@ -252,7 +327,7 @@ class TestExecuteRefusals:
         repo.fetch_prune()
         before = _head(repo)
         state = _state_for(repo, 'main')
-        outcome = execute(Action.PULL_FF, state, repo)
+        outcome = execute(Action.PULL_FF, state, repo, POLICY)
         assert outcome.status == 'refused'  # invariant 3: not strictly behind
         assert _head(repo) == before
 
@@ -261,7 +336,7 @@ class TestExecuteRefusals:
         repo = _make_repo(cloned_repo)
         repo.fetch_prune()
         state = _state_for(repo, 'main')  # main is current and behind
-        outcome = execute(Action.FF_REF, state, repo)
+        outcome = execute(Action.FF_REF, state, repo, POLICY)
         assert outcome.status == 'refused'
 
     def test_push_refused_when_diverged(self, cloned_repo, tmp_path):
@@ -270,7 +345,7 @@ class TestExecuteRefusals:
         repo = _make_repo(cloned_repo)
         repo.fetch_prune()
         state = _state_for(repo, 'main')
-        outcome = execute(Action.PUSH, state, repo)
+        outcome = execute(Action.PUSH, state, repo, POLICY)
         assert outcome.status == 'refused'
 
     def test_push_refused_when_dirty(self, cloned_repo):
@@ -279,7 +354,7 @@ class TestExecuteRefusals:
         _git(cloned_repo, 'add', 'dirty.txt')
         repo = _make_repo(cloned_repo)
         state = _state_for(repo, 'main')
-        outcome = execute(Action.PUSH, state, repo)
+        outcome = execute(Action.PUSH, state, repo, POLICY)
         assert outcome.status == 'refused'
         assert 'dirty' in outcome.message
 
@@ -293,15 +368,15 @@ class TestExecuteRefusals:
         repo.fetch_prune()
         state = _state_for(repo, 'feature/unmerged')
         assert state.primary == PrimaryState.GONE
-        outcome = execute(Action.DELETE_LOCAL, state, repo)
+        outcome = execute(Action.DELETE_LOCAL, state, repo, POLICY)
         assert outcome.status == 'refused'
         assert 'feature/unmerged' in repo.local_branches()  # not deleted
 
     def test_delete_local_refused_on_default_branch(self, cloned_repo):
         repo = _make_repo(cloned_repo)
         # Hand-build a GONE state for main to prove the ¬default guard holds.
-        state = BranchState(branch='main', primary=PrimaryState.GONE, is_default=True, merged_into_default=True)
-        outcome = execute(Action.DELETE_LOCAL, state, repo)
+        state = BranchState(branch='main', primary=PrimaryState.GONE, is_default=True, merged_into_target=True)
+        outcome = execute(Action.DELETE_LOCAL, state, repo, POLICY)
         assert outcome.status == 'refused'
         assert 'main' in repo.local_branches()
 
@@ -318,7 +393,7 @@ class TestInvariants:
         repo.fetch_prune()
         state = _state_for(repo, 'main')
         assert state.primary == PrimaryState.DIVERGED
-        outcome = execute(Action.REBASE_PUSH, state, repo)
+        outcome = execute(Action.REBASE_PUSH, state, repo, POLICY)
         assert outcome.status == 'refused'
         assert 'conflict' in outcome.message
         # invariant 4: no half-rebase, tree left clean
@@ -342,7 +417,7 @@ class TestInvariants:
         for branch in ('main', 'feature/gone'):
             state = _state_for(repo, branch)
             for action in Action:
-                execute(action, state, repo)
+                execute(action, state, repo, POLICY)
 
         for flag in FORCE_FLAGS:
             assert flag not in spy.flat_args, f'{flag} was issued to git'
@@ -358,7 +433,7 @@ class TestInvariants:
         before_dirty = repo.uncommitted_changes
         state = _state_for(repo, 'main')
         for action in (Action.FAST_FORWARD, Action.PULL_FF, Action.REBASE_PUSH, Action.PUSH):
-            outcome = execute(action, state, repo)
+            outcome = execute(action, state, repo, POLICY)
             assert outcome.status == 'refused'
         assert _head(repo) == before_head
         assert repo.uncommitted_changes == before_dirty
@@ -370,16 +445,16 @@ class TestInvariants:
 class TestNonMutatingActions:
     def test_skip(self, cloned_repo):
         repo = _make_repo(cloned_repo)
-        outcome = execute(Action.SKIP, _state_for(repo, 'main'), repo)
+        outcome = execute(Action.SKIP, _state_for(repo, 'main'), repo, POLICY)
         assert outcome.status == 'skipped'
 
     def test_report(self, cloned_repo):
         repo = _make_repo(cloned_repo)
-        outcome = execute(Action.REPORT, _state_for(repo, 'main'), repo)
+        outcome = execute(Action.REPORT, _state_for(repo, 'main'), repo, POLICY)
         assert outcome.status == 'reported'
 
     def test_prompt_degrades_to_report(self, cloned_repo):
         repo = _make_repo(cloned_repo)
-        outcome = execute(Action.PROMPT, _state_for(repo, 'main'), repo)
+        outcome = execute(Action.PROMPT, _state_for(repo, 'main'), repo, POLICY)
         assert outcome.status == 'reported'
         assert isinstance(outcome, Outcome)

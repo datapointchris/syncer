@@ -122,12 +122,32 @@ class Repo:
             return 0, 0
         return int(parts[0]), int(parts[1])
 
-    def is_merged_into(self, branch: str, target: str) -> bool:
-        """True if `branch` is an ancestor of `target` (prefer origin/<target> if present)."""
+    def _target_ref(self, target: str) -> str:
         ref = f'origin/{target}'
         if self._git('rev-parse', '--verify', ref).returncode != 0:
             ref = target
-        return self._git('merge-base', '--is-ancestor', branch, ref).returncode == 0
+        return ref
+
+    def is_merged_into(self, branch: str, target: str) -> bool:
+        """True if `branch` is an ancestor of `target` (prefer origin/<target> if present)."""
+        return self._git('merge-base', '--is-ancestor', branch, self._target_ref(target)).returncode == 0
+
+    def is_patch_applied_in(self, branch: str, target: str) -> bool:
+        """True if every commit unique to `branch` has a patch-equivalent commit in `target`.
+
+        Catches squash and cherry-pick integration, which rewrite commits so ancestry can never
+        see them. `git cherry` marks a commit '-' when its patch-id is already present upstream
+        and '+' when it is not. A multi-commit branch collapsed into a single squash commit has
+        no matching patch-ids and correctly reports '+' — a false negative costs only a refusal.
+        """
+        result = self._git('cherry', self._target_ref(target), branch)
+        if result.returncode != 0:
+            return False
+        return all(line.startswith('-') for line in result.stdout.splitlines() if line.strip())
+
+    def contains_branch(self, branch: str, target: str) -> bool:
+        """True if `target` already holds every change on `branch`, by ancestry or by patch."""
+        return self.is_merged_into(branch, target) or self.is_patch_applied_in(branch, target)
 
     @property
     def unpushed_commits(self) -> int:

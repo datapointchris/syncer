@@ -9,7 +9,9 @@ independent of any policy:
 2. Never mutate a branch whose working tree is dirty (the current branch).
 3. fast_forward / pull_ff / ff_ref require strict ancestry (upstream strictly ahead), re-checked here.
 4. rebase_push aborts on conflict and downgrades to a refusal — never a half-rebase.
-5. delete_local only under the full GONE ∧ merged ∧ ¬current ∧ ¬default ∧ clean guard.
+5. delete_local only under the full GONE ∧ integrated ∧ ¬current ∧ ¬default ∧ ¬merge-target ∧
+   clean guard. Integration is proven by ancestry or by patch equivalence, never assumed from
+   the remote branch having been deleted.
 6. Any precondition that fails at execute time is refused and reported, never forced.
 7. execute always acts on the branch the state was classified from (explicit refspecs /
    ref names), never the incidentally-checked-out branch.
@@ -23,6 +25,7 @@ from pydantic import BaseModel
 
 from syncer.policy import Action
 from syncer.policy import BranchState
+from syncer.policy import Policy
 from syncer.repos import Repo
 
 OutcomeStatus = Literal['skipped', 'reported', 'done', 'refused', 'failed']
@@ -53,7 +56,7 @@ def _is_strictly_behind(repo: Repo, branch: str, upstream: str) -> bool:
     return behind > 0 and ahead == 0
 
 
-def _pull_ff(state: BranchState, repo: Repo) -> Outcome:
+def _pull_ff(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     if not state.is_current:
         return _refused(state, Action.PULL_FF, 'pull_ff requires the branch to be current')
     if not state.upstream:
@@ -68,7 +71,7 @@ def _pull_ff(state: BranchState, repo: Repo) -> Outcome:
     return Outcome(branch=state.branch, action=Action.PULL_FF, status='failed', message=err)
 
 
-def _ff_ref(state: BranchState, repo: Repo) -> Outcome:
+def _ff_ref(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     if state.is_current:
         return _refused(state, Action.FF_REF, 'ff_ref is for non-current branches; use pull_ff')
     if not state.upstream:
@@ -81,7 +84,7 @@ def _ff_ref(state: BranchState, repo: Repo) -> Outcome:
     return Outcome(branch=state.branch, action=Action.FF_REF, status='failed', message=err)
 
 
-def _fast_forward(state: BranchState, repo: Repo) -> Outcome:
+def _fast_forward(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     """Advance a branch to its upstream by whichever mechanism its checkout state allows.
 
     merge --ff-only needs the branch checked out; update-ref needs it not checked out. A rule
@@ -90,10 +93,10 @@ def _fast_forward(state: BranchState, repo: Repo) -> Outcome:
     strict ancestry (and dirtiness, where it applies) themselves, so this adds no new primitive.
     """
     delegate = _pull_ff if state.is_current else _ff_ref
-    return delegate(state, repo).model_copy(update={'action': Action.FAST_FORWARD})
+    return delegate(state, repo, policy).model_copy(update={'action': Action.FAST_FORWARD})
 
 
-def _push(state: BranchState, repo: Repo) -> Outcome:
+def _push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     if repo.uncommitted_changes:
         return _refused(state, Action.PUSH, 'working tree is dirty')
     if not state.upstream:
@@ -109,7 +112,7 @@ def _push(state: BranchState, repo: Repo) -> Outcome:
     return Outcome(branch=state.branch, action=Action.PUSH, status='failed', message=err)
 
 
-def _rebase_push(state: BranchState, repo: Repo) -> Outcome:
+def _rebase_push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     if not state.is_current:
         return _refused(state, Action.REBASE_PUSH, 'rebase_push requires the branch to be current')
     if repo.uncommitted_changes:  # invariant 2
@@ -128,7 +131,7 @@ def _rebase_push(state: BranchState, repo: Repo) -> Outcome:
     return Outcome(branch=state.branch, action=Action.REBASE_PUSH, status='failed', message=err)
 
 
-def _set_upstream_push(state: BranchState, repo: Repo) -> Outcome:
+def _set_upstream_push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     if state.upstream:
         return _refused(state, Action.SET_UPSTREAM_PUSH, 'branch already has an upstream')
     if repo.uncommitted_changes:
@@ -139,7 +142,7 @@ def _set_upstream_push(state: BranchState, repo: Repo) -> Outcome:
     return Outcome(branch=state.branch, action=Action.SET_UPSTREAM_PUSH, status='failed', message=err)
 
 
-def _delete_local(state: BranchState, repo: Repo) -> Outcome:
+def _delete_local(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     # Full guard (invariant 5), every clause re-verified live.
     if state.primary != 'gone':
         return _refused(state, Action.DELETE_LOCAL, 'branch is not gone')
@@ -149,12 +152,16 @@ def _delete_local(state: BranchState, repo: Repo) -> Outcome:
         return _refused(state, Action.DELETE_LOCAL, 'refusing to delete the default branch')
     if repo.uncommitted_changes:
         return _refused(state, Action.DELETE_LOCAL, 'working tree is dirty')
-    default = repo.default_branch
-    if not default or not repo.is_merged_into(state.branch, default):
-        return _refused(state, Action.DELETE_LOCAL, 'branch is not merged into the default branch')
+    target = policy.merge_target or repo.default_branch
+    if not target:
+        return _refused(state, Action.DELETE_LOCAL, 'no merge target to verify integration against')
+    if state.branch == target:
+        return _refused(state, Action.DELETE_LOCAL, f'refusing to delete the merge target ({target})')
+    if not repo.contains_branch(state.branch, target):
+        return _refused(state, Action.DELETE_LOCAL, f'branch is not integrated into {target}')
     ok, err = repo.delete_local_branch(state.branch)
     if ok:
-        return Outcome(branch=state.branch, action=Action.DELETE_LOCAL, status='done', message='deleted merged, gone branch')
+        return Outcome(branch=state.branch, action=Action.DELETE_LOCAL, status='done', message=f'deleted; integrated into {target}')
     return Outcome(branch=state.branch, action=Action.DELETE_LOCAL, status='failed', message=err)
 
 
@@ -169,8 +176,12 @@ _MUTATORS = {
 }
 
 
-def execute(action: Action, state: BranchState, repo: Repo) -> Outcome:
-    """Perform `action` on `state.branch`, enforcing the hard invariants. Never forces."""
+def execute(action: Action, state: BranchState, repo: Repo, policy: Policy) -> Outcome:
+    """Perform `action` on `state.branch`, enforcing the hard invariants. Never forces.
+
+    `policy` is passed for the settings a guard has to consult live (currently `merge_target`);
+    it can never widen what an action is allowed to do — the invariants above hold whatever it says.
+    """
     if action == Action.SKIP:
         return Outcome(branch=state.branch, action=action, status='skipped')
     if action == Action.REPORT:
@@ -178,4 +189,4 @@ def execute(action: Action, state: BranchState, repo: Repo) -> Outcome:
     if action == Action.PROMPT:
         # Interactive traverse is deferred to a later slice; degrade to a report.
         return Outcome(branch=state.branch, action=action, status='reported', message='interactive prompt not implemented (v1)')
-    return _MUTATORS[action](state, repo)
+    return _MUTATORS[action](state, repo, policy)
