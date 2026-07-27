@@ -64,6 +64,10 @@ class SyncerConfig(BaseModel):
     # Center wants the .git suffix — and a registry is one host, so this belongs here rather
     # than repeated as a clone_url on all thirty entries.
     url_template: str | None = None
+    # Whether default-branch naming is ours to change. `syncer issues` flags repos still
+    # defaulting to master only where it is — at a company the default branch is the org's
+    # decision, so the check would fire on every repo forever with nothing to do about any of them.
+    owns_branch_naming: bool = True
     repos: list[RepoConfig]
 
     @field_validator('url_template')

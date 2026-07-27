@@ -282,6 +282,18 @@ class TestIsFork:
         with patch('subprocess.run', return_value=result):
             assert repo.is_fork is False
 
+    def test_non_github_host_never_invokes_gh(self, git_repo):
+        """gh only speaks to GitHub, so asking it about a Bitbucket repo is a subprocess per
+        repo that always answers 'no'."""
+        repo = _make_repo(git_repo, url='git@bitbucket.org:myworkspace/payments.git')
+        assert repo.is_github is False
+        with patch('syncer.repos.subprocess.run') as run:
+            assert repo.is_fork is False
+        run.assert_not_called()
+
+    def test_github_ssh_url_is_recognised(self, git_repo):
+        assert _make_repo(git_repo, url='git@github.com:datapointchris/syncer.git').is_github is True
+
 
 class TestNonInteractiveExecution:
     """Git prompts on /dev/tty, which capture_output does not redirect, so a credential or

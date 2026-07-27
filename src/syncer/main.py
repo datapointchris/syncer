@@ -214,11 +214,11 @@ def issues(
             url=resolve_clone_url(repo_config, syncer_config),
         )
 
-        # Only nag about master on repos we control. A third-party clone's default
-        # branch is upstream's decision — every exemplar clone would report it
-        # forever and there is nothing to do about any of them.
+        # Only nag about master where the naming is ours to change. A third-party clone's
+        # default branch is upstream's decision and a work repo's is the org's — either way
+        # the check would report forever with nothing to do about any of them.
         is_ours = bool(syncer_config.owner) and owner == syncer_config.owner
-        if is_ours and repo.default_branch == 'master':
+        if syncer_config.owns_branch_naming and is_ours and repo.default_branch == 'master':
             if repo.is_fork:
                 console.print(_status_line(ICON_WARN, label, 'using master (fork)', 'yellow', branch='master'))
             else:

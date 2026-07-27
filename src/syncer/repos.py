@@ -323,7 +323,16 @@ class Repo:
         return result.returncode == 0, result.stderr.strip()
 
     @property
+    def is_github(self) -> bool:
+        """Whether `gh` can answer questions about this repo at all. Judged from the resolved
+        clone URL, which is where the repo actually lives — a url_template can point somewhere
+        the registry `host` does not."""
+        return 'github.com' in self.url
+
+    @property
     def is_fork(self) -> bool:
+        if not self.is_github:
+            return False
         result = run_command(
             ['gh', 'repo', 'view', f'{self.owner}/{self.name}', '--json', 'isFork', '--jq', '.isFork'],
             timeout=self.timeout,

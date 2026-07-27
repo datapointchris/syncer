@@ -101,7 +101,11 @@ current/non-current split needs the same treatment.
   merges with the default. `owner` and `host` are optional so an all-third-party registry works —
   `~/dev/exemplar-repos.json` holds twenty upstream clones that each name their own owner. Repos
   whose owner isn't the registry owner are treated as not ours: the `using master` check is skipped
-  for them, because upstream's default branch is not something we can act on.
+  for them, because upstream's default branch is not something we can act on. `owns_branch_naming`
+  (default `true`) turns that check off for a whole registry — at a company the default branch is
+  the org's decision, so the check would fire on every repo forever with nothing to do about any of
+  them. `is_fork` short-circuits off GitHub, since `gh` cannot answer for a Bitbucket repo and
+  asking is a subprocess per repo that always says no.
 
   `exclude_paths` lets a registry disclaim a subtree inside its own `search_paths`, so the subtree
   is never reported as untracked. `~/code/refs` belongs to the exemplar registry and `~/code/1904labs`
