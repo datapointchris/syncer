@@ -48,7 +48,8 @@ time — and refuses rather than forces. Guaranteed independent of any policy:
 
 1. Never `--force`/`-f`/`--force-with-lease` (no such argv is ever constructed).
 2. Never mutate a branch whose working tree is dirty.
-3. `pull_ff`/`ff_ref` require strict ancestry (upstream strictly ahead), re-checked at write time.
+3. `fast_forward`/`pull_ff`/`ff_ref` require strict ancestry (upstream strictly ahead), re-checked
+   at write time.
 4. `rebase_push` aborts on conflict and downgrades to a refusal — never a half-rebase.
 5. `delete_local` only under the full `GONE ∧ merged-into-default ∧ ¬current ∧ ¬default ∧ clean`
    guard. Uses `branch -D` (not `-d`) because a GONE branch has no upstream for git's own
@@ -59,6 +60,14 @@ time — and refuses rather than forces. Guaranteed independent of any policy:
 
 Any new `Action` must be added to the `Action` enum, mapped in `_MUTATORS`, and given a mutator
 that re-checks its own preconditions live. Never add an unsafe primitive to the menu.
+
+**Rules name intents, not mechanisms.** `pull_ff` (`merge --ff-only`) needs the branch checked
+out and `ff_ref` (`update-ref`) needs it not checked out, so a rule naming either one is refused
+for half of all checkout states — which is what `default:behind = pull_ff` and `*:behind = ff_ref`
+silently did in both built-ins. `fast_forward` dispatches to whichever applies; the mechanisms stay
+on the menu as explicit escape hatches. `TestBuiltinsNameIntentNotMechanism` locks this: no
+built-in may ever decide `pull_ff` or `ff_ref`. Any future action with the same
+current/non-current split needs the same treatment.
 
 ## Config: two files, deliberately split
 

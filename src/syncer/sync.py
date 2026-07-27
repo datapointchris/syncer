@@ -54,7 +54,7 @@ _ISSUE_STATUSES = {'issues', 'not_git', 'no_remote', 'path_mismatch', 'missing'}
 def _operation_status(report: RepoBranchReport) -> str:
     """Status for a repo where actions ran and nothing needs attention (severity OPERATION)."""
     acted = {row.action for row in report.rows if row.outcome is not None and row.outcome.status == 'done'}
-    if Action.REBASE_PUSH in acted or (acted & {Action.PULL_FF, Action.FF_REF} and Action.PUSH in acted):
+    if Action.REBASE_PUSH in acted or (acted & {Action.FAST_FORWARD, Action.PULL_FF, Action.FF_REF} and Action.PUSH in acted):
         return 'pull_pushed'
     if Action.PUSH in acted:
         return 'pushed'

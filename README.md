@@ -79,8 +79,8 @@ default_policy = "standard"
 scope = "all"
 fallback = "report"
 [policies.laptop.rules]
-"default:behind" = "pull_ff"
-"*:behind"       = "ff_ref"    # advance non-current branch refs, no checkout
+"*:behind"       = "fast_forward"   # merge --ff-only if checked out, update-ref if not
+"*:diverged"     = "report"
 
 [repo_overrides]
 "some-shared-repo" = "observe"   # per-repo, per-machine

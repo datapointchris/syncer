@@ -7,7 +7,7 @@ independent of any policy:
 
 1. Never --force / -f / --force-with-lease (no such argv is ever constructed).
 2. Never mutate a branch whose working tree is dirty (the current branch).
-3. pull_ff / ff_ref require strict ancestry (upstream strictly ahead), re-checked here.
+3. fast_forward / pull_ff / ff_ref require strict ancestry (upstream strictly ahead), re-checked here.
 4. rebase_push aborts on conflict and downgrades to a refusal — never a half-rebase.
 5. delete_local only under the full GONE ∧ merged ∧ ¬current ∧ ¬default ∧ clean guard.
 6. Any precondition that fails at execute time is refused and reported, never forced.
@@ -81,6 +81,18 @@ def _ff_ref(state: BranchState, repo: Repo) -> Outcome:
     return Outcome(branch=state.branch, action=Action.FF_REF, status='failed', message=err)
 
 
+def _fast_forward(state: BranchState, repo: Repo) -> Outcome:
+    """Advance a branch to its upstream by whichever mechanism its checkout state allows.
+
+    merge --ff-only needs the branch checked out; update-ref needs it not checked out. A rule
+    naming either mechanism is therefore refused every time the branch sits on the other side
+    of that split, which is why policies name this intent instead. Both delegates re-verify
+    strict ancestry (and dirtiness, where it applies) themselves, so this adds no new primitive.
+    """
+    delegate = _pull_ff if state.is_current else _ff_ref
+    return delegate(state, repo).model_copy(update={'action': Action.FAST_FORWARD})
+
+
 def _push(state: BranchState, repo: Repo) -> Outcome:
     if repo.uncommitted_changes:
         return _refused(state, Action.PUSH, 'working tree is dirty')
@@ -147,6 +159,7 @@ def _delete_local(state: BranchState, repo: Repo) -> Outcome:
 
 
 _MUTATORS = {
+    Action.FAST_FORWARD: _fast_forward,
     Action.PULL_FF: _pull_ff,
     Action.FF_REF: _ff_ref,
     Action.PUSH: _push,

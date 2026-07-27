@@ -29,7 +29,7 @@ def _state(primary, *, branch='feature/x', is_default=False, is_current=False, d
 _STANDARD_DEFAULT = {
     PrimaryState.SYNCED: Action.SKIP,
     PrimaryState.AHEAD: Action.PUSH,
-    PrimaryState.BEHIND: Action.PULL_FF,
+    PrimaryState.BEHIND: Action.FAST_FORWARD,
     PrimaryState.DIVERGED: Action.REBASE_PUSH,
     PrimaryState.NO_UPSTREAM: Action.REPORT,  # no default:no_upstream rule → falls to *:no_upstream
     PrimaryState.GONE: Action.REPORT,
@@ -38,7 +38,7 @@ _STANDARD_DEFAULT = {
 _STANDARD_FEATURE = {
     PrimaryState.SYNCED: Action.REPORT,  # no *:synced rule → fallback
     PrimaryState.AHEAD: Action.REPORT,
-    PrimaryState.BEHIND: Action.FF_REF,
+    PrimaryState.BEHIND: Action.FAST_FORWARD,
     PrimaryState.DIVERGED: Action.REPORT,
     PrimaryState.NO_UPSTREAM: Action.REPORT,
     PrimaryState.GONE: Action.REPORT,
@@ -47,7 +47,7 @@ _STANDARD_FEATURE = {
 _MIRROR_DEFAULT = {
     PrimaryState.SYNCED: Action.REPORT,  # no default:synced and no *:synced → fallback
     PrimaryState.AHEAD: Action.PUSH,  # falls through to *:ahead
-    PrimaryState.BEHIND: Action.PULL_FF,
+    PrimaryState.BEHIND: Action.FAST_FORWARD,
     PrimaryState.DIVERGED: Action.REBASE_PUSH,
     PrimaryState.NO_UPSTREAM: Action.REPORT,
     PrimaryState.GONE: Action.DELETE_LOCAL,
@@ -56,7 +56,7 @@ _MIRROR_DEFAULT = {
 _MIRROR_FEATURE = {
     PrimaryState.SYNCED: Action.REPORT,
     PrimaryState.AHEAD: Action.PUSH,
-    PrimaryState.BEHIND: Action.FF_REF,
+    PrimaryState.BEHIND: Action.FAST_FORWARD,
     PrimaryState.DIVERGED: Action.REBASE_PUSH,
     PrimaryState.NO_UPSTREAM: Action.REPORT,
     PrimaryState.GONE: Action.DELETE_LOCAL,
@@ -94,6 +94,21 @@ class TestDecideObserve:
     def test_everything_is_report(self, primary, is_default):
         state = _state(primary, is_default=is_default, is_current=is_default)
         assert decide(state, BUILTIN_POLICIES['observe']) == Action.REPORT
+
+
+class TestBuiltinsNameIntentNotMechanism:
+    """pull_ff refuses on a non-current branch and ff_ref refuses on a current one, so a
+    built-in that names either mechanism is refused for half of all checkout states. Both
+    built-ins did exactly that: `default:behind = pull_ff` never ran unless the default
+    branch happened to be checked out, and `*:behind = ff_ref` never ran when it was."""
+
+    @pytest.mark.parametrize('policy_name', list(BUILTIN_POLICIES))
+    @pytest.mark.parametrize('primary', ALL_STATES)
+    def test_no_builtin_decides_a_mechanism_action(self, policy_name, primary):
+        policy = BUILTIN_POLICIES[policy_name]
+        for is_default, is_current in itertools.product([True, False], repeat=2):
+            state = _state(primary, branch='main', is_default=is_default, is_current=is_current)
+            assert decide(state, policy) not in (Action.PULL_FF, Action.FF_REF)
 
 
 class TestDecideModifierInvariance:

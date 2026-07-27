@@ -29,10 +29,17 @@ class PrimaryState(StrEnum):
 
 class Action(StrEnum):
     """The safe menu. Every action here is pre-vetted safe; a policy can never opt into
-    an unsafe primitive (force-push, dirty-tree mutation, history rewrite)."""
+    an unsafe primitive (force-push, dirty-tree mutation, history rewrite).
+
+    FAST_FORWARD is the intent 'advance this branch to its upstream'; PULL_FF and FF_REF
+    are the two mechanisms that implement it, and each refuses in the checkout state the
+    other one handles. Rules should name the intent — a rule naming a mechanism is refused
+    whenever the branch happens to be on the wrong side of that split.
+    """
 
     SKIP = 'skip'
     REPORT = 'report'
+    FAST_FORWARD = 'fast_forward'
     PULL_FF = 'pull_ff'
     FF_REF = 'ff_ref'
     PUSH = 'push'
@@ -160,11 +167,10 @@ STANDARD_POLICY = Policy(
     fallback=Action.REPORT,
     rules={
         'default:synced': 'skip',
-        'default:behind': 'pull_ff',
         'default:ahead': 'push',
         'default:diverged': 'rebase_push',
         'default:gone': 'report',
-        '*:behind': 'ff_ref',
+        '*:behind': 'fast_forward',
         '*:ahead': 'report',
         '*:diverged': 'report',
         '*:no_upstream': 'report',
@@ -186,8 +192,7 @@ MIRROR_POLICY = Policy(
     prune=True,
     fallback=Action.REPORT,
     rules={
-        'default:behind': 'pull_ff',
-        '*:behind': 'ff_ref',
+        '*:behind': 'fast_forward',
         '*:ahead': 'push',
         '*:diverged': 'rebase_push',
         '*:gone': 'delete_local',

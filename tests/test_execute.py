@@ -170,6 +170,65 @@ class TestExecuteEffects:
         assert 'feature/merged' not in repo.local_branches()
 
 
+class TestFastForwardDispatchesOnCheckoutState:
+    """fast_forward is the intent behind pull_ff and ff_ref; it must succeed in both
+    checkout states, which is precisely where naming either mechanism directly fails."""
+
+    def test_advances_the_current_branch(self, cloned_repo, tmp_path):
+        _second_clone_pushes(tmp_path)
+        repo = _make_repo(cloned_repo)
+        repo.fetch_prune()
+        state = _state_for(repo, 'main')
+        assert state.is_current is True
+        assert state.primary == PrimaryState.BEHIND
+        outcome = execute(Action.FAST_FORWARD, state, repo)
+        assert outcome.status == 'done'
+        assert outcome.action == Action.FAST_FORWARD
+        assert _state_for(repo, 'main').primary == PrimaryState.SYNCED
+
+    def test_advances_a_non_current_branch(self, cloned_repo, tmp_path):
+        _git(cloned_repo, 'checkout', '-b', 'feature')
+        _git(cloned_repo, 'push', '-u', 'origin', 'feature')
+        bare = tmp_path / 'remote.git'
+        second = tmp_path / 'second'
+        subprocess.run(['git', 'clone', '-b', 'feature', str(bare), str(second)], capture_output=True)
+        _git(second, 'config', 'user.email', 'test@test.com')
+        _git(second, 'config', 'user.name', 'Test')
+        _commit(second, 'f.txt', 'feature work')
+        _git(second, 'push')
+        _git(cloned_repo, 'checkout', 'main')
+        repo = _make_repo(cloned_repo)
+        repo.fetch_prune()
+        state = _state_for(repo, 'feature')
+        assert state.is_current is False
+        assert state.primary == PrimaryState.BEHIND
+        outcome = execute(Action.FAST_FORWARD, state, repo)
+        assert outcome.status == 'done'
+        assert outcome.action == Action.FAST_FORWARD
+        assert _state_for(repo, 'feature').primary == PrimaryState.SYNCED
+
+    def test_refuses_a_dirty_current_branch(self, cloned_repo, tmp_path):
+        _second_clone_pushes(tmp_path)
+        repo = _make_repo(cloned_repo)
+        repo.fetch_prune()
+        (cloned_repo / 'README.md').write_text('# dirty edit\n')
+        before = _head(repo)
+        outcome = execute(Action.FAST_FORWARD, _state_for(repo, 'main'), repo)
+        assert outcome.status == 'refused'
+        assert 'dirty' in outcome.message
+        assert _head(repo) == before
+
+    def test_refuses_when_not_strictly_behind(self, cloned_repo, tmp_path):
+        _commit(cloned_repo, 'local.py', 'local')
+        _second_clone_pushes(tmp_path, 'remote.py')
+        repo = _make_repo(cloned_repo)
+        repo.fetch_prune()
+        before = _head(repo)
+        outcome = execute(Action.FAST_FORWARD, _state_for(repo, 'main'), repo)
+        assert outcome.status == 'refused'
+        assert _head(repo) == before
+
+
 # ---------- L3: refusals (out-of-precondition → no mutation) ---------- #
 
 
@@ -298,7 +357,7 @@ class TestInvariants:
         before_head = _head(repo)
         before_dirty = repo.uncommitted_changes
         state = _state_for(repo, 'main')
-        for action in (Action.PULL_FF, Action.REBASE_PUSH, Action.PUSH):
+        for action in (Action.FAST_FORWARD, Action.PULL_FF, Action.REBASE_PUSH, Action.PUSH):
             outcome = execute(action, state, repo)
             assert outcome.status == 'refused'
         assert _head(repo) == before_head
