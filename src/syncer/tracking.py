@@ -12,6 +12,19 @@ from syncer.config import DATA_DIR
 
 EVENTS_FILE = DATA_DIR / 'events.jsonl'
 
+RepoStatus = Literal[
+    'synced',
+    'issues',
+    'pulled',
+    'pushed',
+    'pull_pushed',
+    'cloned',
+    'missing',
+    'not_git',
+    'no_remote',
+    'path_mismatch',
+]
+
 
 class BranchSnapshot(BaseModel):
     """Per-branch detail captured on a run. Added additively — older events have none."""
@@ -29,7 +42,7 @@ class BranchSnapshot(BaseModel):
 class RepoSnapshot(BaseModel):
     name: str
     path: str
-    status: Literal['synced', 'issues', 'pulled', 'pushed', 'pull_pushed', 'cloned', 'missing', 'not_git', 'no_remote', 'path_mismatch']
+    status: RepoStatus
     branch: str | None = None
     uncommitted: int = 0
     unpushed: int = 0

@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from syncer.tracking import BranchSnapshot
 from syncer.tracking import RepoSnapshot
+from syncer.tracking import RepoStatus
 from syncer.tracking import RunSummary
 from syncer.tracking import SyncRunEvent
 from syncer.tracking import emit_event
@@ -14,7 +15,7 @@ from syncer.tracking import find_stale_repos
 from syncer.tracking import read_events
 
 
-def _make_snapshot(name: str = 'repo1', status: str = 'synced', uncommitted: int = 0, **kwargs) -> RepoSnapshot:
+def _make_snapshot(name: str = 'repo1', status: RepoStatus = 'synced', uncommitted: int = 0, **kwargs) -> RepoSnapshot:
     return RepoSnapshot(name=name, path=f'~/code/{name}', status=status, uncommitted=uncommitted, **kwargs)
 
 
