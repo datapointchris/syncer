@@ -1,6 +1,58 @@
 # CHANGELOG
 
 
+## v4.3.1 (2026-07-27)
+
+### Bug Fixes
+
+- **policy**: Add fast_forward so behind branches actually advance
+  ([`de002e2`](https://github.com/datapointchris/syncer/commit/de002e2ddd7f2a57ae1d3bd31ccf135afc74c47c))
+
+pull_ff (merge --ff-only) refuses unless the branch is checked out and ff_ref (update-ref) refuses
+  unless it is not, so a rule naming either mechanism was refused for half of all checkout states.
+  Both built-ins did exactly that: `default:behind = pull_ff` never ran unless the default branch
+  happened to be current, and `*:behind = ff_ref` never ran when it was.
+
+fast_forward names the intent and dispatches to whichever mechanism applies. Both delegates already
+  re-verify strict ancestry and dirtiness themselves, so this adds no new primitive and the hard
+  invariants are unchanged. pull_ff and ff_ref stay on the menu as explicit escape hatches.
+
+### Build System
+
+- **deps**: Require pyselfupdate 0.2.1
+  ([`0f83970`](https://github.com/datapointchris/syncer/commit/0f83970014b9e7a4fb443ed8e48e0605ecca1362))
+
+0.2.0's run_update fetched the changelog after uv had already rewritten the environment, and
+  returned into typer rather than exiting. syncer survives that on the stdlib path, but a floor
+  below the fix means a fresh install can still land on it.
+
+### Continuous Integration
+
+- Add generated validate.yml and gate release on it
+  ([`19aef58`](https://github.com/datapointchris/syncer/commit/19aef58dbf7d5b71b5992c59256fe4daf04ff85a))
+
+Release triggered on push to main with no validation at all, so it published whatever was on main.
+  Adds the forge-generated CI block (ruff check, ruff format, mypy, pytest) and makes release depend
+  on it.
+
+Verified locally before wiring the gate: all four checks pass.
+
+- Regenerate validate.yml at toolchain 6
+  ([`49e3835`](https://github.com/datapointchris/syncer/commit/49e38358c59ca93637d487b0a3ce41c5899c283f))
+
+Stamp only — the python block is unchanged. Toolchain 6 adds the pinned release-binary mechanism and
+  the shell CI block.
+
+### Refactoring
+
+- **tracking**: Name the RepoStatus literal and use it in tests
+  ([`a7b8ec4`](https://github.com/datapointchris/syncer/commit/a7b8ec46e7d748c85d5d99cc123db547fd537f5b))
+
+The status literal was inlined in RepoSnapshot, so the test helper had to widen its parameter to str
+  and mypy rejected passing it through. Naming the alias lets the helper declare the type it
+  actually accepts.
+
+
 ## v4.3.0 (2026-07-27)
 
 ### Features
