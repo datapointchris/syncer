@@ -1,6 +1,26 @@
 # CHANGELOG
 
 
+## v4.4.1 (2026-07-27)
+
+### Bug Fixes
+
+- **repos**: Run git non-interactively with a timeout
+  ([`14b481f`](https://github.com/datapointchris/syncer/commit/14b481f5808fad45f774d4de480bb33c7a2c4ddf))
+
+Git prompts for credentials on /dev/tty, which capture_output does not redirect, so an expired
+  credential or an unknown SSH host key would leave every worker thread blocked on the same terminal
+  with nothing on screen explaining why. No git call had a timeout either, so a wedged connection
+  held its thread forever.
+
+All git and gh invocations now go through run_command: GIT_TERMINAL_PROMPT=0, -o BatchMode=yes
+  appended to any configured GIT_SSH_COMMAND, and a timeout that comes back as an ordinary non-zero
+  result rather than raising out of the worker.
+
+git_timeout is machine-local config (default 120s, 600s for clones) because the headroom a fetch
+  needs is a property of the box's network, not of the repo.
+
+
 ## v4.4.0 (2026-07-27)
 
 ### Features
