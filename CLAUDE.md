@@ -155,6 +155,26 @@ Built-ins (`policy.py`): `standard` (default-branch auto-sync, feature branches 
 `observe` (report everything, mutate nothing — note: **does not pull**), `mirror` (auto everything
 safe, opt-in always-on-box policy).
 
+## Read-only checks that are not sync state
+
+Two things the report surfaces that are neither a `PrimaryState` nor an `Action`. Both are
+report-only, and both are deliberately kept out of `decide()` — there is nothing to act on.
+
+- **`origin_mismatch`** (`repos.py`) — the clone's real `origin` vs `resolve_clone_url`'s answer.
+  `gh repo clone <bare-name>` resolves to the authenticated user, so a reference repo that also
+  exists under your own account silently gets your fork as upstream; two did, undetected for 3.5
+  months, because nothing compared them. `normalize_remote_url` reduces both sides to `host/path`
+  first — https, scp-style SSH and `ssh://host:port/` all reach the same repo, and flagging every
+  SSH clone of an https registry entry would be noise that gets the check ignored. Surfaced in
+  `issues` and as a **WARNING annotation** on the repo report — *not* a lifecycle status, which
+  would replace the branch report for a repo whose only problem is where it points.
+- **`watch_remote`** (`Policy`) — branches to report on with no local copy. A fetch brings down
+  every remote branch but the pipeline only iterates local ones, so a long-lived branch never
+  checked out is invisible. Opt-in and empty by default; **never affects severity**, since a repo
+  is not unhealthy for having branches you deliberately do not keep. Never materialise these as
+  local branches: a local copy you never check out is pinned at creation and silently serves
+  stale history, while `origin/<branch>` is current after any fetch.
+
 ## Command groups
 
 Sub-apps live in `src/syncer/commands/`, mounted in `main.py`. `output.py` holds the shared

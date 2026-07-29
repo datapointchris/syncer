@@ -183,6 +183,25 @@ class Repo:
             return []
         return [line for line in result.stdout.splitlines() if line]
 
+    def remote_only_branches(self) -> list[str]:
+        """Branches on origin with no local counterpart, newest commit first.
+
+        The refs are already here — a fetch brings down every branch — but the pipeline only
+        ever iterates local branches, so a long-lived branch you deliberately never check out
+        (develop/uat/prod) is invisible: nothing tells you origin/prod moved.
+        """
+        result = self._git('for-each-ref', '--sort=-committerdate', '--format=%(refname:short)', 'refs/remotes/origin/')
+        if result.returncode != 0:
+            return []
+        local = set(self.local_branches())
+        remote = (line.removeprefix('origin/') for line in result.stdout.splitlines() if line)
+        return [branch for branch in remote if branch != 'HEAD' and branch not in local]
+
+    def branch_age(self, ref: str) -> str:
+        """Human-readable age of a ref's last commit ('3 days ago'), or '' if it can't be read."""
+        result = self._git('log', '-1', '--format=%ar', ref)
+        return result.stdout.strip() if result.returncode == 0 else ''
+
     def branch_upstream(self, branch: str) -> tuple[str, bool]:
         """Return (upstream_short, is_gone) for a branch.
 

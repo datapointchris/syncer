@@ -42,6 +42,8 @@ from syncer.policy import BranchState
 from syncer.policy import Policy
 from syncer.policy import PrimaryState
 from syncer.policy import decide
+from syncer.policy import is_watched_remote
+from syncer.repos import ICON_DOT
 from syncer.repos import ICON_DOWNLOAD
 from syncer.repos import ICON_ERR
 from syncer.repos import ICON_MOVE
@@ -127,6 +129,10 @@ class RepoBranchReport:
     # annotate it.
     origin_mismatch: str | None = None
     expected_url: str = ''
+    # Watched branches that exist only on origin, as (branch, age). Informational: there is no
+    # local branch to sync, so this never affects severity — a repo is not unhealthy for having
+    # branches you deliberately do not keep locally.
+    remote_only: list[tuple[str, str]] = field(default_factory=list)
     # Repo-level counts captured for event snapshots (0 for lifecycle reports).
     uncommitted: int = 0
     stashes: int = 0
@@ -213,6 +219,17 @@ def report_severity(report: RepoBranchReport) -> Severity:
     return branch_severity
 
 
+def _watched_remote_branches(repo: Repo, policy: Policy) -> list[tuple[str, str]]:
+    """Remote-only branches the policy asked to watch, with each one's age.
+
+    Skipped entirely when watch_remote is empty, so the extra git calls cost nothing for the
+    policies that never opted in.
+    """
+    if not policy.watch_remote:
+        return []
+    return [(branch, repo.branch_age(f'origin/{branch}')) for branch in repo.remote_only_branches() if is_watched_remote(branch, policy)]
+
+
 def build_branch_rows(repo: Repo, policy: Policy, apply: bool) -> list[BranchRow]:
     """Classify → decide → (execute if apply) for every in-scope branch. Shared by both surfaces."""
     rows = []
@@ -292,6 +309,7 @@ def _build_repo_report(
         stashes=repo.stash_count,
         origin_mismatch=origin_mismatch(repo),
         expected_url=repo.url,
+        remote_only=_watched_remote_branches(repo, policy),
     )
 
 
@@ -353,6 +371,9 @@ def render_report(report: RepoBranchReport, apply: bool) -> None:
             console.print(f'{_branch_prefix(row.state)} {_outcome_suffix(row.outcome)}')
         else:
             console.print(_branch_line(row.state, row.action, row.blocked))
+    for branch, age in report.remote_only:
+        # No local copy, so nothing to sync — browse it with `git log origin/<branch>`.
+        console.print(f'  [blue]{ICON_DOT}  origin/{branch} — remote only, last commit {age}[/blue]')
     console.print()
 
 

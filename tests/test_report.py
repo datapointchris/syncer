@@ -204,3 +204,72 @@ class TestOriginMismatchReporting:
     def test_lifts_an_otherwise_clean_repo_to_warning(self, tmp_path):
         repo_config, config = self._clone_with_origin(tmp_path, 'https://github.com/datapointchris/homelab')
         assert report_severity(_build(repo_config, config)) == Severity.WARNING
+
+
+class TestWatchedRemoteBranches:
+    """A fetch already brings down every remote branch, but the pipeline only iterates local
+    ones — so a long-lived branch deliberately never checked out is invisible."""
+
+    def _repo_with_remote_branches(self, tmp_path, *branches):
+        bare = tmp_path / 'remote.git'
+        subprocess.run(['git', 'init', '--bare', '-b', 'main', str(bare)], capture_output=True)
+        seed = tmp_path / 'seed'
+        subprocess.run(['git', 'clone', str(bare), str(seed)], capture_output=True)
+        subprocess.run(['git', 'config', 'user.email', 't@t'], cwd=seed, capture_output=True)
+        subprocess.run(['git', 'config', 'user.name', 'T'], cwd=seed, capture_output=True)
+        (seed / 'README.md').write_text('# x\n')
+        subprocess.run(['git', 'add', '.'], cwd=seed, capture_output=True)
+        subprocess.run(['git', 'commit', '-m', 'init'], cwd=seed, capture_output=True)
+        subprocess.run(['git', 'push', '-u', 'origin', 'main'], cwd=seed, capture_output=True)
+        for branch in branches:
+            subprocess.run(['git', 'checkout', '-b', branch], cwd=seed, capture_output=True)
+            subprocess.run(['git', 'push', '-u', 'origin', branch], cwd=seed, capture_output=True)
+
+        clone = tmp_path / 'clone'
+        subprocess.run(['git', 'clone', str(bare), str(clone)], capture_output=True)
+        config = SyncerConfig(owner='me', host=str(tmp_path), search_paths=[], repos=[])
+        # clone_url so the origin-mismatch check agrees; without it the expected URL is the
+        # three-part default and every repo here would be flagged.
+        return RepoConfig(name='remote.git', path=str(clone), clone_url=str(bare)), config
+
+    def _watched(self, tmp_path, patterns, *branches):
+        repo_config, config = self._repo_with_remote_branches(tmp_path, *branches)
+        tool_config = ToolConfig(policies={'w': Policy(name='w', scope='all', watch_remote=patterns)})
+        report = _build_repo_report(
+            repo_config,
+            config=config,
+            tool_config=tool_config,
+            policies=resolve_policies(tool_config),
+            cli_policy='w',
+            apply=False,
+            jitter=0,
+            include_lifecycle=True,
+            search_paths=[],
+            claimed_paths=set(),
+        )
+        return report
+
+    def test_reports_a_branch_that_exists_only_on_the_remote(self, tmp_path):
+        report = self._watched(tmp_path, ['develop', 'uat', 'prod'], 'develop', 'uat')
+        assert {branch for branch, _ in report.remote_only} == {'develop', 'uat'}
+        assert all(age for _, age in report.remote_only)
+
+    def test_only_watched_patterns_are_reported(self, tmp_path):
+        """Every repo has remote branches you will never care about; listing all of them is a
+        check that gets ignored."""
+        report = self._watched(tmp_path, ['develop'], 'develop', 'feature/noise', 'wip/other')
+        assert [branch for branch, _ in report.remote_only] == ['develop']
+
+    def test_a_branch_checked_out_locally_is_not_remote_only(self, tmp_path):
+        """main is cloned locally, so it classifies normally and must not double-report here."""
+        report = self._watched(tmp_path, ['main', 'develop'], 'develop')
+        assert [branch for branch, _ in report.remote_only] == ['develop']
+
+    def test_empty_watch_remote_reports_nothing(self, tmp_path):
+        assert self._watched(tmp_path, [], 'develop', 'uat').remote_only == []
+
+    def test_does_not_affect_severity(self, tmp_path):
+        """There is no local branch to sync — a repo is not unhealthy for having branches you
+        deliberately do not keep."""
+        report = self._watched(tmp_path, ['develop'], 'develop')
+        assert report_severity(report) == Severity.SYNCED

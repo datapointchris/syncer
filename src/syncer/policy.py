@@ -118,6 +118,11 @@ class Policy(BaseModel):
     # rather than a function of getting an exact-name rule right for every branch — forget one
     # under a fallback like '*:ahead = push' and a stray local commit reaches a shared branch.
     protected: list[str] = []
+    # Branch name patterns (fnmatch) to report on even with no local copy. Opt-in and empty by
+    # default: every repo has remote branches you will never care about, and a check that fires
+    # on all of them forever is one that gets ignored. Purely informational — there is no local
+    # branch to act on, so this never reaches decide() or the action menu.
+    watch_remote: list[str] = []
 
     @field_validator('rules')
     @classmethod
@@ -133,6 +138,11 @@ class Policy(BaseModel):
             if action not in VALID_ACTIONS:
                 raise ValueError(f'rule {key!r} maps to unknown action {action!r}; valid: {sorted(VALID_ACTIONS)}')
         return rules
+
+
+def is_watched_remote(branch: str, policy: Policy) -> bool:
+    """Whether a remote-only branch matches the policy's watch_remote patterns."""
+    return any(fnmatch.fnmatch(branch, pattern) for pattern in policy.watch_remote)
 
 
 def matching_protection(branch: str, policy: Policy) -> str | None:

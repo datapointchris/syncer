@@ -84,6 +84,8 @@ Each repo has a `status`: `active` (default), `dormant`, or `retired`. Retired r
 
 `search_paths` are what `syncer issues` scans for repos that moved or aren't tracked; `exclude_paths` disclaims a subtree inside them, for directories another registry owns. **Syncer never writes to the registry** — `issues` reports drift and you fix the paths by hand.
 
+`issues` also flags a clone whose `origin` disagrees with what the registry declares. `gh repo clone <bare-name>` resolves to the authenticated user, so a reference repo that also exists under your own account silently gets your fork as its upstream and pulls from it forever — which went unnoticed for three months on two repos. Comparison normalises https, scp-style SSH and `ssh://` with a port to the same thing, so cloning over SSH against an https registry isn't a false positive. Report-only: a deliberate fork is indistinguishable from a mistake without asking, so the remote is never rewritten.
+
 A registry is a self-contained set: `-c/--repos-file` swaps the entire working set rather than merging with the default, and each registry gets its own run history, so `syncer stats -c work.json` reports only on that set.
 
 `owns_branch_naming` (default `true`) controls whether `syncer issues` flags repos still defaulting to `master`. Turn it off for a registry whose default-branch naming isn't yours to change — at a company that is the org's decision, so the check would report forever with nothing to do about it.
@@ -123,6 +125,7 @@ scope = "all"
 fallback = "report"
 merge_target = "develop"                    # branch a gone branch must be integrated into before delete_local
 protected = ["develop", "dev", "uat", "prod", "release/*"]
+watch_remote = ["develop", "dev", "uat", "prod"]
 [policies.laptop.rules]
 "release/*:ahead" = "report"
 "*:behind"        = "fast_forward"
@@ -143,6 +146,19 @@ Like every other policy setting, it is **machine-local** — it lives on a polic
 ```bash
 syncer policy show laptop --branch develop   # marks every action this stops
 ```
+
+### Watched remote branches
+
+A fetch already brings down every branch on the remote, but syncer only classifies branches you have *locally* — so a long-lived branch you deliberately never check out is invisible, and nothing tells you `origin/prod` moved. `watch_remote` names patterns to report on anyway:
+
+```text
+  origin/develop — remote only, last commit 2 hours ago
+  origin/uat     — remote only, last commit 3 days ago
+```
+
+Purely informational, and it never affects a repo's severity: there is no local branch to sync, and a repo isn't unhealthy for having branches you deliberately don't keep. Opt-in and empty by default, because every repo has remote branches you'll never care about and a check that fires on all of them is one you learn to ignore.
+
+**Don't create local copies of these to read them.** `git log origin/uat`, `git show origin/uat:file` and `git diff origin/develop...HEAD` all work offline against the fetched ref. A local branch you never check out is pinned at whenever you made it, so it silently shows stale history while looking like a normal branch.
 
 Selectors resolve exact branch name → glob → role (`default`, then `current`) → `*`, and the first one with a rule for that state wins. Rules should name **intents, not mechanisms**: `fast_forward` dispatches to `merge --ff-only` when the branch is checked out and `update-ref` when it isn't, so naming either mechanism directly (`pull_ff`, `ff_ref`) is refused for half of all checkout states.
 

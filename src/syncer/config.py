@@ -95,6 +95,14 @@ merge_target = "develop"
 # nothing. `syncer policy show <name> --branch develop` marks exactly which actions this stops.
 protected = ["develop", "dev", "uat", "prod", "release/*"]
 
+# Branches to report on even when you have no local copy. A fetch already brings down every
+# remote branch, but the pipeline only iterates local ones, so a long-lived branch you
+# deliberately never check out is invisible — nothing tells you origin/prod moved. Purely
+# informational: there is no local branch to sync, so no action is ever taken. Opt-in and empty
+# by default, because every repo has remote branches you will never care about and a check that
+# fires on all of them is one you learn to ignore. Browse one with `git log origin/<branch>`.
+watch_remote = ["develop", "dev", "uat", "prod"]
+
 # Rules are "<selector>:<state>" = "<action>". Run `syncer policy show laptop` to see the
 # decision this table actually produces for every state — that matrix is computed from the
 # rules engine itself, so it cannot drift from what --apply will do.
