@@ -1,6 +1,33 @@
 # CHANGELOG
 
 
+## v5.2.0 (2026-07-29)
+
+### Features
+
+- **issues**: Flag a clone whose origin disagrees with the registry
+  ([`1b140b0`](https://github.com/datapointchris/syncer/commit/1b140b096efc43bc24f2f709a05d92b56a568bf2))
+
+~/code/refs/homelab pointed at datapointchris/homelab while the exemplar registry declared
+  khuedoan/homelab — cloned in April, pulled ever since, undetected for 3.5 months. scikit-learn was
+  the same. `gh repo clone <bare-name>` resolves to the authenticated user, so any reference repo
+  that also exists under your own account silently gets your fork as origin, and searches read a
+  stale duplicate of your own work as if it were reference material.
+
+Nothing compared the two, so nothing could notice. origin_mismatch() normalises both sides to
+  host/path before comparing — https, scp-style SSH and ssh:// with a port all reach the same repo,
+  and flagging every SSH clone of an https registry entry would be noise that gets the check
+  ignored.
+
+Report-only: a deliberate fork with a legitimately different origin is indistinguishable from a
+  mistake without asking, so the remote is never rewritten. Surfaced in `issues` alongside the other
+  registry-vs-reality drift, and as a WARNING annotation on the default run — not a lifecycle
+  status, which would replace the branch report for a repo whose only problem is where it points.
+
+Immediately found a third instance the incident never caught: ~/code/refs/vue-core resolved to
+  vuejs/vue-core, which does not exist; the repo is vuejs/core.
+
+
 ## v5.1.0 (2026-07-29)
 
 ### Features
