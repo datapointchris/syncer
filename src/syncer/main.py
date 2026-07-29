@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib.metadata
 import shutil
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 from typing import Annotated
@@ -14,7 +13,7 @@ from pyselfupdate import notify
 from pyselfupdate.typercmd import run_update
 from rich.console import Console
 
-from syncer.config import TOOL_CONFIG_PATH
+from syncer.commands.config_cmd import config_app
 from syncer.config import RepoConfig
 from syncer.config import SyncerConfig
 from syncer.config import load_tool_config
@@ -34,6 +33,7 @@ from syncer.tracking import events_file_for
 from syncer.tracking import migrate_legacy_events
 
 app = typer.Typer(invoke_without_command=True, rich_markup_mode='rich')
+app.add_typer(config_app, name='config', rich_help_panel='Manage')
 console = Console()
 
 # Shared by the `update` command and the daily check in the callback below, so
@@ -46,7 +46,8 @@ _EPILOG = (
     "[cyan]syncer --apply[/cyan] — pull, push, fast-forward, and clone what's safe\n\n"
     '[cyan]syncer -p mirror --apply[/cyan] — run the aggressive mirror policy this once\n\n'
     '[cyan]syncer branches[/cyan] — quick per-branch view, no lifecycle or history\n\n'
-    '[cyan]syncer issues[/cyan] — find moved, missing, or untracked repos'
+    '[cyan]syncer issues[/cyan] — find moved, missing, or untracked repos\n\n'
+    '[cyan]syncer config init[/cyan] — start from scratch on a new machine'
 )
 
 
@@ -255,18 +256,6 @@ def stats(
     """
     syncer_config, repos_path = resolve_registry(repos_file)
     show_stats(syncer_config, _events_file(repos_path, repos_file))
-
-
-@app.command(rich_help_panel='Manage')
-def init() -> None:
-    """Create the syncer tool config (~/.config/syncer/config.toml) if it doesn't exist."""
-    if TOOL_CONFIG_PATH.exists():
-        console.print(f'[red]Config already exists: {TOOL_CONFIG_PATH}[/red]')
-        sys.exit(1)
-    TOOL_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    TOOL_CONFIG_PATH.write_text('repos_file = "~/dev/repos.json"\n')
-    console.print(f'[green]Created config: {TOOL_CONFIG_PATH}[/green]')
-    console.print('[yellow]Edit repos_file to point to your repo registry.[/yellow]')
 
 
 @app.command(rich_help_panel='Manage')

@@ -9,9 +9,11 @@ from typing import Any
 from typing import Literal
 
 from pydantic import BaseModel
+from pydantic import ValidationError
 from pydantic import field_validator
-from rich.console import Console
 
+from syncer.output import error
+from syncer.output import hint
 from syncer.policy import BUILTIN_POLICIES
 from syncer.policy import Policy
 from syncer.repos import GIT_TIMEOUT_SECONDS
@@ -42,7 +44,108 @@ STATE_DIR = xdg_state_home() / 'syncer'
 # Where run history lived before the state move. Swept by migrate_legacy_events().
 LEGACY_DATA_DIR = Path.home() / '.local' / 'share' / 'syncer'
 
-console = Console()
+# The single source for both `config init` and `config example`, so the annotated example a user
+# reads is byte-for-byte the file `init` writes. Every option appears, exercised — the template
+# doubles as side-by-side reference while editing. A round-trip test parses both of these into
+# their models, which is what stops them drifting from the schema.
+
+TEMPLATE_TOOL_CONFIG = """\
+# syncer tool config — machine-local. Policies live here rather than in the repo registry
+# because they are a property of this box: the same repo can sync aggressively on an always-on
+# desktop and report-only on a laptop.
+
+# Repo registry to read. Defaults to ~/.config/syncer/repos.json. Point it elsewhere only if the
+# registry is shared with other tools — on the fleet, forge and indy read the same file, so it
+# lives at ~/dev/repos.json and every machine names it here.
+# repos_file = "~/dev/repos.json"
+
+# Policy for any repo that names no other. Built-ins: standard, observe, mirror.
+default_policy = "standard"
+
+# Ceiling on a single git call, in seconds; clones get five times this. Machine-local because it
+# is a property of this box's network — a VPN fetching a large monorepo needs more headroom.
+git_timeout = 120
+
+# Per-repo policy, keyed by the name in the registry. Beats the registry's sync_policy hint,
+# loses to --policy.
+[repo_overrides]
+"some-shared-repo" = "observe"
+
+# A custom policy. Its name is the table key, so this one is `--policy laptop`.
+[policies.laptop]
+# Which branches are evaluated: default | current | tracked | all
+scope = "all"
+# Prune remote-tracking refs on fetch, so a deleted upstream branch classifies as gone rather
+# than sitting there looking synced forever.
+prune = true
+# Action when no rule below matches.
+fallback = "report"
+# Branch a gone branch must provably be integrated into before delete_local will touch it.
+# Defaults to the repo's default branch. Set it where the trunk you merge into is not the
+# default: a develop-centric flow never makes a feature branch an ancestor of main, so the
+# default-branch guard would refuse every genuinely merged branch forever.
+merge_target = "develop"
+
+# Rules are "<selector>:<state>" = "<action>". Run `syncer policy show laptop` to see the
+# decision this table actually produces for every state — that matrix is computed from the
+# rules engine itself, so it cannot drift from what --apply will do.
+#
+#   selector   exact branch name  >  glob  >  role (default > current)  >  "*"
+#   state      synced | ahead | behind | diverged | no_upstream | gone | detached
+#   action     skip | report | fast_forward | push | rebase_push | set_upstream_push
+#              | delete_local | prompt | pull_ff | ff_ref
+#
+# Name intents, not mechanisms: fast_forward dispatches to pull_ff (merge --ff-only, which needs
+# the branch checked out) or ff_ref (update-ref, which needs it not checked out). A rule naming
+# either mechanism directly is refused for half of all checkout states.
+[policies.laptop.rules]
+"main:diverged"       = "rebase_push"
+"release/*:ahead"     = "report"
+"default:synced"      = "skip"
+"default:ahead"       = "push"
+"current:no_upstream" = "set_upstream_push"
+"*:behind"            = "fast_forward"
+"*:ahead"             = "report"
+"*:diverged"          = "report"
+"*:detached"          = "report"
+"*:gone"              = "delete_local"
+"""
+
+# JSON carries no comments, so the annotation rides in the `description` field of each entry —
+# a real field, and the one place prose already belongs.
+TEMPLATE_REGISTRY = """\
+{
+  "owner": "your-github-username",
+  "host": "https://github.com",
+  "url_template": "{host}/{owner}/{name}",
+  "owns_branch_naming": true,
+  "search_paths": ["~/code", "~/tools"],
+  "exclude_paths": ["~/code/refs"],
+  "repos": [
+    {
+      "name": "example-repo",
+      "path": "~/code/example-repo",
+      "status": "active",
+      "description": "status is active (the default), dormant, or retired; retired repos are skipped"
+    },
+    {
+      "name": "example-clone",
+      "path": "~/code/refs/example-clone",
+      "status": "dormant",
+      "owner": "upstream-owner",
+      "description": "owner overrides the registry owner; a repo that is not ours skips the 'using master' check"
+    },
+    {
+      "name": "example-work-repo",
+      "path": "~/code/work/example-work-repo",
+      "status": "active",
+      "sync_policy": "observe",
+      "clone_url": "ssh://git@bitbucket.example.com:7999/proj/example-work-repo.git",
+      "description": "sync_policy is a portable hint and must name a built-in; clone_url overrides url_template for one repo"
+    }
+  ]
+}
+"""
 
 
 class RepoConfig(BaseModel):
@@ -121,34 +224,118 @@ class ToolConfig(BaseModel):
     git_timeout: int = GIT_TIMEOUT_SECONDS
 
 
+class ConfigError(Exception):
+    """A config file that cannot be loaded, carrying one readable line per problem.
+
+    Every load path raises this instead of letting a pydantic ValidationError or a
+    TOMLDecodeError escape, so a bad key reads as `policies.laptop.rules: ...` rather than a
+    traceback — and so `config validate` and an ordinary run report the same text.
+    """
+
+    def __init__(self, problems: list[str]) -> None:
+        super().__init__('\n'.join(problems))
+        self.problems = problems
+
+
+def _validation_problems(exc: ValidationError, prefix: str = '') -> list[str]:
+    """One line per pydantic error: the key path that failed, then why."""
+    problems = []
+    for err in exc.errors():
+        parts = [prefix, *(str(part) for part in err['loc'])]
+        location = '.'.join(part for part in parts if part) or '(root)'
+        # Our own field_validators already write a complete sentence; pydantic's 'Value error, '
+        # prefix just repeats what the red text and the key path already said.
+        problems.append(f'{location}: {err["msg"].removeprefix("Value error, ")}')
+    return problems
+
+
+def _report_config_error(path: Path, exc: ConfigError) -> None:
+    error(f'{path} is invalid:')
+    for problem in exc.problems:
+        hint(f'  {problem}')
+
+
 def _load_repos_file(path: Path) -> SyncerConfig:
     """Load the repo registry from a JSON file."""
     if not path.exists():
-        console.print(f'[red]Repos file not found: {path}[/red]')
+        error(f'Repo registry not found: {path}')
+        hint(f'Scaffold one with: syncer config example --registry > {path}')
         sys.exit(1)
-    data = json.loads(path.read_text())
-    config = SyncerConfig(**data)
+    try:
+        config = parse_registry(json.loads(path.read_text()))
+    except json.JSONDecodeError as exc:
+        _report_config_error(path, ConfigError([f'not valid JSON: {exc}']))
+        sys.exit(1)
+    except ConfigError as exc:
+        _report_config_error(path, exc)
+        sys.exit(1)
     config.repos.sort(key=lambda r: r.path)
     return config
 
 
-def load_tool_config() -> ToolConfig:
-    """Load the machine-local tool config, injecting each policy's name from its table key.
+def parse_registry(raw: dict[str, Any]) -> SyncerConfig:
+    """Build a SyncerConfig from parsed JSON, as a ConfigError on failure."""
+    try:
+        return SyncerConfig(**raw)
+    except ValidationError as exc:
+        raise ConfigError(_validation_problems(exc)) from exc
 
-    Returns an empty ToolConfig when no config file exists. Malformed policies (unknown
-    action names, bad scope, invalid rule keys) raise loudly via pydantic validation.
+
+def parse_tool_config(raw: dict[str, Any]) -> ToolConfig:
+    """Build a ToolConfig from parsed TOML, injecting each policy's name from its table key.
+
+    Split out from load_tool_config so `config validate` and the template round-trip test go
+    through the same construction the real load does, rather than a second approximation of it.
+    Policies are built one at a time so a bad rule reports which policy it is in — pydantic's
+    own error names only `rules`, which is no help in a file holding several.
+    """
+    policies = {}
+    for name, body in raw.get('policies', {}).items():
+        try:
+            policies[name] = Policy(name=name, **body)
+        except ValidationError as exc:
+            raise ConfigError(_validation_problems(exc, prefix=f'policies.{name}')) from exc
+
+    try:
+        return ToolConfig(
+            repos_file=raw.get('repos_file'),
+            default_policy=raw.get('default_policy', 'standard'),
+            policies=policies,
+            repo_overrides=raw.get('repo_overrides', {}),
+            git_timeout=raw.get('git_timeout', GIT_TIMEOUT_SECONDS),
+        )
+    except ValidationError as exc:
+        raise ConfigError(_validation_problems(exc)) from exc
+
+
+def read_tool_config() -> dict[str, Any]:
+    """Parse config.toml to raw TOML, as a ConfigError on a syntax error."""
+    try:
+        return tomllib.loads(TOOL_CONFIG_PATH.read_text())
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError([f'not valid TOML: {exc}']) from exc
+
+
+def load_tool_config() -> ToolConfig:
+    """Load the machine-local tool config. Returns an empty ToolConfig when no file exists.
+
+    A broken file prints exactly what is wrong with it and exits, rather than a traceback or a
+    generic 'run validate' — the error the user needs is already in hand here.
     """
     if not TOOL_CONFIG_PATH.exists():
         return ToolConfig()
-    raw = tomllib.loads(TOOL_CONFIG_PATH.read_text())
-    policies = {name: Policy(name=name, **body) for name, body in raw.get('policies', {}).items()}
-    return ToolConfig(
-        repos_file=raw.get('repos_file'),
-        default_policy=raw.get('default_policy', 'standard'),
-        policies=policies,
-        repo_overrides=raw.get('repo_overrides', {}),
-        git_timeout=raw.get('git_timeout', GIT_TIMEOUT_SECONDS),
-    )
+    try:
+        return parse_tool_config(read_tool_config())
+    except ConfigError as exc:
+        _report_config_error(TOOL_CONFIG_PATH, exc)
+        sys.exit(1)
+
+
+def init_tool_config() -> Path:
+    """Write the annotated tool config template. Callers check for an existing file first."""
+    TOOL_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    TOOL_CONFIG_PATH.write_text(TEMPLATE_TOOL_CONFIG)
+    return TOOL_CONFIG_PATH
 
 
 def resolve_clone_url(repo_config: RepoConfig, config: SyncerConfig) -> str:
@@ -184,14 +371,21 @@ def resolve_policy_name(repo_config: RepoConfig, tool_config: ToolConfig, cli_po
     return tool_config.default_policy or 'standard'
 
 
-def get_repos_file_path(override: Path | None = None) -> Path:
-    """Resolve the registry path: --repos-file, then config.toml's repos_file, then the default."""
+def registry_path_for(tool_config: ToolConfig, override: Path | None = None) -> Path:
+    """Resolve the registry path: --repos-file, then config.toml's repos_file, then the default.
+
+    Takes an already-loaded ToolConfig so `config validate` can resolve the registry from the
+    config it just parsed and diagnosed, instead of loading the same broken file a second time.
+    """
     if override is not None:
         return override.expanduser()
-    tool_config = load_tool_config()
     if tool_config.repos_file:
         return Path(tool_config.repos_file).expanduser()
     return DEFAULT_REPOS_FILE
+
+
+def get_repos_file_path(override: Path | None = None) -> Path:
+    return registry_path_for(load_tool_config(), override)
 
 
 def resolve_registry(repos_file: Path | None = None) -> tuple[SyncerConfig, Path]:

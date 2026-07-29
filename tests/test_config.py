@@ -111,10 +111,11 @@ class TestLoadToolConfig:
         assert policy.scope == Scope.ALL
         assert policy.rules['default:behind'] == 'pull_ff'
 
-    def test_invalid_policy_action_fails_loudly(self, tool_config):
+    def test_invalid_policy_action_fails_loudly(self, tool_config, capsys):
         tool_config.write_text('[policies.bad]\n[policies.bad.rules]\n"default:behind" = "nuke"\n')
-        with pytest.raises(ValueError, match='unknown action'):
+        with pytest.raises(SystemExit):
             load_tool_config()
+        assert 'unknown action' in capsys.readouterr().err
 
     def test_git_timeout_defaults_and_overrides(self, tool_config):
         assert load_tool_config().git_timeout == GIT_TIMEOUT_SECONDS
@@ -344,3 +345,39 @@ class TestXDGPaths:
     def test_tilde_in_the_override_is_expanded(self, monkeypatch):
         monkeypatch.setenv('XDG_STATE_HOME', '~/somewhere/state')
         assert xdg_state_home() == Path.home() / 'somewhere' / 'state'
+
+
+class TestBrokenConfigIsExplained:
+    """A malformed config used to surface as a raw pydantic traceback from whichever command
+    happened to load it first. Every load path now prints what is actually wrong — the key that
+    failed and why — rather than a traceback or a referral to another command."""
+
+    def test_malformed_toml_names_the_syntax_error(self, tool_config, capsys):
+        tool_config.write_text('default_policy = \n')
+        with pytest.raises(SystemExit):
+            load_tool_config()
+        assert 'not valid TOML' in capsys.readouterr().err
+
+    def test_a_bad_rule_names_the_policy_it_is_in(self, tool_config, capsys):
+        """pydantic's own error says only `rules`, which is no help in a file holding several
+        policies — the location has to carry the policy name."""
+        tool_config.write_text('[policies.laptop.rules]\n"*:ahead" = "yolo"\n')
+        with pytest.raises(SystemExit):
+            load_tool_config()
+        stderr = capsys.readouterr().err
+        assert 'policies.laptop.rules' in stderr
+        assert 'yolo' in stderr
+
+    def test_a_bad_registry_names_the_offending_key(self, repos_file, capsys):
+        repos_file.write_text(json.dumps({'owner': 'me', 'url_template': '{host}/{oops}/{name}', 'repos': []}))
+        with pytest.raises(SystemExit):
+            _load_repos_file(repos_file)
+        stderr = capsys.readouterr().err
+        assert 'url_template' in stderr
+        assert 'unknown placeholder' in stderr
+
+    def test_malformed_registry_json_names_the_syntax_error(self, repos_file, capsys):
+        repos_file.write_text('{not json')
+        with pytest.raises(SystemExit):
+            _load_repos_file(repos_file)
+        assert 'not valid JSON' in capsys.readouterr().err
