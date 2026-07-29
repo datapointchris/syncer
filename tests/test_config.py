@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -12,6 +13,8 @@ from syncer.config import resolve_clone_url
 from syncer.config import resolve_config
 from syncer.config import resolve_policies
 from syncer.config import resolve_policy_name
+from syncer.config import xdg_config_home
+from syncer.config import xdg_state_home
 from syncer.policy import Action
 from syncer.policy import Scope
 from syncer.repos import GIT_TIMEOUT_SECONDS
@@ -317,3 +320,27 @@ class TestRegistryIndependence:
             }
         )
         assert config.repos[0].name == 'chi'
+
+
+class TestXDGPaths:
+    """Every path syncer writes is an XDG base directory, resolved through the environment
+    variable rather than a hardcoded ~/.config — a machine that relocates its config or state
+    home is otherwise silently ignored."""
+
+    def test_config_home_honours_the_environment(self, tmp_path, monkeypatch):
+        monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'cfg'))
+        assert xdg_config_home() == tmp_path / 'cfg'
+
+    def test_state_home_honours_the_environment(self, tmp_path, monkeypatch):
+        monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'st'))
+        assert xdg_state_home() == tmp_path / 'st'
+
+    def test_documented_fallbacks_when_unset(self, monkeypatch):
+        monkeypatch.delenv('XDG_CONFIG_HOME', raising=False)
+        monkeypatch.delenv('XDG_STATE_HOME', raising=False)
+        assert xdg_config_home() == Path.home() / '.config'
+        assert xdg_state_home() == Path.home() / '.local' / 'state'
+
+    def test_tilde_in_the_override_is_expanded(self, monkeypatch):
+        monkeypatch.setenv('XDG_STATE_HOME', '~/somewhere/state')
+        assert xdg_state_home() == Path.home() / 'somewhere' / 'state'

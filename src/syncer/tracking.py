@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import suppress
 from datetime import UTC
 from datetime import datetime
 from operator import itemgetter
@@ -8,11 +9,12 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from syncer.config import DATA_DIR
+from syncer.config import LEGACY_DATA_DIR
+from syncer.config import STATE_DIR
 
 # The single global stream that predates per-registry events. Adopted once by the default
-# registry (see adopt_legacy_events) rather than orphaned.
-LEGACY_EVENTS_FILE = DATA_DIR / 'events.jsonl'
+# registry (see migrate_legacy_events) rather than orphaned.
+LEGACY_EVENTS_FILE = LEGACY_DATA_DIR / 'events.jsonl'
 
 
 def events_file_for(repos_file: Path) -> Path:
@@ -22,20 +24,39 @@ def events_file_for(repos_file: Path) -> Path:
     working sets, and find_stale_repos() scopes to the paths in the most recent run — so
     alternating registries would make each set's dirty-repo warnings vanish on the other's run.
     """
-    return DATA_DIR / f'{repos_file.stem}-events.jsonl'
+    return STATE_DIR / f'{repos_file.stem}-events.jsonl'
 
 
-def adopt_legacy_events(events_file: Path) -> None:
-    """Hand the pre-split global stream to the registry that actually wrote it.
+# MIGRATION (v5.0.0): run history moved from ~/.local/share/syncer (XDG data) to
+# $XDG_STATE_HOME/syncer, and from a single global events.jsonl to one stream per registry.
+# Retire when every machine — macmini, mbp, archlinux, work — has run syncer >= 5.0.0, observable
+# as ~/.local/share/syncer being absent on all of them. Tracked in the syncer icb project.
+def migrate_legacy_events(events_file: Path, adopt_global: bool = False) -> None:
+    """Move any run history left in the old data dir into the state dir.
 
-    A rename, not a copy, so it happens exactly once and no second registry can claim it.
-    Call only for the default registry; an explicit --repos-file names a set that never
-    contributed to that history.
+    Two shapes exist out there, because a machine may have skipped the release that split the
+    stream per registry: already-split `*-events.jsonl` files, which keep their names, and the
+    pre-split global `events.jsonl`, which belongs to the default registry alone — an explicit
+    --repos-file names a set that never contributed to it, hence `adopt_global`.
+
+    Renames, never copies, so it runs exactly once and cannot re-adopt a stream another registry
+    has since claimed. An existing target always wins.
     """
-    if events_file.exists() or not LEGACY_EVENTS_FILE.exists():
+    if not LEGACY_DATA_DIR.is_dir():
         return
+
     events_file.parent.mkdir(parents=True, exist_ok=True)
-    LEGACY_EVENTS_FILE.rename(events_file)
+    for legacy_stream in sorted(LEGACY_DATA_DIR.glob('*-events.jsonl')):
+        target = events_file.parent / legacy_stream.name
+        if not target.exists():
+            legacy_stream.rename(target)
+
+    if adopt_global and LEGACY_EVENTS_FILE.exists() and not events_file.exists():
+        LEGACY_EVENTS_FILE.rename(events_file)
+
+    # Leaving an empty directory behind would make the retirement condition above unobservable.
+    with suppress(OSError):
+        LEGACY_DATA_DIR.rmdir()
 
 
 RepoStatus = Literal[

@@ -149,13 +149,21 @@ Never call `subprocess.run` directly for a git or `gh` invocation.
 
 ## Run history
 
-The default run appends one `SyncRunEvent` per run to `DATA_DIR/<registry-stem>-events.jsonl`;
-`syncer stats -c <registry>` reads the matching stream back. **One stream per registry**, keyed on
-the registry file, because two registries are two working sets: a shared file makes `stats` a blend
-of both, and `find_stale_repos` scopes to the paths in the most recent run, so alternating a
-personal and a work run would make each set's dirty-repo warnings vanish on the other's. The
-pre-split global `events.jsonl` is adopted (renamed, so exactly once) by the default registry —
-never by one named with `--repos-file`, which never contributed to that history.
+The default run appends one `SyncRunEvent` per run to `STATE_DIR/<registry-stem>-events.jsonl`
+(`$XDG_STATE_HOME/syncer`, since history is state: nobody authors it, and deleting it changes
+behaviour rather than costing a recompute); `syncer stats -c <registry>` reads the matching stream
+back. **One stream per registry**, keyed on the registry file, because two registries are two
+working sets: a shared file makes `stats` a blend of both, and `find_stale_repos` scopes to the
+paths in the most recent run, so alternating a personal and a work run would make each set's
+dirty-repo warnings vanish on the other's. The pre-split global `events.jsonl` is adopted
+(renamed, so exactly once) by the default registry — never by one named with `--repos-file`, which
+never contributed to that history.
+
+`migrate_legacy_events` sweeps the pre-XDG data dir (`~/.local/share/syncer`) for both shapes —
+the global stream and already-split per-registry ones — since a machine may have skipped the
+release that split them. It renames rather than copies, so it runs once and an existing target
+always wins, and it rmdir's the emptied directory so the migration's retirement condition is
+observable. Carries the `# MIGRATION (v5.0.0)` marker per `~/dev/standards/data.md`.
 
 The schema (`tracking.py`) evolves **additively** —
 `RepoSnapshot` gained `policy` + `branches: list[BranchSnapshot]`, both defaulting empty so

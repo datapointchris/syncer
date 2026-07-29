@@ -30,8 +30,8 @@ from syncer.repos import _status_line
 from syncer.repos import find_repo_in_search_paths
 from syncer.stats import show_stats
 from syncer.sync import run_sync
-from syncer.tracking import adopt_legacy_events
 from syncer.tracking import events_file_for
+from syncer.tracking import migrate_legacy_events
 
 app = typer.Typer(invoke_without_command=True, rich_markup_mode='rich')
 console = Console()
@@ -54,8 +54,7 @@ def _events_file(repos_path: Path, override: Path | None) -> Path:
     """Event stream for the registry in play. The pre-split global stream is adopted only when
     no --repos-file was given, since it is the default registry's history and nobody else's."""
     events_file = events_file_for(repos_path)
-    if override is None:
-        adopt_legacy_events(events_file)
+    migrate_legacy_events(events_file, adopt_global=override is None)
     return events_file
 
 

@@ -11,10 +11,10 @@ from syncer.tracking import RepoSnapshot
 from syncer.tracking import RepoStatus
 from syncer.tracking import RunSummary
 from syncer.tracking import SyncRunEvent
-from syncer.tracking import adopt_legacy_events
 from syncer.tracking import emit_event
 from syncer.tracking import events_file_for
 from syncer.tracking import find_stale_repos
+from syncer.tracking import migrate_legacy_events
 from syncer.tracking import read_events
 
 
@@ -159,7 +159,7 @@ class TestPerRegistryEventStreams:
     personal and a work run would make each set's dirty-repo warnings vanish on the other's."""
 
     def test_stream_is_keyed_on_the_registry_file(self, tmp_path, monkeypatch):
-        monkeypatch.setattr('syncer.tracking.DATA_DIR', tmp_path)
+        monkeypatch.setattr('syncer.tracking.STATE_DIR', tmp_path)
         personal = events_file_for(Path('~/dev/repos.json'))
         work = events_file_for(Path('~/dev/work-repos.json'))
         assert personal != work
@@ -174,30 +174,78 @@ class TestPerRegistryEventStreams:
         assert [event.config_name for event in read_events(personal)] == ['personal']
         assert [event.config_name for event in read_events(work)] == ['work']
 
-    def test_legacy_stream_is_adopted_once(self, tmp_path, monkeypatch):
-        legacy = tmp_path / 'events.jsonl'
-        monkeypatch.setattr('syncer.tracking.LEGACY_EVENTS_FILE', legacy)
-        emit_event(_make_event(config_name='history'), legacy)
 
-        default_stream = tmp_path / 'repos-events.jsonl'
-        adopt_legacy_events(default_stream)
-        assert not legacy.exists()  # renamed, so no second registry can claim it
-        assert [event.config_name for event in read_events(default_stream)] == ['history']
+class TestLegacyStateMigration:
+    """Run history is machine-local, so it exists separately on every box that ever ran syncer.
+    Both shapes have to land: a machine that skipped the per-registry split still has the single
+    global stream sitting in the old data dir."""
 
-        other_stream = tmp_path / 'work-repos-events.jsonl'
-        adopt_legacy_events(other_stream)
-        assert read_events(other_stream) == []
+    @pytest.fixture
+    def dirs(self, tmp_path, monkeypatch):
+        data_dir = tmp_path / 'share' / 'syncer'
+        state_dir = tmp_path / 'state' / 'syncer'
+        monkeypatch.setattr('syncer.tracking.LEGACY_DATA_DIR', data_dir)
+        monkeypatch.setattr('syncer.tracking.LEGACY_EVENTS_FILE', data_dir / 'events.jsonl')
+        monkeypatch.setattr('syncer.tracking.STATE_DIR', state_dir)
+        return data_dir, state_dir
 
-    def test_adoption_never_overwrites_an_existing_stream(self, tmp_path, monkeypatch):
-        legacy = tmp_path / 'events.jsonl'
-        monkeypatch.setattr('syncer.tracking.LEGACY_EVENTS_FILE', legacy)
-        emit_event(_make_event(config_name='legacy'), legacy)
-        existing = tmp_path / 'repos-events.jsonl'
-        emit_event(_make_event(config_name='current'), existing)
+    def test_global_stream_is_adopted_by_the_default_registry(self, dirs):
+        data_dir, state_dir = dirs
+        emit_event(_make_event(config_name='history'), data_dir / 'events.jsonl')
 
-        adopt_legacy_events(existing)
-        assert [event.config_name for event in read_events(existing)] == ['current']
-        assert legacy.exists()
+        migrate_legacy_events(state_dir / 'repos-events.jsonl', adopt_global=True)
+        assert not (data_dir / 'events.jsonl').exists()  # renamed, so no second registry claims it
+        assert [event.config_name for event in read_events(state_dir / 'repos-events.jsonl')] == ['history']
+
+    def test_global_stream_is_not_adopted_by_a_named_registry(self, dirs):
+        data_dir, state_dir = dirs
+        emit_event(_make_event(config_name='history'), data_dir / 'events.jsonl')
+
+        migrate_legacy_events(state_dir / 'work-repos-events.jsonl', adopt_global=False)
+        assert read_events(state_dir / 'work-repos-events.jsonl') == []
+        assert (data_dir / 'events.jsonl').exists()
+
+    def test_split_streams_move_under_their_own_names(self, dirs):
+        data_dir, state_dir = dirs
+        emit_event(_make_event(config_name='personal'), data_dir / 'repos-events.jsonl')
+        emit_event(_make_event(config_name='work'), data_dir / 'work-repos-events.jsonl')
+
+        migrate_legacy_events(state_dir / 'repos-events.jsonl', adopt_global=True)
+        assert [event.config_name for event in read_events(state_dir / 'repos-events.jsonl')] == ['personal']
+        assert [event.config_name for event in read_events(state_dir / 'work-repos-events.jsonl')] == ['work']
+
+    def test_never_overwrites_an_existing_stream(self, dirs):
+        data_dir, state_dir = dirs
+        emit_event(_make_event(config_name='legacy'), data_dir / 'repos-events.jsonl')
+        emit_event(_make_event(config_name='legacy-global'), data_dir / 'events.jsonl')
+        emit_event(_make_event(config_name='current'), state_dir / 'repos-events.jsonl')
+
+        migrate_legacy_events(state_dir / 'repos-events.jsonl', adopt_global=True)
+        assert [event.config_name for event in read_events(state_dir / 'repos-events.jsonl')] == ['current']
+        assert (data_dir / 'repos-events.jsonl').exists()
+        assert (data_dir / 'events.jsonl').exists()
+
+    def test_runs_exactly_once(self, dirs):
+        data_dir, state_dir = dirs
+        emit_event(_make_event(config_name='history'), data_dir / 'events.jsonl')
+        target = state_dir / 'repos-events.jsonl'
+
+        migrate_legacy_events(target, adopt_global=True)
+        emit_event(_make_event(config_name='after-migration'), target)
+        migrate_legacy_events(target, adopt_global=True)
+
+        assert [event.config_name for event in read_events(target)] == ['history', 'after-migration']
+
+    def test_empty_data_dir_is_removed_so_the_migration_is_observably_done(self, dirs):
+        data_dir, state_dir = dirs
+        emit_event(_make_event(), data_dir / 'events.jsonl')
+        migrate_legacy_events(state_dir / 'repos-events.jsonl', adopt_global=True)
+        assert not data_dir.exists()
+
+    def test_no_op_on_a_fresh_install(self, dirs):
+        _, state_dir = dirs
+        migrate_legacy_events(state_dir / 'repos-events.jsonl', adopt_global=True)
+        assert not (state_dir / 'repos-events.jsonl').exists()
 
 
 class TestFindStaleRepos:

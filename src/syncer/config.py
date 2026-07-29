@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tomllib
 from pathlib import Path
@@ -15,8 +16,26 @@ from syncer.policy import BUILTIN_POLICIES
 from syncer.policy import Policy
 from syncer.repos import GIT_TIMEOUT_SECONDS
 
-TOOL_CONFIG_PATH = Path.home() / '.config' / 'syncer' / 'config.toml'
-DATA_DIR = Path.home() / '.local' / 'share' / 'syncer'
+
+def xdg_config_home() -> Path:
+    override = os.environ.get('XDG_CONFIG_HOME')
+    return Path(override).expanduser() if override else Path.home() / '.config'
+
+
+def xdg_state_home() -> Path:
+    override = os.environ.get('XDG_STATE_HOME')
+    return Path(override).expanduser() if override else Path.home() / '.local' / 'state'
+
+
+CONFIG_DIR = xdg_config_home() / 'syncer'
+TOOL_CONFIG_PATH = CONFIG_DIR / 'config.toml'
+
+# Run history is state, not data: it persists across runs, nobody authors it, and deleting it
+# changes behaviour (stale-repo warnings restart) rather than merely costing a recompute.
+STATE_DIR = xdg_state_home() / 'syncer'
+
+# Where run history lived before the state move. Swept by migrate_legacy_events().
+LEGACY_DATA_DIR = Path.home() / '.local' / 'share' / 'syncer'
 
 # Legacy path for deprecation fallback
 _LEGACY_CONFIG_DIR = Path.home() / '.config' / 'syncer'
