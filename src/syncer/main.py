@@ -14,6 +14,7 @@ from pyselfupdate.typercmd import run_update
 from rich.console import Console
 
 from syncer.commands.config_cmd import config_app
+from syncer.commands.policy_cmd import policy_app
 from syncer.config import RepoConfig
 from syncer.config import SyncerConfig
 from syncer.config import load_tool_config
@@ -34,6 +35,7 @@ from syncer.tracking import migrate_legacy_events
 
 app = typer.Typer(invoke_without_command=True, rich_markup_mode='rich')
 app.add_typer(config_app, name='config', rich_help_panel='Manage')
+app.add_typer(policy_app, name='policy', rich_help_panel='Inspect')
 console = Console()
 
 # Shared by the `update` command and the daily check in the callback below, so
