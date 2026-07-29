@@ -9,6 +9,7 @@ from syncer.config import ToolConfig
 from syncer.config import _load_repos_file
 from syncer.config import get_repos_file_path
 from syncer.config import load_tool_config
+from syncer.config import registry_location
 from syncer.config import resolve_clone_url
 from syncer.config import resolve_config
 from syncer.config import resolve_policies
@@ -248,6 +249,13 @@ class TestLoadReposFile:
         with pytest.raises(SystemExit):
             _load_repos_file(repos_file)
 
+    def test_missing_file_names_what_chose_the_path(self, repos_file, capsys):
+        """A path this machine never had is the common failure, and the actionable half of it is
+        which file named the path — not that the file is absent."""
+        with pytest.raises(SystemExit):
+            _load_repos_file(repos_file, 'repos_file in /somewhere/config.toml')
+        assert 'repos_file in /somewhere/config.toml' in capsys.readouterr().err
+
     def test_repos_sorted_by_path(self, repos_file, sample_config):
         repos_file.write_text(json.dumps(sample_config))
         config = _load_repos_file(repos_file)
@@ -272,6 +280,24 @@ class TestGetReposFilePath:
         monkeypatch.setattr('syncer.config.DEFAULT_REPOS_FILE', tmp_path / 'syncer' / 'repos.json')
         # tool_config is not written, so nothing names a registry
         assert get_repos_file_path() == tmp_path / 'syncer' / 'repos.json'
+
+
+class TestRegistryLocation:
+    """Every resolved path carries why it was chosen, so a report can explain itself."""
+
+    def test_default_has_no_source(self, tool_config):
+        assert registry_location(ToolConfig()).source is None
+
+    def test_repos_file_names_the_config_that_set_it(self, tool_config, repos_file):
+        location = registry_location(ToolConfig(repos_file=str(repos_file)))
+        assert location.path == repos_file
+        assert 'repos_file' in location.source
+        assert str(tool_config) in location.source
+
+    def test_the_flag_names_itself(self, tool_config, repos_file, tmp_path):
+        location = registry_location(ToolConfig(repos_file=str(repos_file)), tmp_path / 'work.json')
+        assert location.path == tmp_path / 'work.json'
+        assert '--repos-file' in location.source
 
 
 class TestResolveConfig:

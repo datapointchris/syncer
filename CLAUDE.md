@@ -90,13 +90,28 @@ current/non-current split needs the same treatment.
 - **`repos.json`** (default `$XDG_CONFIG_HOME/syncer/repos.json`, repointed by `repos_file` in
   `config.toml`) — the repo **identity registry**: `owner`, `host`, `search_paths`,
   `exclude_paths`, and per-repo `{name, path, status, description, owner?, sync_policy?,
-  toolchain?}`. Portable across machines. **syncer never writes to it** — it's shared
+  toolchain?}`. Portable across machines. **syncer never modifies it** — it's shared
   infrastructure (also read by `forge` and `indy`). `issues` reports drift but tells you to fix
-  paths by hand.
+  paths by hand. `config init` *creates* one that is absent, which is the single write and not a
+  modification: it refuses the moment a file is there. A tool that can only tell you to hand-write
+  a file whose shape it already knows has pushed its own job onto the reader.
 
   The fleet keeps its registry at `~/dev/repos.json` and points `repos_file` there, because forge
   and indy read the same file. That sharing is a **fleet fact, not a syncer fact** — the default
   must stay a syncer-owned XDG path so a machine that has never heard of `~/dev` still works.
+  Nothing shipped in this repo may *recommend* it either: the tool-config template used to say the
+  registry "lives at ~/dev/repos.json and every machine names it here", which reads as an
+  instruction, and a fleet that then deployed exactly that `config.toml` from a shared dotfiles
+  bucket pointed the work box — a git-only WSL node with no Syncthing, so no `~/dev` — at a
+  registry it could never have. `config.toml` is machine-local in the operational sense, not just
+  by convention: `repos_file` is the one setting whose correct value differs per machine and whose
+  wrong value fails every run outright rather than degrading, so that file must never be synced.
+
+  Every resolved registry path therefore carries its provenance (`RegistryLocation.source`), and
+  every message about a missing registry prints it plus both exits (create one there, or drop the
+  pointer). That failure was undiagnosable from syncer's own output, which named the path but never
+  what chose it — so the tool looked like it had `~/dev` hard-coded. A resolution chain owes the
+  reader which tier won.
 
   **It is no longer purely identity.** `toolchain` declares a repo's build surface — `components`
   (a `stack` and the `dir` it lives in) and `sql_dialect` — and is owned entirely by forge, which
@@ -135,6 +150,13 @@ current/non-current split needs the same treatment.
 round-trip test (`test_config_cmd.py`) parses each back into its model so they cannot drift. A
 second test asserts every `PrimaryState` and `Action` appears in the tool-config template, so a
 new member cannot ship undiscoverable.
+
+`init` **writes** those templates, `example` **prints** them, and both take the same optional
+positional naming which file — `config`, `registry`, or omitted for both — reusing the vocabulary
+`config path` already established. That positional replaced a `--registry` boolean: a flag whose
+name is a noun answers "which file" in a grammar built for "on or off", and it read as an unrelated
+mode rather than a target. `example` on a terminal also names the path `init` would write to,
+because a template on screen with no path is the half of the answer that cannot be acted on.
 
 Every load path raises `ConfigError` carrying one readable line per problem, rather than letting a
 pydantic `ValidationError` escape as a traceback. Policies are constructed one at a time in

@@ -23,15 +23,14 @@ This fetches the latest GitHub release and reinstalls via `uv tool install`.
 On a machine that has never run syncer:
 
 ```bash
-syncer config init                                            # annotated ~/.config/syncer/config.toml
-syncer config edit                                            # adjust the default policy, add your own
-syncer config example --registry > ~/.config/syncer/repos.json  # scaffold the repo registry
-syncer config validate                                        # both files, plus their cross-references
-syncer                                                        # report-only
-syncer --apply                                                # execute the safe actions
+syncer config init      # write both files, annotated, at the paths syncer reads
+syncer config edit      # name your repos, adjust the default policy, add your own
+syncer config validate  # both files, plus their cross-references
+syncer                  # report-only
+syncer --apply          # execute the safe actions
 ```
 
-`config init` never writes the registry — that file is shared infrastructure, so `config example --registry` scaffolds it and you own it from there.
+`config init` creates whichever of the two files is missing and **never rewrites one that exists** — the registry is shared infrastructure that `forge` and `indy` also read, so syncer scaffolds one that is absent and modifies no existing one. `syncer config init registry` does just that file; `syncer config path` says where both landed.
 
 ## Usage
 
@@ -61,12 +60,14 @@ Two files, deliberately split. `syncer config path` prints where both resolve to
 **`~/.config/syncer/config.toml`** — machine-local tool config: which registry to read, the default policy, custom policies, per-repo overrides, and the git timeout. `syncer config example` prints a fully annotated one showing every option.
 
 ```toml
-# repos_file = "~/dev/repos.json"   # defaults to ~/.config/syncer/repos.json
+# repos_file = "~/shared/repos.json"  # defaults to ~/.config/syncer/repos.json
 default_policy = "standard"
-git_timeout = 120                   # ceiling on a single git call; clones get 5x this
+git_timeout = 120                     # ceiling on a single git call; clones get 5x this
 ```
 
-**`~/.config/syncer/repos.json`** — the repo registry, portable between machines. `syncer config example --registry` prints an annotated one.
+`repos_file` is worth setting only when another tool reads the same registry file, and then only on the machines that have it. Because it is machine-local, this file is the one thing that must **not** be shared between machines: a config naming a path only some of them have makes every run there fail on a registry that was never going to exist. Any message about a missing registry names what chose the path — `(from repos_file in ~/.config/syncer/config.toml)` — and offers both exits, creating one there or dropping the pointer.
+
+**`~/.config/syncer/repos.json`** — the repo registry, portable between machines. `syncer config init registry` writes an annotated one; `syncer config example registry` prints it without writing.
 
 ```json
 {

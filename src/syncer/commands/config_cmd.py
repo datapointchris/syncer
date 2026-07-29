@@ -24,15 +24,18 @@ from syncer.config import TEMPLATE_REGISTRY
 from syncer.config import TEMPLATE_TOOL_CONFIG
 from syncer.config import TOOL_CONFIG_PATH
 from syncer.config import ConfigError
+from syncer.config import RegistryLocation
 from syncer.config import SyncerConfig
 from syncer.config import ToolConfig
 from syncer.config import get_repos_file_path
+from syncer.config import init_registry
 from syncer.config import init_tool_config
 from syncer.config import load_tool_config
 from syncer.config import parse_registry
 from syncer.config import parse_tool_config
 from syncer.config import read_tool_config
-from syncer.config import registry_path_for
+from syncer.config import registry_location
+from syncer.config import registry_source_note
 from syncer.config import resolve_policies
 from syncer.config import resolve_policy_name
 from syncer.output import console
@@ -48,36 +51,71 @@ config_app = typer.Typer(
 )
 
 
-@config_app.command('init')
-def config_init() -> None:
-    """Create an annotated tool config (fails if one already exists).
+FILES = ('config', 'registry')
 
-    Writes config.toml only, never the registry — syncer never writes repos.json, which is
-    shared infrastructure that forge and indy also read. Scaffold a registry instead with
-    `syncer config example --registry > <path>`.
+
+def _requested_files(which: str | None) -> tuple[str, ...]:
+    """The files a command was asked about. Naming none means both, matching `config path`."""
+    if which is None:
+        return FILES
+    if which not in FILES:
+        raise typer.BadParameter(f'unknown file {which!r}; expected one of: {", ".join(FILES)}')
+    return (which,)
+
+
+@config_app.command('init')
+def config_init(
+    which: Annotated[str | None, typer.Argument(help='One of: config, registry. Omit to create both.')] = None,
+    repos_file: Annotated[
+        Path | None,
+        typer.Option('--repos-file', '-c', help='Create the registry at this path instead of the resolved one'),
+    ] = None,
+) -> None:
+    """Create the annotated tool config and repo registry, at the paths syncer reads.
+
+    Idempotent: a file that already exists is reported and left exactly as it was, never
+    rewritten — the registry is shared infrastructure that forge and indy also read, and syncer
+    creates one that is absent but modifies no existing one.
     """
-    if TOOL_CONFIG_PATH.exists():
-        error(f'config already exists at {TOOL_CONFIG_PATH}')
-        raise typer.Exit(1)
-    path = init_tool_config()
-    success(f'created config at {path}')
-    hint(f'the registry defaults to {DEFAULT_REPOS_FILE} — scaffold one with:')
-    hint(f'  syncer config example --registry > {DEFAULT_REPOS_FILE}')
+    files = _requested_files(which)
+
+    if 'config' in files:
+        if TOOL_CONFIG_PATH.exists():
+            hint(f'config already exists at {TOOL_CONFIG_PATH} — left as is')
+        else:
+            success(f'created config at {init_tool_config()}')
+
+    if 'registry' in files:
+        # Resolved after the write above, so a config.toml created moments ago is what names the
+        # registry path — not the absence it was resolved against before.
+        location = registry_location(load_tool_config(), repos_file)
+        note = registry_source_note(location.source)
+        if location.path.exists():
+            hint(f'registry already exists at {location.path}{note} — left as is')
+        else:
+            success(f'created registry at {init_registry(location.path)}{note}')
+            hint('it holds example entries — replace them with your repos, then: syncer config validate')
 
 
 @config_app.command('example')
 def config_example(
-    registry: Annotated[bool, typer.Option('--registry', help='Print the repo registry example instead of the tool config.')] = False,
+    which: Annotated[str, typer.Argument(help='Which file to print: config or registry.')] = 'config',
 ) -> None:
-    """Print a fully annotated example showing every available option.
+    """Print a fully annotated example of one file, showing every available option.
 
-    Meant for side-by-side reference: display it in one pane while editing the real file in
-    another. Syntax-highlighted on a terminal, plain text when redirected, so
-    `syncer config example --registry > repos.json` stays clean.
+    Reference material, not a scaffold — `syncer config init` writes these same templates to the
+    paths syncer reads. Meant for side-by-side reading: this in one pane, the real file in another.
+    Syntax-highlighted on a terminal, plain text when redirected, so
+    `syncer config example registry > repos.json` stays clean.
     """
-    template, lexer = (TEMPLATE_REGISTRY, 'json') if registry else (TEMPLATE_TOOL_CONFIG, 'toml')
+    _requested_files(which)
+    template, lexer = (TEMPLATE_REGISTRY, 'json') if which == 'registry' else (TEMPLATE_TOOL_CONFIG, 'toml')
     if console.is_terminal:
         console.print(Syntax(template, lexer, background_color='default', word_wrap=True))
+        # A template on screen with no path is the half-answer: it says what to write and never
+        # where. On stderr, so a redirect still captures only the template.
+        target = TOOL_CONFIG_PATH if which == 'config' else get_repos_file_path()
+        hint(f'reference only — `syncer config init {which}` writes this to {target}')
     else:
         print(template, end='')
 
@@ -124,7 +162,7 @@ def config_show(
     answers which one actually won.
     """
     tool_config = load_tool_config()
-    registry_path = registry_path_for(tool_config, repos_file)
+    registry_path, registry_source = registry_location(tool_config, repos_file)
     known_policies = resolve_policies(tool_config)
 
     registry: SyncerConfig | None = None
@@ -157,6 +195,7 @@ def config_show(
                 'config_exists': TOOL_CONFIG_PATH.exists(),
                 'registry_file': str(registry_path),
                 'registry_exists': registry_path.exists(),
+                'registry_source': registry_source,
                 'state_dir': str(STATE_DIR),
                 'default_policy': tool_config.default_policy,
                 'git_timeout': tool_config.git_timeout,
@@ -171,7 +210,10 @@ def config_show(
         f'[bold]config[/bold]    {TOOL_CONFIG_PATH}{"" if TOOL_CONFIG_PATH.exists() else "  (absent — built-in defaults)"}',
         soft_wrap=True,
     )
-    console.print(f'[bold]registry[/bold]  {registry_path}{"" if registry_path.exists() else "  (absent)"}', soft_wrap=True)
+    console.print(
+        f'[bold]registry[/bold]  {registry_path}{registry_source_note(registry_source)}{"" if registry_path.exists() else "  (absent)"}',
+        soft_wrap=True,
+    )
     console.print(f'[bold]state[/bold]     {STATE_DIR}', soft_wrap=True)
     console.print()
     console.print(f'[bold]default_policy[/bold]  {tool_config.default_policy}')
@@ -242,7 +284,7 @@ def config_validate(
     tool_config = _validate_tool_config(problems)
     # Resolved from the config just parsed, not re-read: load_tool_config exits on a broken file,
     # which would abort the very command whose job is to explain what is broken about it.
-    _validate_registry(registry_path_for(tool_config, repos_file), tool_config, problems)
+    _validate_registry(registry_location(tool_config, repos_file), tool_config, problems)
 
     if problems:
         error(f'{len(problems)} problem(s) found:')
@@ -272,13 +314,21 @@ def _validate_tool_config(problems: list[str]) -> ToolConfig:
         if policy_name not in known:
             problems.append(f'repo_overrides.{repo_name}: unknown policy {policy_name!r}')
     if tool_config.repos_file and not Path(tool_config.repos_file).expanduser().exists():
-        problems.append(f'repos_file: no such file: {Path(tool_config.repos_file).expanduser()}')
+        # The likely cause is a config copied from a machine that has the shared registry onto one
+        # that does not, so the message names the way out rather than only the missing path.
+        problems.append(
+            f'repos_file: no such file: {Path(tool_config.repos_file).expanduser()}'
+            f" — comment it out to use this machine's own registry at {DEFAULT_REPOS_FILE}"
+        )
     return tool_config
 
 
-def _validate_registry(registry_path: Path, tool_config: ToolConfig, problems: list[str]) -> None:
+def _validate_registry(location: RegistryLocation, tool_config: ToolConfig, problems: list[str]) -> None:
+    registry_path = location.path
     if not registry_path.exists():
-        problems.append(f'{registry_path}: no such file — scaffold one with `syncer config example --registry`')
+        problems.append(
+            f'{registry_path}{registry_source_note(location.source)}: no such file — create one with `syncer config init registry`'
+        )
         return
 
     try:

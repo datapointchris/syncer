@@ -7,6 +7,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 from typing import Literal
+from typing import NamedTuple
 
 from pydantic import BaseModel
 from pydantic import ValidationError
@@ -54,10 +55,11 @@ TEMPLATE_TOOL_CONFIG = """\
 # because they are a property of this box: the same repo can sync aggressively on an always-on
 # desktop and report-only on a laptop.
 
-# Repo registry to read. Defaults to ~/.config/syncer/repos.json. Point it elsewhere only if the
-# registry is shared with other tools — on the fleet, forge and indy read the same file, so it
-# lives at ~/dev/repos.json and every machine names it here.
-# repos_file = "~/dev/repos.json"
+# Repo registry to read. Defaults to whatever `syncer config path registry` prints, which is the
+# file `syncer config init` scaffolds. Point it elsewhere only when another tool reads the same
+# registry, in which case every machine that has that file names the shared path here — a machine
+# without it must leave this commented out, or every run fails on a path it cannot have.
+# repos_file = "~/shared/repos.json"
 
 # Policy for any repo that names no other. Built-ins: standard, observe, mirror.
 default_policy = "standard"
@@ -272,11 +274,19 @@ def _report_config_error(path: Path, exc: ConfigError) -> None:
         hint(f'  {problem}')
 
 
-def _load_repos_file(path: Path) -> SyncerConfig:
-    """Load the repo registry from a JSON file."""
+def _load_repos_file(path: Path, source: str | None = None) -> SyncerConfig:
+    """Load the repo registry from a JSON file.
+
+    A missing registry names its own provenance, because the actionable fact is usually not that
+    the file is absent but that something chose a path this machine was never going to have.
+    """
     if not path.exists():
-        error(f'Repo registry not found: {path}')
-        hint(f'Scaffold one with: syncer config example --registry > {path}')
+        error(f'Repo registry not found: {path}{registry_source_note(source)}')
+        hint('Create an annotated one there with: syncer config init registry')
+        # When something explicitly chose the path, creating a registry there is only half the
+        # menu — a machine that was never going to have that path wants the other half.
+        if source:
+            hint(f'Or drop {source} to fall back to {DEFAULT_REPOS_FILE}')
         sys.exit(1)
     try:
         config = parse_registry(json.loads(path.read_text()))
@@ -355,6 +365,16 @@ def init_tool_config() -> Path:
     return TOOL_CONFIG_PATH
 
 
+def init_registry(path: Path) -> Path:
+    """Write the annotated registry template to the path syncer reads. Callers check for an
+    existing file first: creating a registry that is absent is scaffolding, but rewriting one that
+    exists would clobber shared infrastructure that forge and indy also read.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(TEMPLATE_REGISTRY)
+    return path
+
+
 def resolve_clone_url(repo_config: RepoConfig, config: SyncerConfig) -> str:
     """Clone URL for one repo: per-repo override, then registry template, then the default
     '{host}/{owner}/{name}'."""
@@ -388,21 +408,39 @@ def resolve_policy_name(repo_config: RepoConfig, tool_config: ToolConfig, cli_po
     return tool_config.default_policy or 'standard'
 
 
-def registry_path_for(tool_config: ToolConfig, override: Path | None = None) -> Path:
+class RegistryLocation(NamedTuple):
+    """A resolved registry path plus why syncer is looking there.
+
+    The provenance travels with the path because the path alone is not enough to act on: a
+    machine that inherits a `repos_file` naming a directory it does not have reads as syncer
+    hard-coding someone else's layout, and no message said which file chose the path.
+    """
+
+    path: Path
+    # None is the built-in default; anything else is a phrase naming what pointed here.
+    source: str | None = None
+
+
+def registry_source_note(source: str | None) -> str:
+    """Parenthetical naming where a registry path came from; empty for the built-in default."""
+    return f' (from {source})' if source else ''
+
+
+def registry_location(tool_config: ToolConfig, override: Path | None = None) -> RegistryLocation:
     """Resolve the registry path: --repos-file, then config.toml's repos_file, then the default.
 
     Takes an already-loaded ToolConfig so `config validate` can resolve the registry from the
     config it just parsed and diagnosed, instead of loading the same broken file a second time.
     """
     if override is not None:
-        return override.expanduser()
+        return RegistryLocation(override.expanduser(), 'the --repos-file flag')
     if tool_config.repos_file:
-        return Path(tool_config.repos_file).expanduser()
-    return DEFAULT_REPOS_FILE
+        return RegistryLocation(Path(tool_config.repos_file).expanduser(), f'repos_file in {TOOL_CONFIG_PATH}')
+    return RegistryLocation(DEFAULT_REPOS_FILE)
 
 
 def get_repos_file_path(override: Path | None = None) -> Path:
-    return registry_path_for(load_tool_config(), override)
+    return registry_location(load_tool_config(), override).path
 
 
 def resolve_registry(repos_file: Path | None = None) -> tuple[SyncerConfig, Path]:
@@ -410,8 +448,8 @@ def resolve_registry(repos_file: Path | None = None) -> tuple[SyncerConfig, Path
     set of repos: passing a different file swaps the whole working set, it does not merge with
     the default. The path comes back because it is the registry's identity — what the per-registry
     event stream is keyed on."""
-    path = get_repos_file_path(repos_file)
-    return _load_repos_file(path), path
+    location = registry_location(load_tool_config(), repos_file)
+    return _load_repos_file(location.path, location.source), location.path
 
 
 def resolve_config(repos_file: Path | None = None) -> SyncerConfig:

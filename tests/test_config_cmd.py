@@ -53,34 +53,69 @@ class TestTemplateRoundTrip:
 
 
 class TestConfigInit:
-    def test_writes_a_config_that_validates(self, config_home):
+    def test_creates_both_files_and_they_validate(self, config_home):
+        """One command has to leave a fresh machine in a runnable state: a template printed to
+        the terminal is the half-answer that sent the user looking for where to put it."""
         assert runner.invoke(app, ['config', 'init']).exit_code == 0
         assert (config_home / 'config.toml').read_text() == TEMPLATE_TOOL_CONFIG
-
-        _write(config_home / 'repos.json', TEMPLATE_REGISTRY)
+        assert (config_home / 'repos.json').read_text() == TEMPLATE_REGISTRY
         assert runner.invoke(app, ['config', 'validate']).exit_code == 0
 
-    def test_refuses_when_the_file_exists(self, config_home):
-        _write(config_home / 'config.toml', 'default_policy = "observe"\n')
-        result = runner.invoke(app, ['config', 'init'])
-        assert result.exit_code == 1
-        assert (config_home / 'config.toml').read_text() == 'default_policy = "observe"\n'
+    def test_naming_one_file_creates_only_that_one(self, config_home):
+        assert runner.invoke(app, ['config', 'init', 'registry']).exit_code == 0
+        assert (config_home / 'repos.json').exists()
+        assert not (config_home / 'config.toml').exists()
 
-    def test_never_writes_the_registry(self, config_home):
-        """syncer never writes repos.json — it is shared with forge and indy. Scaffolding is
-        `config example --registry`, so the invariant stays absolute."""
-        runner.invoke(app, ['config', 'init'])
+    def test_unknown_file_is_a_usage_error(self, config_home):
+        assert runner.invoke(app, ['config', 'init', 'nope']).exit_code == 2
+
+    def test_never_overwrites_an_existing_file(self, config_home):
+        """Idempotent by design: the registry is shared with forge and indy, so syncer creates one
+        that is absent and modifies no existing one."""
+        _write(config_home / 'config.toml', 'default_policy = "observe"\n')
+        _write(config_home / 'repos.json', '{"owner": "me", "repos": []}')
+        result = runner.invoke(app, ['config', 'init'])
+        assert result.exit_code == 0
+        assert (config_home / 'config.toml').read_text() == 'default_policy = "observe"\n'
+        assert (config_home / 'repos.json').read_text() == '{"owner": "me", "repos": []}'
+
+    def test_creates_the_registry_where_repos_file_points(self, config_home, tmp_path):
+        """The scaffold lands at the path syncer will actually read, not at the default — a
+        registry created anywhere else is a file nothing loads."""
+        elsewhere = tmp_path / 'shared' / 'registry.json'
+        _write(config_home / 'config.toml', f'repos_file = "{elsewhere}"\n')
+        result = runner.invoke(app, ['config', 'init', 'registry'])
+        assert result.exit_code == 0
+        assert elsewhere.read_text() == TEMPLATE_REGISTRY
         assert not (config_home / 'repos.json').exists()
+        # The provenance is the answer to "why is it looking there", so it rides on the message.
+        assert 'repos_file' in result.output
+
+    def test_the_config_it_just_wrote_names_the_registry_path(self, config_home, tmp_path):
+        """Resolution order matters within one invocation: reading the tool config before writing
+        it would scaffold the registry against a config that did not exist yet."""
+        result = runner.invoke(app, ['config', 'init'])
+        assert result.exit_code == 0
+        assert (config_home / 'repos.json').exists()
 
 
 class TestConfigExample:
-    def test_prints_the_tool_config_template(self, config_home):
+    def test_prints_the_tool_config_template_by_default(self, config_home):
         result = runner.invoke(app, ['config', 'example'])
         assert 'default_policy' in result.output
 
-    def test_registry_flag_prints_the_registry_template(self, config_home):
-        result = runner.invoke(app, ['config', 'example', '--registry'])
+    def test_naming_the_registry_prints_the_registry_template(self, config_home):
+        result = runner.invoke(app, ['config', 'example', 'registry'])
         assert json.loads(result.output)['repos']
+
+    def test_unknown_file_is_a_usage_error(self, config_home):
+        assert runner.invoke(app, ['config', 'example', 'nope']).exit_code == 2
+
+    def test_redirected_output_is_only_the_template(self, config_home):
+        """The where-to-put-it hint goes to stderr, so `config example registry > repos.json`
+        still produces a parseable file."""
+        result = runner.invoke(app, ['config', 'example', 'registry'])
+        assert result.stdout == TEMPLATE_REGISTRY
 
 
 class TestConfigPath:
@@ -213,7 +248,14 @@ class TestConfigValidate:
         _write(config_home / 'config.toml', '')
         result = runner.invoke(app, ['config', 'validate'])
         assert result.exit_code == 1
-        assert 'config example --registry' in result.output
+        assert 'config init registry' in result.output
+
+    def test_unreachable_repos_file_says_how_to_fall_back(self, config_home, tmp_path):
+        """The work-box case: a config naming a registry this machine does not have. Reporting
+        only the missing path leaves the reader with no way out of it."""
+        result = self._run(config_home, f'repos_file = "{tmp_path / "elsewhere.json"}"\n')
+        assert result.exit_code == 1
+        assert 'comment it out' in result.output
 
     def test_repo_paths_are_not_checked_against_the_disk(self, config_home):
         """validate checks structure, issues checks reality. Blurring them means neither gets
