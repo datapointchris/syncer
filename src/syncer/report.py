@@ -52,6 +52,7 @@ from syncer.repos import ICON_WARN
 from syncer.repos import Repo
 from syncer.repos import console
 from syncer.repos import find_repo_in_search_paths
+from syncer.repos import origin_mismatch
 
 DEFAULT_JOBS = 16
 # Upper bound on the random pre-fetch delay each worker sleeps, to desynchronize the initial
@@ -120,6 +121,12 @@ class RepoBranchReport:
     error: str | None = None
     lifecycle: str | None = None
     lifecycle_detail: str | None = None
+    # The clone's actual origin when it disagrees with the registry, and what was expected.
+    # Deliberately NOT a lifecycle status: a repo pointing at the wrong upstream is otherwise
+    # perfectly healthy, and a lifecycle status would replace its branch report rather than
+    # annotate it.
+    origin_mismatch: str | None = None
+    expected_url: str = ''
     # Repo-level counts captured for event snapshots (0 for lifecycle reports).
     uncommitted: int = 0
     stashes: int = 0
@@ -200,7 +207,10 @@ def report_severity(report: RepoBranchReport) -> Severity:
         return Severity.ERROR
     if report.lifecycle:
         return LIFECYCLE_STYLE[report.lifecycle][3]
-    return max((_row_severity(row) for row in report.rows), default=Severity.SYNCED)
+    branch_severity = max((_row_severity(row) for row in report.rows), default=Severity.SYNCED)
+    if report.origin_mismatch:
+        return max(branch_severity, Severity.WARNING)
+    return branch_severity
 
 
 def build_branch_rows(repo: Repo, policy: Policy, apply: bool) -> list[BranchRow]:
@@ -280,6 +290,8 @@ def _build_repo_report(
         rows=rows,
         uncommitted=len(repo.uncommitted_changes),
         stashes=repo.stash_count,
+        origin_mismatch=origin_mismatch(repo),
+        expected_url=repo.url,
     )
 
 
@@ -333,6 +345,9 @@ def render_report(report: RepoBranchReport, apply: bool) -> None:
         return
     mode = 'apply' if apply else 'report-only'
     console.print(f'[bold]{report.label}[/bold] [blue](policy: {report.policy_name}, {mode})[/blue]')
+    if report.origin_mismatch:
+        console.print(f'  [yellow]{ICON_WARN}  origin is {report.origin_mismatch}[/yellow]')
+        console.print(f'    [yellow]registry expects {report.expected_url} (fix the remote or repos.json by hand)[/yellow]')
     for row in report.rows:
         if apply and row.outcome is not None:
             console.print(f'{_branch_prefix(row.state)} {_outcome_suffix(row.outcome)}')

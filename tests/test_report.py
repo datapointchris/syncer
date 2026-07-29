@@ -18,6 +18,7 @@ from syncer.report import _build_repo_report
 from syncer.report import _row_severity
 from syncer.report import gather_reports
 from syncer.report import report_branches
+from syncer.report import report_severity
 
 
 def _build(repo_config, config, *, cli_policy=None, apply=False, include_lifecycle=True):
@@ -162,3 +163,44 @@ class TestProtectedBranchReporting:
         row = self._row(Action.PUSH, [])
         row.outcome = Outcome(branch='develop', action=Action.PUSH, status='refused', message='working tree is dirty')
         assert _row_severity(row) == Severity.ERROR
+
+
+class TestOriginMismatchReporting:
+    """A wrong origin is silent drift — the clone is healthy, it just pulls from the wrong
+    place. So it annotates the branch report rather than replacing it the way a lifecycle
+    status would, and it lifts the repo to WARNING so it sorts near the prompt."""
+
+    def _clone_with_origin(self, tmp_path, origin):
+        path = tmp_path / 'homelab'
+        subprocess.run(['git', 'init', '-b', 'main', str(path)], capture_output=True)
+        subprocess.run(['git', 'config', 'user.email', 't@t'], cwd=path, capture_output=True)
+        subprocess.run(['git', 'config', 'user.name', 'T'], cwd=path, capture_output=True)
+        (path / 'README.md').write_text('# x\n')
+        subprocess.run(['git', 'add', '.'], cwd=path, capture_output=True)
+        subprocess.run(['git', 'commit', '-m', 'init'], cwd=path, capture_output=True)
+        subprocess.run(['git', 'remote', 'add', 'origin', origin], cwd=path, capture_output=True)
+        config = SyncerConfig(owner='khuedoan', host='https://github.com', search_paths=[], repos=[])
+        return RepoConfig(name='homelab', path=str(path)), config
+
+    def test_flagged_when_the_origin_is_someone_elses(self, tmp_path):
+        repo_config, config = self._clone_with_origin(tmp_path, 'https://github.com/datapointchris/homelab')
+        report = _build(repo_config, config)
+        assert report.origin_mismatch == 'https://github.com/datapointchris/homelab'
+        assert report.expected_url == 'https://github.com/khuedoan/homelab'
+
+    def test_silent_when_the_origin_matches(self, tmp_path):
+        repo_config, config = self._clone_with_origin(tmp_path, 'https://github.com/khuedoan/homelab')
+        assert _build(repo_config, config).origin_mismatch is None
+
+    def test_the_branch_report_is_annotated_not_replaced(self, tmp_path):
+        """A lifecycle status would return instead of classifying — losing every branch row for
+        a repo whose only problem is where it points."""
+        repo_config, config = self._clone_with_origin(tmp_path, 'https://github.com/datapointchris/homelab')
+        # observe has scope ALL, so main is classified despite having no upstream to track.
+        report = _build(repo_config, config, cli_policy='observe')
+        assert report.lifecycle is None
+        assert [row.state.branch for row in report.rows] == ['main']
+
+    def test_lifts_an_otherwise_clean_repo_to_warning(self, tmp_path):
+        repo_config, config = self._clone_with_origin(tmp_path, 'https://github.com/datapointchris/homelab')
+        assert report_severity(_build(repo_config, config)) == Severity.WARNING

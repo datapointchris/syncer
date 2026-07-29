@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -15,6 +16,37 @@ GIT_TIMEOUT_SECONDS = 120
 CLONE_TIMEOUT_SECONDS = 600
 # Exit code for a timeout, matching the shell's convention for a command killed by `timeout`.
 TIMEOUT_RETURNCODE = 124
+
+
+def normalize_remote_url(url: str) -> str:
+    """Reduce a clone URL to `host/path` so equivalent forms compare equal.
+
+    The same repo is reachable as `https://host/o/r`, `git@host:o/r.git` and
+    `ssh://git@host:7999/o/r.git`. Comparing raw strings would report every repo cloned over
+    SSH against an https registry as a mismatch, which is noise that would get the check
+    ignored — and an ignored check is how a wrong origin survives for months.
+    """
+    url = url.strip().rstrip('/')
+    url = re.sub(r'^[A-Za-z][A-Za-z0-9+.\-]*://', '', url)
+    url = re.sub(r'^[^/@]+@', '', url)
+    host, separator, rest = url.partition(':')
+    if separator:
+        # A numeric segment is a port; anything else is scp-style `host:owner/repo`.
+        port, slash, tail = rest.partition('/')
+        url = f'{host}/{tail}' if port.isdigit() and slash else f'{host}/{rest}'
+    return url.removesuffix('.git').lower()
+
+
+def origin_mismatch(repo: Repo) -> str | None:
+    """The clone's actual origin when it disagrees with the registry, else None.
+
+    Report-only by design: a deliberate fork with a legitimately different origin is
+    indistinguishable from a mistake without asking, so this never rewrites a remote.
+    """
+    actual = repo.origin_url
+    if actual is None or normalize_remote_url(actual) == normalize_remote_url(repo.url):
+        return None
+    return actual
 
 
 def _noninteractive_env() -> dict[str, str]:
@@ -110,6 +142,12 @@ class Repo:
     def has_remote(self) -> bool:
         result = self._git('remote')
         return bool(result.stdout.strip())
+
+    @property
+    def origin_url(self) -> str | None:
+        """Where this clone actually points, as opposed to where the registry says it should."""
+        result = self._git('remote', 'get-url', 'origin')
+        return result.stdout.strip() or None if result.returncode == 0 else None
 
     @property
     def current_branch(self) -> str:

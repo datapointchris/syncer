@@ -28,6 +28,7 @@ from syncer.repos import ICON_WARN
 from syncer.repos import Repo
 from syncer.repos import _status_line
 from syncer.repos import find_repo_in_search_paths
+from syncer.repos import origin_mismatch
 from syncer.stats import show_stats
 from syncer.sync import run_sync
 from syncer.tracking import events_file_for
@@ -215,6 +216,18 @@ def issues(
             timeout=tool_config.git_timeout,
             url=resolve_clone_url(repo_config, syncer_config),
         )
+
+        # A clone pointing somewhere the registry never named is silent drift: `gh repo clone
+        # <bare-name>` resolves to the authenticated user, so a reference repo that also exists
+        # under your own account gets your fork as origin and pulls from it forever. Report
+        # only — a deliberate fork is indistinguishable from a mistake without asking.
+        actual_origin = origin_mismatch(repo)
+        if actual_origin:
+            console.print(_status_line(ICON_WARN, label, 'origin mismatch', 'yellow'))
+            console.print(f'    origin is {actual_origin}')
+            console.print(f'    registry expects {repo.url} (fix the remote or repos.json manually)')
+            issues_found += 1
+            console.print()
 
         # Only nag about master where the naming is ours to change. A third-party clone's
         # default branch is upstream's decision and a work repo's is the org's — either way

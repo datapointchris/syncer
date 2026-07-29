@@ -13,6 +13,8 @@ from syncer.repos import _display_width
 from syncer.repos import _noninteractive_env
 from syncer.repos import _status_line
 from syncer.repos import find_repo_in_search_paths
+from syncer.repos import normalize_remote_url
+from syncer.repos import origin_mismatch
 from syncer.repos import run_command
 
 
@@ -410,3 +412,78 @@ class TestFindRepoInSearchPaths:
 
         result = find_repo_in_search_paths('myrepo', [tmp_path / 'code'], claimed_paths={repo_dir})
         assert result is None
+
+
+class TestNormalizeRemoteUrl:
+    """The same repo is reachable over https, scp-style SSH and ssh:// with a port. Comparing
+    raw strings would flag every SSH clone against an https registry — noise that gets the
+    check ignored, and an ignored check is how a wrong origin survives for months."""
+
+    def test_equivalent_forms_compare_equal(self):
+        forms = [
+            'https://github.com/khuedoan/homelab',
+            'https://github.com/khuedoan/homelab.git',
+            'https://github.com/khuedoan/homelab/',
+            'git@github.com:khuedoan/homelab.git',
+            'ssh://git@github.com/khuedoan/homelab.git',
+        ]
+        assert len({normalize_remote_url(form) for form in forms}) == 1
+
+    def test_bitbucket_data_center_port_is_not_part_of_the_path(self):
+        assert normalize_remote_url('ssh://git@bitbucket.corp:7999/proj/payments.git') == 'bitbucket.corp/proj/payments'
+
+    def test_scp_style_colon_is_a_path_separator_not_a_port(self):
+        assert normalize_remote_url('git@bitbucket.org:myworkspace/payments.git') == 'bitbucket.org/myworkspace/payments'
+
+    def test_case_is_ignored(self):
+        assert normalize_remote_url('https://GitHub.com/Owner/Repo') == normalize_remote_url('https://github.com/owner/repo')
+
+    def test_different_owners_do_not_compare_equal(self):
+        """The real incident: the same repo name under a different owner."""
+        assert normalize_remote_url('https://github.com/datapointchris/homelab') != normalize_remote_url(
+            'https://github.com/khuedoan/homelab'
+        )
+
+
+class TestOriginMismatch:
+    """~/code/refs/homelab pointed at datapointchris/homelab while the exemplar registry
+    declared khuedoan/homelab — undetected for 3.5 months, because nothing compared them.
+    `gh repo clone <bare-name>` resolves to the authenticated user, so any reference repo that
+    also exists under your own account silently gets your fork as origin."""
+
+    def _repo_with_origin(self, tmp_path, origin, expected):
+        path = tmp_path / 'clone'
+        subprocess.run(['git', 'init', str(path)], capture_output=True)
+        subprocess.run(['git', 'remote', 'add', 'origin', origin], cwd=path, capture_output=True)
+        return Repo(name='homelab', path=path, owner='khuedoan', host='https://github.com', url=expected)
+
+    def test_the_real_incident_is_flagged(self, tmp_path):
+        repo = self._repo_with_origin(
+            tmp_path,
+            origin='https://github.com/datapointchris/homelab',
+            expected='https://github.com/khuedoan/homelab',
+        )
+        assert origin_mismatch(repo) == 'https://github.com/datapointchris/homelab'
+
+    def test_a_matching_origin_is_silent(self, tmp_path):
+        repo = self._repo_with_origin(
+            tmp_path,
+            origin='https://github.com/khuedoan/homelab',
+            expected='https://github.com/khuedoan/homelab',
+        )
+        assert origin_mismatch(repo) is None
+
+    def test_an_ssh_clone_of_an_https_registry_entry_is_not_a_mismatch(self, tmp_path):
+        repo = self._repo_with_origin(
+            tmp_path,
+            origin='git@github.com:khuedoan/homelab.git',
+            expected='https://github.com/khuedoan/homelab',
+        )
+        assert origin_mismatch(repo) is None
+
+    def test_a_repo_with_no_remote_is_not_a_mismatch(self, tmp_path):
+        """`no remote` is already its own lifecycle status; reporting it twice is noise."""
+        path = tmp_path / 'bare-init'
+        subprocess.run(['git', 'init', str(path)], capture_output=True)
+        repo = Repo(name='x', path=path, owner='me', host='https://github.com')
+        assert origin_mismatch(repo) is None
