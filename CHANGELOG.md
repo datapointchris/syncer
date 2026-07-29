@@ -1,6 +1,28 @@
 # CHANGELOG
 
 
+## v5.3.0 (2026-07-29)
+
+### Features
+
+- **policy**: Report watched branches that exist only on the remote
+  ([`2e8eb70`](https://github.com/datapointchris/syncer/commit/2e8eb70d6b08abb3ba5f83a43515c9a14c632833))
+
+A fetch already brings down every branch on the remote, but the pipeline only iterates local
+  branches — so a long-lived branch deliberately never checked out (develop/uat/prod) is invisible,
+  and nothing tells you origin/prod moved.
+
+watch_remote names fnmatch patterns to report on anyway, with each branch's age. Opt-in and empty by
+  default: every repo has remote branches you will never care about, and a check that fires on all
+  of them forever is one you learn to ignore.
+
+Informational only. It never reaches decide() and never affects severity — there is no local branch
+  to sync, and a repo is not unhealthy for having branches you deliberately do not keep.
+  Deliberately does NOT create local tracking branches: a local copy you never check out is pinned
+  at whenever you made it and silently serves stale history while looking like a normal branch,
+  whereas origin/<branch> is current after any fetch and needs no maintenance.
+
+
 ## v5.2.0 (2026-07-29)
 
 ### Features
