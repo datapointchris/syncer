@@ -7,8 +7,12 @@ Syncer fetches every configured repo concurrently, classifies each branch (ahead
 ## Installing
 
 ```bash
-uv tool install git+https://github.com/datapointchris/syncer.git@latest
+uv tool install "syncer @ git+https://github.com/datapointchris/syncer.git@$(gh release view --repo datapointchris/syncer --json tagName -q .tagName)"
 ```
+
+Install a **tag**, not the default branch — substitute one explicitly (`@v6.0.0`) if you would rather
+not shell out to `gh`. `syncer update` reads uv's receipt to find out what it may do, and refuses to
+reinstall over a branch install, whose version says nothing about how far behind it is.
 
 ## Updating
 
