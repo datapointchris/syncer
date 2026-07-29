@@ -32,9 +32,9 @@ class TestDecisionMatrix:
         policy = BUILTIN_POLICIES[policy_name]
         matrix = decision_matrix(policy, 'main')
         for state in PrimaryState:
-            for role, flags in ROLES:
-                expected = decide(BranchState(branch='main', primary=state, **flags), policy)
-                assert matrix[state.value][role] == expected.value
+            for role, is_default, is_current in ROLES:
+                synthetic = BranchState(branch='main', primary=state, is_default=is_default, is_current=is_current)
+                assert matrix[state.value][role] == decide(synthetic, policy).value
 
     def test_covers_every_primary_state(self):
         """Iterate the enum — a state added without a matrix row is one the user cannot see."""

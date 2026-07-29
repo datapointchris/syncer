@@ -34,12 +34,13 @@ policy_app = typer.Typer(
 # before trusting --apply across thirty repos.
 DEFAULT_MATRIX_BRANCH = 'main'
 
-# The three roles a branch can hold, which is the other half of what decide() reads. Modifiers
-# (dirty, stashed) are deliberately absent: they are execute-time gates, never decision inputs.
-ROLES: tuple[tuple[str, dict[str, bool]], ...] = (
-    ('default', {'is_default': True}),
-    ('current', {'is_current': True}),
-    ('other', {}),
+# The three roles a branch can hold — (label, is_default, is_current) — which is the other half of
+# what decide() reads. Modifiers (dirty, stashed) are deliberately absent: they are execute-time
+# gates, never decision inputs, and decide() is invariant to them.
+ROLES: tuple[tuple[str, bool, bool], ...] = (
+    ('default', True, False),
+    ('current', False, True),
+    ('other', False, False),
 )
 
 
@@ -50,7 +51,10 @@ def decision_matrix(policy: Policy, branch: str) -> dict[str, dict[str, str]]:
     it is added instead of the day someone remembers to document it.
     """
     return {
-        state.value: {role: decide(BranchState(branch=branch, primary=state, **flags), policy).value for role, flags in ROLES}
+        state.value: {
+            role: decide(BranchState(branch=branch, primary=state, is_default=is_default, is_current=is_current), policy).value
+            for role, is_default, is_current in ROLES
+        }
         for state in PrimaryState
     }
 
@@ -160,5 +164,5 @@ def policy_show(
     decisions.add_column('current')
     decisions.add_column('other')
     for state, by_role in matrix.items():
-        decisions.add_row(f'  {state}', *(by_role[role] for role, _ in ROLES))
+        decisions.add_row(f'  {state}', *(by_role[role] for role, _, _ in ROLES))
     console.print(decisions)
