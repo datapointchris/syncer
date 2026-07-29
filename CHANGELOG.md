@@ -1,6 +1,37 @@
 # CHANGELOG
 
 
+## v6.0.0 (2026-07-29)
+
+### Features
+
+- **config**: Create the registry and explain its path
+  ([`cf747a0`](https://github.com/datapointchris/syncer/commit/cf747a02e2febc51fee7cf8abf5d4434cc5b415f))
+
+A resolved registry path now carries why it was chosen, and every message about a missing one prints
+  it plus both exits — create one there, or drop the pointer. Naming the path without the tier that
+  chose it made an inherited repos_file look like a hard-coded path inside syncer, with no way to
+  find the config that set it.
+
+The tool-config template no longer recommends a fleet-specific registry path. Read as an
+  instruction, it is how a machine that cannot have that path ended up pointed at it.
+
+`config init` now writes the registry as well as the tool config, at the path syncer reads, and
+  refuses the moment either file exists. Creating an absent file is not modifying shared
+  infrastructure; the old scoping made scaffolding a manual redirect that printed a template with no
+  path.
+
+BREAKING CHANGE: `config example --registry` is now `config example registry`, and `init`/`example`
+  take the same optional positional as `config path` (config, registry, or omitted for both). A
+  boolean flag named after a noun answered "which file" in a grammar built for on/off.
+
+### Breaking Changes
+
+- **config**: `config example --registry` is now `config example registry`, and `init`/`example`
+  take the same optional positional as `config path` (config, registry, or omitted for both). A
+  boolean flag named after a noun answered "which file" in a grammar built for on/off.
+
+
 ## v5.3.0 (2026-07-29)
 
 ### Features
