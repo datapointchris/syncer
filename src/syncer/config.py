@@ -30,15 +30,17 @@ def xdg_state_home() -> Path:
 CONFIG_DIR = xdg_config_home() / 'syncer'
 TOOL_CONFIG_PATH = CONFIG_DIR / 'config.toml'
 
+# Registry location when config.toml names none. Deliberately a syncer-owned path: sharing one
+# registry with forge and indy (the fleet keeps it at ~/dev/repos.json) is an arrangement between
+# those tools, so it belongs in repos_file on the machines that want it — never in the default.
+DEFAULT_REPOS_FILE = CONFIG_DIR / 'repos.json'
+
 # Run history is state, not data: it persists across runs, nobody authors it, and deleting it
 # changes behaviour (stale-repo warnings restart) rather than merely costing a recompute.
 STATE_DIR = xdg_state_home() / 'syncer'
 
 # Where run history lived before the state move. Swept by migrate_legacy_events().
 LEGACY_DATA_DIR = Path.home() / '.local' / 'share' / 'syncer'
-
-# Legacy path for deprecation fallback
-_LEGACY_CONFIG_DIR = Path.home() / '.config' / 'syncer'
 
 console = Console()
 
@@ -183,24 +185,13 @@ def resolve_policy_name(repo_config: RepoConfig, tool_config: ToolConfig, cli_po
 
 
 def get_repos_file_path(override: Path | None = None) -> Path:
-    """Resolve the repos file path: explicit override, then tool config, then legacy."""
+    """Resolve the registry path: --repos-file, then config.toml's repos_file, then the default."""
     if override is not None:
         return override.expanduser()
     tool_config = load_tool_config()
     if tool_config.repos_file:
         return Path(tool_config.repos_file).expanduser()
-
-    # Legacy fallback: look for JSON files in ~/.config/syncer/
-    legacy_files = list(_LEGACY_CONFIG_DIR.glob('*.json')) if _LEGACY_CONFIG_DIR.exists() else []
-    if legacy_files:
-        console.print(
-            f'[yellow]Warning: using legacy config at {legacy_files[0]}. '
-            f'Migrate to {TOOL_CONFIG_PATH} with repos_file pointing to ~/dev/repos.json[/yellow]'
-        )
-        return legacy_files[0]
-
-    console.print(f'[red]No config found. Create {TOOL_CONFIG_PATH} with repos_file = "~/dev/repos.json"[/red]')
-    sys.exit(1)
+    return DEFAULT_REPOS_FILE
 
 
 def resolve_registry(repos_file: Path | None = None) -> tuple[SyncerConfig, Path]:

@@ -259,18 +259,18 @@ class TestGetReposFilePath:
         tool_config.write_text(f'repos_file = "{repos_file}"\n')
         assert get_repos_file_path() == repos_file
 
-    def test_falls_back_to_legacy(self, tool_config, tmp_path, monkeypatch):
-        legacy_dir = tmp_path / 'legacy'
-        legacy_dir.mkdir()
-        (legacy_dir / 'test.json').write_text('{}')
-        monkeypatch.setattr('syncer.config._LEGACY_CONFIG_DIR', legacy_dir)
-        # tool_config doesn't exist (not written), so falls back
-        assert get_repos_file_path() == legacy_dir / 'test.json'
+    def test_explicit_override_wins(self, tool_config, repos_file, tmp_path):
+        tool_config.write_text(f'repos_file = "{repos_file}"\n')
+        other = tmp_path / 'work-repos.json'
+        assert get_repos_file_path(other) == other
 
-    def test_exits_when_no_config(self, tool_config, tmp_path, monkeypatch):
-        monkeypatch.setattr('syncer.config._LEGACY_CONFIG_DIR', tmp_path / 'nonexistent')
-        with pytest.raises(SystemExit):
-            get_repos_file_path()
+    def test_defaults_into_the_xdg_config_dir(self, tool_config, tmp_path, monkeypatch):
+        """A fresh machine gets a working default rather than an error naming one fleet's
+        directory layout. The old behaviour globbed ~/.config/syncer/*.json — picking up any
+        stray JSON — and otherwise hard-exited."""
+        monkeypatch.setattr('syncer.config.DEFAULT_REPOS_FILE', tmp_path / 'syncer' / 'repos.json')
+        # tool_config is not written, so nothing names a registry
+        assert get_repos_file_path() == tmp_path / 'syncer' / 'repos.json'
 
 
 class TestResolveConfig:

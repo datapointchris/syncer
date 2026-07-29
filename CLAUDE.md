@@ -76,11 +76,16 @@ current/non-current split needs the same treatment.
 
 ## Config: two files, deliberately split
 
-- **`repos.json`** (default `~/dev/repos.json`, path set in `config.toml`) — the repo **identity
-  registry**: `owner`, `host`, `search_paths`, `exclude_paths`, and per-repo `{name, path, status,
-  description, owner?, sync_policy?, toolchain?}`. Portable across machines. **syncer never writes
-  to it** — it's shared infrastructure (also read by `forge` and `indy`). `issues` reports drift but
-  tells you to fix paths by hand.
+- **`repos.json`** (default `$XDG_CONFIG_HOME/syncer/repos.json`, repointed by `repos_file` in
+  `config.toml`) — the repo **identity registry**: `owner`, `host`, `search_paths`,
+  `exclude_paths`, and per-repo `{name, path, status, description, owner?, sync_policy?,
+  toolchain?}`. Portable across machines. **syncer never writes to it** — it's shared
+  infrastructure (also read by `forge` and `indy`). `issues` reports drift but tells you to fix
+  paths by hand.
+
+  The fleet keeps its registry at `~/dev/repos.json` and points `repos_file` there, because forge
+  and indy read the same file. That sharing is a **fleet fact, not a syncer fact** — the default
+  must stay a syncer-owned XDG path so a machine that has never heard of `~/dev` still works.
 
   **It is no longer purely identity.** `toolchain` declares a repo's build surface — `components`
   (a `stack` and the `dir` it lives in) and `sql_dialect` — and is owned entirely by forge, which
