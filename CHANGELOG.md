@@ -1,6 +1,35 @@
 # CHANGELOG
 
 
+## v5.1.0 (2026-07-29)
+
+### Features
+
+- **policy**: Add a protected branch list enforced in execute
+  ([`baeca59`](https://github.com/datapointchris/syncer/commit/baeca590c9e926a8b60ac3cca0ab87cd9c1f9264))
+
+Protecting develop/uat/prod from an aggressive fallback like '*:ahead = push' relied on remembering
+  an exact-name rule per branch; forget one and a stray local commit reaches a shared branch.
+  `protected` is a list of fnmatch patterns on Policy, checked centrally in execute() before
+  dispatch, so it is a hard guard rather than a function of rule ordering — matching how every other
+  invariant in the executor works.
+
+PROTECTED_ALLOWED is an allowlist, not a denylist, so an Action added later is refused on a
+  protected branch by default. It holds only actions that provably neither publish local work nor
+  lose it, which is why fast_forward stays permitted: advancing to what the upstream already
+  contains does neither, and refusing it would make the setting useless for exactly the long-lived
+  branches it exists to protect.
+
+Machine-local, like every other policy setting — it lives on a Policy in config.toml, the portable
+  registry has no policy fields, and no built-in sets one (locked by a test, so a "sensible default"
+  cannot become a fleet-wide list).
+
+Unlike the other execute-time gates, protection is static config and therefore knowable without
+  running anything, so protection_refusal() is shared with the reporter: a report-only run marks
+  what --apply would refuse instead of printing a `push` it will never make. The refusal is a
+  WARNING rather than an ERROR, since it is the guard working as configured, not a failure.
+
+
 ## v5.0.0 (2026-07-29)
 
 ### Bug Fixes
