@@ -115,8 +115,21 @@ current/non-current split needs the same treatment.
   `exclude_paths` lets a registry disclaim a subtree inside its own `search_paths`, so the subtree
   is never reported as untracked. `~/code/refs` belongs to the exemplar registry and `~/code/1904labs`
   belongs to no personal registry at all.
-- **`config.toml`** (`~/.config/syncer/config.toml`) — **machine-local** tool config: `repos_file`
-  pointer, `default_policy`, custom `[policies.*]`, and `[repo_overrides]`.
+- **`config.toml`** (`$XDG_CONFIG_HOME/syncer/config.toml`) — **machine-local** tool config:
+  `repos_file` pointer, `default_policy`, custom `[policies.*]`, `[repo_overrides]`, and
+  `git_timeout`.
+
+`TEMPLATE_TOOL_CONFIG` and `TEMPLATE_REGISTRY` in `config.py` are the **single source** for both
+`config init` and `config example` — changing a config model means changing the template, and a
+round-trip test (`test_config_cmd.py`) parses each back into its model so they cannot drift. A
+second test asserts every `PrimaryState` and `Action` appears in the tool-config template, so a
+new member cannot ship undiscoverable.
+
+Every load path raises `ConfigError` carrying one readable line per problem, rather than letting a
+pydantic `ValidationError` escape as a traceback. Policies are constructed one at a time in
+`parse_tool_config` so the reported location names *which* policy the bad rule is in — pydantic's
+own error says only `rules`, which is no help in a file holding several. `config validate` prints
+the same lines it collects; it does not have its own error rendering.
 
 Policies are machine-local **on purpose**: the same repo can sync aggressively on an always-on
 box and report-only on a laptop. That's why they live in `config.toml`, never in `repos.json`.
@@ -130,6 +143,22 @@ Policy resolution per repo, first hit wins (`resolve_policy_name`):
 Built-ins (`policy.py`): `standard` (default-branch auto-sync, feature branches report-only),
 `observe` (report everything, mutate nothing — note: **does not pull**), `mirror` (auto everything
 safe, opt-in always-on-box policy).
+
+## Command groups
+
+Sub-apps live in `src/syncer/commands/`, mounted in `main.py`. `output.py` holds the shared
+console pair: **stdout is data, stderr is everything else** — `emit_json` writes to stdout and
+bypasses Rich markup; `error`/`hint`/`success` write to stderr with `soft_wrap` so a path stays on
+one line and survives a copy-paste.
+
+`policy show` renders a **computed** decision matrix: every `PrimaryState` × three synthetic
+`BranchState`s (default / current / neither), each cell produced by calling `decide()`. That is
+only possible because `decide()` is pure, and it means the table cannot drift from what `--apply`
+does. Never replace it with a written-down table, and iterate the enums rather than listing their
+members — `test_policy_cmd.py` asserts the matrix agrees with `decide()` cell for cell.
+
+`config validate` checks **structure**; `syncer issues` checks **reality** (do the paths exist).
+Both help texts say so. Blurring them means neither gets trusted.
 
 ## Concurrency
 
