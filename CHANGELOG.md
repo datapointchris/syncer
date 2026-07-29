@@ -1,6 +1,104 @@
 # CHANGELOG
 
 
+## v5.0.0 (2026-07-29)
+
+### Bug Fixes
+
+- **policy**: Type the matrix roles explicitly for mypy
+  ([`3669ba3`](https://github.com/datapointchris/syncer/commit/3669ba39238d63b21388f4fcfea6214e44716ba4))
+
+**flags unpacking into BranchState is unverifiable by mypy, so ROLES carries (label, is_default,
+  is_current) directly. Caught by CI, which type-checks the whole tree while the pre-commit hook
+  sees only changed files.
+
+### Documentation
+
+- Cover the config and policy groups, and the XDG paths
+  ([`0012a9a`](https://github.com/datapointchris/syncer/commit/0012a9a5991828aca440940b64b4df52be06474d))
+
+README gains a from-scratch setup sequence and points at `syncer policy show` instead of
+  hand-maintaining a rule table that would rot. Also catches up on what shipped in 4.3.1-4.6.1 and
+  was never documented: fast_forward and the intents-not-mechanisms rule, owns_branch_naming,
+  exclude_paths, git_timeout, per-registry event streams, and stats -c.
+
+CLAUDE.md records the two invariants a future change would otherwise break: the templates are the
+  single source for init and example, guarded by a round-trip test, and the decision matrix is
+  computed from decide() rather than written down.
+
+### Features
+
+- **config**: Add the syncer config command group
+  ([`c18bc87`](https://github.com/datapointchris/syncer/commit/c18bc8726c46060f9ca34caf3a76dccb553132fe))
+
+syncer had no config tooling: `init` wrote one line, nothing validated a config, and nothing printed
+  an example. Setting up a fresh machine meant reading the source. The group covers init, example,
+  path, show, edit, and validate, with annotated TOML and JSON templates in config.py as the single
+  source for both init and example — a round-trip test parses each into its model, which is what
+  stops the examples drifting from the schema.
+
+config init writes config.toml and never the registry: syncer never writes repos.json, which forge
+  and indy also read. Scaffolding is `config example --registry > <path>`, so the invariant stays
+  absolute.
+
+validate checks structure and cross-references, including the one rule nothing enforced: a registry
+  sync_policy hint must name a built-in, since config.toml is not synced between machines and a hint
+  naming a machine-local policy silently degrades to `unknown policy` everywhere else. Whether repo
+  paths exist on disk stays `syncer issues` — validate checks the files, issues checks reality.
+
+Also fixes a broken config.toml surfacing as a raw pydantic traceback from whichever command loaded
+  it first. Every load path now raises ConfigError and prints the failing key and why, and policies
+  are built one at a time so the location names which policy the bad rule is in — pydantic's own
+  error says only `rules`, which is no help in a file holding several.
+
+BREAKING CHANGE: `syncer init` is now `syncer config init`, with no alias.
+
+- **config**: Default the registry to the XDG config path
+  ([`4287a22`](https://github.com/datapointchris/syncer/commit/4287a22398eb4cab7d14ad2a9c70c8506f2ae019))
+
+With repos_file unset, resolution globbed ~/.config/syncer/*.json — picking up any stray JSON that
+  happened to sit there — then hard-exited telling the user to write repos_file =
+  "~/dev/repos.json". A fresh machine's first experience was an error naming one fleet's directory
+  layout.
+
+The default is now $XDG_CONFIG_HOME/syncer/repos.json, and the glob and its deprecation warning are
+  deleted rather than kept alongside: once the exact filename in that directory is the default, the
+  glob is redundant. The fleet's ~/dev/repos.json stays an explicit repos_file override, which is
+  what it always was — sharing the registry with forge and indy is a fleet arrangement, not
+  something that belongs in the tool's defaults.
+
+BREAKING CHANGE: a machine relying on the ~/.config/syncer/*.json glob must name its registry in
+  config.toml or move it to ~/.config/syncer/repos.json.
+
+- **paths**: Move run history to XDG state, resolved via env
+  ([`d0eb462`](https://github.com/datapointchris/syncer/commit/d0eb4622060443acafaf514f86358a8ce72a80a1))
+
+Run history is state, not data: it persists across runs, nobody authors it, and deleting it changes
+  behaviour rather than costing a recompute. DATA_DIR (~/.local/share/syncer) becomes STATE_DIR
+  ($XDG_STATE_HOME/syncer), and both config and state homes now resolve through their environment
+  variables rather than a hardcoded ~/.config.
+
+adopt_legacy_events generalizes into migrate_legacy_events, which sweeps the old data dir for both
+  shapes — the pre-split global stream and already-split per-registry ones — because a machine may
+  have skipped the release that split them. Folded into this commit rather than a later one: moving
+  the constant without the sweep ships a build that silently orphans every machine's history.
+
+- **policy**: Add policy list and show with a computed decision matrix
+  ([`ff5e091`](https://github.com/datapointchris/syncer/commit/ff5e09154c501ca13a978b3711eebf634fb05113))
+
+Authoring a policy meant knowing every PrimaryState, every Action, and the four-tier selector
+  precedence, none of which was reachable from the CLI.
+
+`policy show` enumerates decide() over the full state taxonomy x the three branch roles rather than
+  documenting it in prose, so the table cannot drift from what --apply will do — it is the decision
+  function, not a description of one. That is only possible because decide() is pure. --branch
+  re-evaluates for a real name, which is how you confirm `release/*:ahead` beats `*:ahead` before
+  trusting --apply across a set of repos.
+
+Both the matrix and its test iterate PrimaryState, so a state added later shows up the day it exists
+  rather than the day someone remembers to document it.
+
+
 ## v4.6.1 (2026-07-27)
 
 ### Bug Fixes
