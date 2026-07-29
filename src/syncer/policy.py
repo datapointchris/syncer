@@ -61,6 +61,21 @@ class Scope(StrEnum):
 VALID_STATES = {state.value for state in PrimaryState}
 VALID_ACTIONS = {action.value for action in Action}
 
+# What a protected branch still permits. An allowlist, not a denylist, so a new Action defaults
+# to refused on a protected branch — the safe direction. Everything here either does nothing or
+# advances the branch to what its upstream already contains: it publishes nothing and destroys
+# nothing, which is the whole test for whether protection should care.
+PROTECTED_ALLOWED = frozenset(
+    {
+        Action.SKIP,
+        Action.REPORT,
+        Action.PROMPT,
+        Action.FAST_FORWARD,
+        Action.PULL_FF,
+        Action.FF_REF,
+    }
+)
+
 # Selector words that are roles, not literal branch names or globs.
 ROLE_SELECTORS = {'default', 'current'}
 GLOB_CHARS = set('*?[]')
@@ -98,6 +113,11 @@ class Policy(BaseModel):
     # default — a develop-centric flow never makes a feature branch an ancestor of main until
     # the release promotes it, so the default-branch guard refuses every merged branch forever.
     merge_target: str | None = None
+    # Branch name patterns (fnmatch, the same grammar rule selectors use) that no action may
+    # publish to or destroy. Enforced centrally in execute(), so protection is a hard guard
+    # rather than a function of getting an exact-name rule right for every branch — forget one
+    # under a fallback like '*:ahead = push' and a stray local commit reaches a shared branch.
+    protected: list[str] = []
 
     @field_validator('rules')
     @classmethod
@@ -113,6 +133,15 @@ class Policy(BaseModel):
             if action not in VALID_ACTIONS:
                 raise ValueError(f'rule {key!r} maps to unknown action {action!r}; valid: {sorted(VALID_ACTIONS)}')
         return rules
+
+
+def matching_protection(branch: str, policy: Policy) -> str | None:
+    """The first protected pattern matching `branch`, or None if it is unprotected.
+
+    Returns the pattern rather than a bool so a refusal can name the config entry responsible:
+    `protected by 'release/*'` tells you what to edit, `protected` does not.
+    """
+    return next((pattern for pattern in policy.protected if fnmatch.fnmatch(branch, pattern)), None)
 
 
 def _matching_globs(branch: str, policy: Policy) -> list[str]:

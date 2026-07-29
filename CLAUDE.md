@@ -24,7 +24,10 @@ of primary-states × policies as a no-git truth table. Keep git and FS I/O out o
 
 `decide()` depends only on the primary state plus the branch's role/name. The `dirty`/`stashed`
 modifiers are **execute-time gates, never decision inputs** — `decide()` is invariant to them
-(asserted in `TestDecideModifierInvariance`).
+(asserted in `TestDecideModifierInvariance`). `protected` is the same kind of gate and is likewise
+invisible to `decide()`. Because it is *static config* rather than live repo state, though,
+`protection_refusal()` is shared with the reporter so a report-only run marks the actions that
+would be refused — rendering the decided `push` alone would promise a push `--apply` never makes.
 
 ## Two surfaces, one core
 
@@ -62,6 +65,14 @@ time — and refuses rather than forces. Guaranteed independent of any policy:
 6. Any precondition that fails at execute time is refused and reported, never forced.
 7. Actions use explicit refspecs / ref names, so they always act on the classified branch, never
    the incidentally-checked-out one.
+8. A branch matching the policy's `protected` patterns admits no action that publishes or
+   destroys. Checked centrally in `execute()` **before dispatch**, so it covers every action
+   including ones added later. `PROTECTED_ALLOWED` (`policy.py`) is an **allowlist** — a new
+   `Action` is refused on a protected branch by default, which is the safe direction. Only
+   actions that provably neither publish local work nor lose it belong in it; `fast_forward`
+   does (it advances to what the upstream already contains), `push`/`rebase_push`/
+   `set_upstream_push`/`delete_local` do not. `protected` lives on `Policy`, so it is
+   machine-local like every other policy setting, and no built-in sets one.
 
 Any new `Action` must be added to the `Action` enum, mapped in `_MUTATORS`, and given a mutator
 that re-checks its own preconditions live. Never add an unsafe primitive to the menu.

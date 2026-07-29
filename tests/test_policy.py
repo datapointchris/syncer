@@ -3,12 +3,14 @@ import itertools
 import pytest
 
 from syncer.policy import BUILTIN_POLICIES
+from syncer.policy import PROTECTED_ALLOWED
 from syncer.policy import Action
 from syncer.policy import BranchState
 from syncer.policy import Policy
 from syncer.policy import PrimaryState
 from syncer.policy import Scope
 from syncer.policy import decide
+from syncer.policy import matching_protection
 
 ALL_STATES = list(PrimaryState)
 
@@ -201,3 +203,37 @@ class TestPolicyValidation:
     def test_valid_policy_accepts_all_scopes(self):
         for scope in Scope:
             assert Policy(name='p', scope=scope).scope == scope
+
+
+class TestProtectedBranches:
+    """`protected` is machine-local, like every other policy setting: it lives on a Policy, and
+    policies only ever come from config.toml. The registry carries no policy fields at all
+    beyond the portable `sync_policy` name hint, so protection cannot be set fleet-wide."""
+
+    def test_no_builtin_protects_anything(self):
+        """A built-in with a protected list would be a global default that every machine
+        inherits — which is exactly what the setting must not be."""
+        assert all(policy.protected == [] for policy in BUILTIN_POLICIES.values())
+
+    def test_defaults_to_protecting_nothing(self):
+        assert Policy(name='p').protected == []
+
+    def test_matching_returns_the_pattern_responsible(self):
+        policy = Policy(name='p', protected=['develop', 'release/*'])
+        assert matching_protection('develop', policy) == 'develop'
+        assert matching_protection('release/2.0', policy) == 'release/*'
+        assert matching_protection('feature/x', policy) is None
+
+    def test_allowlist_covers_only_actions_that_neither_publish_nor_destroy(self):
+        """An allowlist, so a new Action is refused on a protected branch by default. Anything
+        added here has to be provably incapable of publishing local work or losing it."""
+        assert set(PROTECTED_ALLOWED) == {Action.SKIP, Action.REPORT, Action.PROMPT, Action.FAST_FORWARD, Action.PULL_FF, Action.FF_REF}
+        assert not PROTECTED_ALLOWED & {Action.PUSH, Action.REBASE_PUSH, Action.SET_UPSTREAM_PUSH, Action.DELETE_LOCAL}
+
+    def test_decide_is_invariant_to_protection(self):
+        """Protection is an execute-time gate, never a decision input — the same split that
+        keeps dirty/stashed out of decide(). The reporter surfaces the refusal separately."""
+        bare = Policy(name='p', rules={'*:ahead': 'push'})
+        guarded = Policy(name='p', rules={'*:ahead': 'push'}, protected=['develop'])
+        state = BranchState(branch='develop', primary=PrimaryState.AHEAD)
+        assert decide(state, bare) == decide(state, guarded) == Action.PUSH

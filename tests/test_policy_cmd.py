@@ -95,3 +95,47 @@ class TestPolicyShow:
         payload = json.loads(runner.invoke(app, ['policy', 'show', 'observe', '--json']).output)
         actions = {action for row in payload['decisions'].values() for action in row.values()}
         assert actions == {'report'}
+
+
+class TestProtectedBranchesInShow:
+    """protected is machine-local, set per policy in config.toml. `policy show` is where you
+    confirm it covers what you think before trusting --apply."""
+
+    def _work_policy(self, config_home):
+        (config_home / 'config.toml').write_text(
+            '[policies.work]\nscope = "all"\nprotected = ["develop", "release/*"]\n'
+            '[policies.work.rules]\n"*:ahead" = "push"\n"*:gone" = "delete_local"\n'
+        )
+
+    def test_marks_the_actions_protection_would_refuse(self, config_home):
+        self._work_policy(config_home)
+        payload = json.loads(runner.invoke(app, ['policy', 'show', 'work', '--branch', 'develop', '--json']).output)
+        assert payload['protected_by'] == 'develop'
+        # decisions stays the pure decide() answer; blocked_actions is what execute() then refuses
+        assert payload['decisions']['ahead']['other'] == 'push'
+        assert 'push' in payload['blocked_actions']
+        assert 'delete_local' in payload['blocked_actions']
+
+    def test_fast_forward_is_never_blocked(self, config_home):
+        """Advancing to what the upstream already contains publishes nothing and destroys
+        nothing — blocking it would make the setting useless for long-lived branches."""
+        self._work_policy(config_home)
+        payload = json.loads(runner.invoke(app, ['policy', 'show', 'work', '--branch', 'develop', '--json']).output)
+        assert 'fast_forward' not in payload['blocked_actions']
+
+    def test_a_branch_outside_the_patterns_is_unblocked(self, config_home):
+        self._work_policy(config_home)
+        payload = json.loads(runner.invoke(app, ['policy', 'show', 'work', '--branch', 'feature/x', '--json']).output)
+        assert payload['protected_by'] is None
+        assert payload['blocked_actions'] == []
+
+    def test_glob_patterns_resolve(self, config_home):
+        self._work_policy(config_home)
+        payload = json.loads(runner.invoke(app, ['policy', 'show', 'work', '--branch', 'release/2.0', '--json']).output)
+        assert payload['protected_by'] == 'release/*'
+
+    def test_list_reports_each_policys_protected_patterns(self, config_home):
+        self._work_policy(config_home)
+        listed = {policy['name']: policy for policy in json.loads(runner.invoke(app, ['policy', 'list', '--json']).output)}
+        assert listed['work']['protected'] == ['develop', 'release/*']
+        assert listed['standard']['protected'] == []

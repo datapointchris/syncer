@@ -36,6 +36,7 @@ from syncer.config import resolve_policies
 from syncer.config import resolve_policy_name
 from syncer.execute import Outcome
 from syncer.execute import execute
+from syncer.execute import protection_refusal
 from syncer.policy import Action
 from syncer.policy import BranchState
 from syncer.policy import Policy
@@ -104,6 +105,9 @@ class BranchRow:
     state: BranchState
     action: Action
     outcome: Outcome | None = None
+    # Why protection would refuse this action, computed whether or not --apply ran. Protection
+    # is static config, so a report-only run can and should show it.
+    blocked: str | None = None
 
 
 @dataclass
@@ -150,8 +154,9 @@ def _branch_prefix(state: BranchState) -> str:
     return f'  [{color}]{icon}  {state.branch}{flag_str} — {detail}[/{color}]'
 
 
-def _branch_line(state: BranchState, action: Action) -> str:
-    return f'{_branch_prefix(state)} [blue]→ {action.value}[/blue]'
+def _branch_line(state: BranchState, action: Action, blocked: str | None = None) -> str:
+    line = f'{_branch_prefix(state)} [blue]→ {action.value}[/blue]'
+    return f'{line} [yellow](would refuse: {blocked})[/yellow]' if blocked else line
 
 
 _OUTCOME_COLOR = {
@@ -174,6 +179,11 @@ def _outcome_suffix(outcome: Outcome) -> str:
 def _row_severity(row: BranchRow) -> Severity:
     # An outcome (apply mode) reflects what actually happened, so it wins over the pre-execute state.
     if row.outcome is not None:
+        # A protection refusal is the guard working as configured, not something that went
+        # wrong — still worth seeing (there is unpushed work on a shared branch), but it would
+        # be red at the bottom of every run forever if it counted as an error.
+        if row.outcome.status == 'refused' and row.blocked:
+            return Severity.WARNING
         if row.outcome.status in ('failed', 'refused'):
             return Severity.ERROR
         if row.outcome.status == 'done':
@@ -199,7 +209,8 @@ def build_branch_rows(repo: Repo, policy: Policy, apply: bool) -> list[BranchRow
     for state in classify_repo(repo, policy):
         action = decide(state, policy)
         outcome = execute(action, state, repo, policy) if apply else None
-        rows.append(BranchRow(state=state, action=action, outcome=outcome))
+        blocked = protection_refusal(action, state, policy)
+        rows.append(BranchRow(state=state, action=action, outcome=outcome, blocked=blocked))
     return rows
 
 
@@ -326,7 +337,7 @@ def render_report(report: RepoBranchReport, apply: bool) -> None:
         if apply and row.outcome is not None:
             console.print(f'{_branch_prefix(row.state)} {_outcome_suffix(row.outcome)}')
         else:
-            console.print(_branch_line(row.state, row.action))
+            console.print(_branch_line(row.state, row.action, row.blocked))
     console.print()
 
 

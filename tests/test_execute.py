@@ -7,6 +7,7 @@ import pytest
 from syncer.classify import classify_branch
 from syncer.execute import Outcome
 from syncer.execute import execute
+from syncer.policy import PROTECTED_ALLOWED
 from syncer.policy import Action
 from syncer.policy import BranchState
 from syncer.policy import Policy
@@ -458,3 +459,94 @@ class TestNonMutatingActions:
         outcome = execute(Action.PROMPT, _state_for(repo, 'main'), repo, POLICY)
         assert outcome.status == 'reported'
         assert isinstance(outcome, Outcome)
+
+
+# ---------- protected branches (invariant 8) ---------- #
+
+
+class TestProtectedBranches:
+    """Protecting a shared branch used to rely on remembering an exact-name rule for it; forget
+    one under a fallback like '*:ahead = push' and a stray local commit reaches it. This is the
+    guard that makes it structural, checked centrally before any action dispatches."""
+
+    def test_push_is_refused_and_the_remote_is_untouched(self, cloned_repo, tmp_path):
+        _git(cloned_repo, 'checkout', '-b', 'develop')
+        _git(cloned_repo, 'push', '-u', 'origin', 'develop')
+        _commit(cloned_repo, 'local.txt', 'local work')
+        repo = _make_repo(cloned_repo)
+        repo.fetch_prune()
+        state = _state_for(repo, 'develop')
+        assert state.primary == PrimaryState.AHEAD
+        remote_head_before = _git(tmp_path / 'remote.git', 'rev-parse', 'develop').stdout.strip()
+
+        outcome = execute(Action.PUSH, state, repo, Policy(name='p', protected=['develop']))
+        assert outcome.status == 'refused'
+        assert "protected by 'develop'" in outcome.message
+        assert _git(tmp_path / 'remote.git', 'rev-parse', 'develop').stdout.strip() == remote_head_before
+
+    def test_fast_forward_still_runs(self, cloned_repo, tmp_path):
+        """Protection stops publishing and destroying, not catching up. Advancing to what the
+        upstream already contains does neither — and refusing it would make the setting useless
+        for exactly the long-lived branches it exists to protect."""
+        _second_clone_pushes(tmp_path)
+        repo = _make_repo(cloned_repo)
+        repo.fetch_prune()
+        state = _state_for(repo, 'main')
+        assert state.primary == PrimaryState.BEHIND
+
+        outcome = execute(Action.FAST_FORWARD, state, repo, Policy(name='p', protected=['main']))
+        assert outcome.status == 'done'
+        assert _state_for(repo, 'main').primary == PrimaryState.SYNCED
+
+    def test_delete_local_is_refused_on_a_protected_branch(self, cloned_repo, tmp_path):
+        _git(cloned_repo, 'checkout', '-b', 'release/1.0')
+        _git(cloned_repo, 'push', '-u', 'origin', 'release/1.0')
+        _git(cloned_repo, 'push', 'origin', '--delete', 'release/1.0')
+        _git(cloned_repo, 'checkout', 'main')
+        repo = _make_repo(cloned_repo)
+        repo.fetch_prune()
+        state = _state_for(repo, 'release/1.0')
+        assert state.primary == PrimaryState.GONE
+
+        outcome = execute(Action.DELETE_LOCAL, state, repo, Policy(name='p', protected=['release/*']))
+        assert outcome.status == 'refused'
+        assert 'release/*' in outcome.message
+        assert 'release/1.0' in repo.local_branches()
+
+    def test_glob_patterns_match_like_rule_selectors(self, cloned_repo):
+        repo = _make_repo(cloned_repo)
+        state = _state_for(repo, 'main')
+        assert 'protected' in execute(Action.PUSH, state, repo, Policy(name='p', protected=['ma*'])).message
+        # A non-matching pattern leaves the action to its own preconditions, whatever they say.
+        assert 'protected' not in execute(Action.PUSH, state, repo, Policy(name='p', protected=['release/*'])).message
+
+    def test_every_publishing_action_is_refused(self, cloned_repo, tmp_path):
+        """Iterate Action rather than listing the mutators: PROTECTED_ALLOWED is an allowlist, so
+        an action added later is refused by default and this test proves it stays that way."""
+        _git(cloned_repo, 'checkout', '-b', 'develop')
+        _commit(cloned_repo, 'local.txt', 'local work')
+        repo = _make_repo(cloned_repo)
+        repo.fetch_prune()
+        spy = GitSpy(repo)
+        state = _state_for(repo, 'develop')
+        policy = Policy(name='p', protected=['develop'])
+        head_before = _head(repo)
+
+        for action in Action:
+            outcome = execute(action, state, repo, policy)
+            if action in PROTECTED_ALLOWED:
+                assert outcome.status != 'refused' or 'protected' not in outcome.message
+            else:
+                assert outcome.status == 'refused', action
+                assert 'protected' in outcome.message, action
+
+        assert _head(repo) == head_before
+        # A refusal is decided before dispatch, so no mutating git command is even attempted.
+        assert not any(arg in ('push', 'branch', 'update-ref', 'rebase') for arg in spy.flat_args)
+
+    def test_an_unprotected_policy_changes_nothing(self, cloned_repo, tmp_path):
+        _second_clone_pushes(tmp_path)
+        repo = _make_repo(cloned_repo)
+        repo.fetch_prune()
+        state = _state_for(repo, 'main')
+        assert execute(Action.FAST_FORWARD, state, repo, POLICY).status == 'done'

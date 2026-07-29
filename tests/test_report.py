@@ -5,9 +5,17 @@ from syncer.config import RepoConfig
 from syncer.config import SyncerConfig
 from syncer.config import ToolConfig
 from syncer.config import resolve_policies
+from syncer.execute import Outcome
+from syncer.execute import protection_refusal
 from syncer.policy import Action
+from syncer.policy import BranchState
+from syncer.policy import Policy
 from syncer.policy import PrimaryState
+from syncer.report import BranchRow
+from syncer.report import Severity
+from syncer.report import _branch_line
 from syncer.report import _build_repo_report
+from syncer.report import _row_severity
 from syncer.report import gather_reports
 from syncer.report import report_branches
 
@@ -122,3 +130,35 @@ class TestReportOrdering:
         out = capsys.readouterr().out
         for i in range(5):
             assert f'repo{i}' in out
+
+
+class TestProtectedBranchReporting:
+    """Protection is static config, so a report-only run can say so. Rendering the decided
+    `push` alone would promise a push that --apply is never going to make."""
+
+    def _row(self, action, protected):
+        state = BranchState(branch='develop', primary=PrimaryState.AHEAD, ahead=2, upstream='origin/develop')
+        policy = Policy(name='p', protected=protected)
+        return BranchRow(state=state, action=action, blocked=protection_refusal(action, state, policy))
+
+    def test_report_line_marks_an_action_protection_would_refuse(self):
+        line = _branch_line(self._row(Action.PUSH, ['develop']).state, Action.PUSH, "protected by 'develop'")
+        assert 'would refuse' in line
+        assert 'develop' in line
+
+    def test_report_line_is_unchanged_when_nothing_is_protected(self):
+        row = self._row(Action.PUSH, [])
+        assert row.blocked is None
+        assert 'would refuse' not in _branch_line(row.state, row.action, row.blocked)
+
+    def test_a_protection_refusal_is_a_warning_not_an_error(self):
+        """It is the guard working as configured. Counting it as an error would paint develop
+        red at the bottom of every run forever, which trains you to ignore the bottom."""
+        row = self._row(Action.PUSH, ['develop'])
+        row.outcome = Outcome(branch='develop', action=Action.PUSH, status='refused', message=row.blocked or '')
+        assert _row_severity(row) == Severity.WARNING
+
+    def test_other_refusals_are_still_errors(self):
+        row = self._row(Action.PUSH, [])
+        row.outcome = Outcome(branch='develop', action=Action.PUSH, status='refused', message='working tree is dirty')
+        assert _row_severity(row) == Severity.ERROR

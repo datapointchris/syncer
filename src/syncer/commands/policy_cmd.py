@@ -19,10 +19,13 @@ from syncer.output import emit_json
 from syncer.output import error
 from syncer.output import hint
 from syncer.policy import BUILTIN_POLICIES
+from syncer.policy import PROTECTED_ALLOWED
+from syncer.policy import Action
 from syncer.policy import BranchState
 from syncer.policy import Policy
 from syncer.policy import PrimaryState
 from syncer.policy import decide
+from syncer.policy import matching_protection
 
 policy_app = typer.Typer(
     no_args_is_help=True,
@@ -67,6 +70,7 @@ def _summary(policy: Policy) -> dict:
         'prune': policy.prune,
         'fallback': policy.fallback.value,
         'merge_target': policy.merge_target,
+        'protected': policy.protected,
         'rules': len(policy.rules),
     }
 
@@ -92,6 +96,7 @@ def policy_list(
     table.add_column('scope')
     table.add_column('fallback')
     table.add_column('merge target')
+    table.add_column('protected')
     table.add_column('rules', justify='right')
     for name in sorted(policies):
         policy = policies[name]
@@ -105,6 +110,7 @@ def policy_list(
             policy.scope.value,
             policy.fallback.value,
             policy.merge_target or 'default branch',
+            ', '.join(policy.protected) or 'none',
             str(len(policy.rules)),
         )
     console.print(table)
@@ -133,9 +139,24 @@ def policy_show(
         raise typer.Exit(2)
 
     matrix = decision_matrix(policy, branch)
+    # Protection matches on the branch name alone, so it applies to all three role columns
+    # equally — one lookup answers the whole matrix.
+    protected_by = matching_protection(branch, policy)
+    blocked_actions = sorted(action.value for action in Action if action not in PROTECTED_ALLOWED) if protected_by else []
 
     if as_json:
-        emit_json(_summary(policy) | {'rules': policy.rules, 'branch': branch, 'decisions': matrix})
+        emit_json(
+            _summary(policy)
+            | {
+                'rules': policy.rules,
+                'branch': branch,
+                'decisions': matrix,
+                'protected_by': protected_by,
+                # decisions stays the pure decide() answer; this is what execute() would then
+                # refuse, so a caller asking "will syncer push to develop" gets both halves.
+                'blocked_actions': blocked_actions,
+            }
+        )
         return
 
     merge_target = policy.merge_target or "the repo's default branch"
@@ -143,6 +164,8 @@ def policy_show(
         f'[bold]{policy.name}[/bold]  (scope: {policy.scope.value}, fallback: {policy.fallback.value}, merge target: {merge_target})',
         soft_wrap=True,
     )
+    if policy.protected:
+        console.print(f'protected: {", ".join(policy.protected)}', soft_wrap=True)
 
     console.print()
     if policy.rules:
@@ -158,11 +181,19 @@ def policy_show(
 
     console.print()
     console.print(f'[bold]decisions[/bold] for a branch named [cyan]{branch}[/cyan]')
+    if protected_by:
+        console.print(
+            f'[yellow]{branch} is protected by {protected_by!r} — marked actions are refused at execute time[/yellow]', soft_wrap=True
+        )
     decisions = Table(box=None, pad_edge=False)
     decisions.add_column('')
     decisions.add_column(f'default({branch})')
     decisions.add_column('current')
     decisions.add_column('other')
     for state, by_role in matrix.items():
-        decisions.add_row(f'  {state}', *(by_role[role] for role, _, _ in ROLES))
+        cells = [
+            f'[yellow]{action} (refused)[/yellow]' if action in blocked_actions else action
+            for action in (by_role[role] for role, _, _ in ROLES)
+        ]
+        decisions.add_row(f'  {state}', *cells)
     console.print(decisions)

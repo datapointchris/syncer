@@ -121,7 +121,8 @@ default_policy = "standard"
 [policies.laptop]
 scope = "all"
 fallback = "report"
-merge_target = "develop"   # branch a gone branch must be integrated into before delete_local
+merge_target = "develop"                    # branch a gone branch must be integrated into before delete_local
+protected = ["develop", "dev", "uat", "prod", "release/*"]
 [policies.laptop.rules]
 "release/*:ahead" = "report"
 "*:behind"        = "fast_forward"
@@ -129,6 +130,18 @@ merge_target = "develop"   # branch a gone branch must be integrated into before
 
 [repo_overrides]
 "some-shared-repo" = "observe"   # per-repo, per-machine
+```
+
+### Protected branches
+
+`protected` names branches (fnmatch patterns, the same grammar the selectors use) that nothing may publish to or destroy. It is enforced centrally in the executor before any action runs, so it's a **hard guard** rather than a matter of writing the right exact-name rule for every branch — under a fallback like `"*:ahead" = "push"`, one branch you forgot is one stray local commit on a shared branch.
+
+`push`, `rebase_push`, `set_upstream_push` and `delete_local` are refused. `fast_forward` still runs: advancing a branch to what its upstream already contains publishes nothing and destroys nothing, and refusing it would make the setting useless for exactly the long-lived branches it exists to protect. The permitted set is an allowlist, so any action added later is refused on a protected branch by default.
+
+Like every other policy setting, it is **machine-local** — it lives on a policy in `config.toml`, none of the built-ins protect anything, and the portable registry carries no policy settings at all. A report-only run marks the actions protection would refuse, so you don't have to run `--apply` to see the guard working:
+
+```bash
+syncer policy show laptop --branch develop   # marks every action this stops
 ```
 
 Selectors resolve exact branch name → glob → role (`default`, then `current`) → `*`, and the first one with a rule for that state wins. Rules should name **intents, not mechanisms**: `fast_forward` dispatches to `merge --ff-only` when the branch is checked out and `update-ref` when it isn't, so naming either mechanism directly (`pull_ff`, `ff_ref`) is refused for half of all checkout states.

@@ -86,6 +86,15 @@ fallback = "report"
 # default-branch guard would refuse every genuinely merged branch forever.
 merge_target = "develop"
 
+# Branches nothing may publish to or destroy. fnmatch patterns, the same grammar the rule
+# selectors use. Enforced in execute() before any action runs, so it is a hard guard rather
+# than a matter of writing the right exact-name rule for every branch — under a fallback like
+# "*:ahead" = "push", one forgotten branch is one stray local commit on a shared branch.
+# push, rebase_push, set_upstream_push and delete_local are refused; fast_forward still runs,
+# because advancing to what the upstream already contains publishes nothing and destroys
+# nothing. `syncer policy show <name> --branch develop` marks exactly which actions this stops.
+protected = ["develop", "dev", "uat", "prod", "release/*"]
+
 # Rules are "<selector>:<state>" = "<action>". Run `syncer policy show laptop` to see the
 # decision this table actually produces for every state — that matrix is computed from the
 # rules engine itself, so it cannot drift from what --apply will do.

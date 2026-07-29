@@ -15,6 +15,9 @@ independent of any policy:
 6. Any precondition that fails at execute time is refused and reported, never forced.
 7. execute always acts on the branch the state was classified from (explicit refspecs /
    ref names), never the incidentally-checked-out branch.
+8. A branch matching the policy's `protected` patterns admits no action that publishes or
+   destroys — checked centrally here, before dispatch, so it holds for every action including
+   ones added later.
 """
 
 from __future__ import annotations
@@ -23,9 +26,11 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from syncer.policy import PROTECTED_ALLOWED
 from syncer.policy import Action
 from syncer.policy import BranchState
 from syncer.policy import Policy
+from syncer.policy import matching_protection
 from syncer.repos import Repo
 
 OutcomeStatus = Literal['skipped', 'reported', 'done', 'refused', 'failed']
@@ -176,12 +181,31 @@ _MUTATORS = {
 }
 
 
+def protection_refusal(action: Action, state: BranchState, policy: Policy) -> str | None:
+    """Why `action` is refused on a protected branch, or None if the branch admits it.
+
+    Shared with the reporter rather than living inside execute(), because protection is static
+    config and therefore knowable without running anything: a report-only run that printed the
+    decided `push` alone would promise a push that `--apply` is never going to make.
+    """
+    if action in PROTECTED_ALLOWED:
+        return None
+    pattern = matching_protection(state.branch, policy)
+    return None if pattern is None else f'protected by {pattern!r}'
+
+
 def execute(action: Action, state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     """Perform `action` on `state.branch`, enforcing the hard invariants. Never forces.
 
-    `policy` is passed for the settings a guard has to consult live (currently `merge_target`);
-    it can never widen what an action is allowed to do — the invariants above hold whatever it says.
+    `policy` is passed for the settings a guard has to consult live (`merge_target`,
+    `protected`); it can never widen what an action is allowed to do — the invariants above hold
+    whatever it says.
     """
+    # Invariant 8, before dispatch so it covers every action, including any added later.
+    refusal = protection_refusal(action, state, policy)
+    if refusal is not None:
+        return _refused(state, action, refusal)
+
     if action == Action.SKIP:
         return Outcome(branch=state.branch, action=action, status='skipped')
     if action == Action.REPORT:
