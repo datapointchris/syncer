@@ -49,6 +49,9 @@ ignore_missing_imports = true
 check_untyped_defs = false
 warn_return_any = false
 
+# `standard` replaces the per-rule opt-outs repos used to accumulate; basedpyright
+# defaults to `recommended`, which turns every one of them back on. Named
+# `pyright` so both basedpyright and Pylance read it.
 
 [tool.pytest.ini_options]
 addopts = "-vv"
@@ -82,27 +85,22 @@ docstring-code-format = true
 
 [tool.ruff.lint]
 select = [
-    # pycodestyle
-    "E",
-    # Pyflakes
-    "F",
-    # pyupgrade
-    "UP",
-    # flake8-bugbear
-    "B",
-    # flake8-simplify
-    "SIM",
-    # isort
-    "I",
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "I",    # isort
 ]
-ignore = ["SIM108"]
+ignore = [
+    "SIM108",  # ternary operator — often less readable
+]
 
 [tool.ruff.lint.isort]
 force-single-line = true
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
-
 
 [tool.semantic_release]
 version_toml = ["pyproject.toml:project.version"]
@@ -117,6 +115,10 @@ build_command = """
 
 # ---------- Build System ---------- #
 
+
+[tool.pyright]
+typeCheckingMode = "standard"
+analyzeUnannotatedFunctions = true  # or pylance stops analyzing in vscode
 
 [build-system]
 requires = ["uv_build>=0.9.13,<0.10.0"]
