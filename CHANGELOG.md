@@ -1,6 +1,46 @@
 # CHANGELOG
 
 
+## v6.0.1 (2026-07-31)
+
+### Bug Fixes
+
+- **ci**: Validate on push, not only via a release call
+  ([`972355a`](https://github.com/datapointchris/syncer/commit/972355afc037e7b4c7581861b7c9a78a70912802))
+
+The workflow triggered on pull_request and workflow_call. Development here is trunk-based, so the
+  only trigger that ever fired was this repo's release pipeline calling it, and the checks ran as
+  part of a release rather than as a gate on the push itself.
+
+### Chores
+
+- **config**: Adopt the standard pyright section
+  ([`db86397`](https://github.com/datapointchris/syncer/commit/db86397b20ed56ef2f3b7bfa522e5d8cc475b573))
+
+Synced from forge pyproject template. With no [tool.pyright] section the editor LSP settings
+  applied, and their ignore = ["*"] suppressed every diagnostic. A config file takes precedence over
+  those settings, so basedpyright now reports against the same "standard" mode as the rest of the
+  portfolio instead of reporting nothing.
+
+- **config**: Record the keys the pyproject sync owns
+  ([`4c5fe1f`](https://github.com/datapointchris/syncer/commit/4c5fe1f6c66b8325a6d929f597dd042a3c443b4d))
+
+forge now writes [tool.forge] managed, listing the exact keys the standard sets. Deletion on a later
+  sync is scoped to that record, so dropping a key from the template retracts it here without having
+  to guess which settings belong to this project.
+
+Purely additive: nothing else in this file changed.
+
+### Documentation
+
+- Install from a real tag, not a ref named latest
+  ([`96a3367`](https://github.com/datapointchris/syncer/commit/96a336700c204edec232e77f45fe408a7d105f5f))
+
+`@latest` is not a git ref and this repo has none, so the documented install command fails outright.
+  It also has to be a tag rather than the default branch: `update` reads uv's receipt and refuses to
+  reinstall over a branch install, whose version cannot be compared against a release.
+
+
 ## v6.0.0 (2026-07-29)
 
 ### Features
