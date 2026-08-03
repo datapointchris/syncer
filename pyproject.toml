@@ -38,7 +38,10 @@ skips = ["B311", "B404", "B603"]
 
 
 [tool.codespell]
-skip = '*.lock'
+# CHANGELOG.md is generated from commit subjects by semantic-release, so a typo
+# in it lives in a commit message that will never be rewritten, and any fix here
+# is undone on the next release.
+skip = '*.lock,CHANGELOG.md'
 ignore-words-list = "astroid,aNULL,ANULL,anull"
 check-filenames = true
 
