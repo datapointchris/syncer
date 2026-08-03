@@ -12,7 +12,7 @@ The whole design is a four-stage pipeline split so the decision logic is a pure 
 therefore exhaustively testable without touching git:
 
 | Stage | Module | Purity | Owns |
-|-------|--------|--------|------|
+| --- | --- | --- | --- |
 | Classify | `classify.py` | impure (git reads) | Turns real repo state into `BranchState` objects. Runs the read-side remediation (`fetch --prune` + `git remote set-head origin --auto`) so a renamed default resolves before anything is classified. |
 | Decide | `policy.py` | **pure** | `decide(state, policy) -> Action`. No git, no FS. A `BranchState` × a `Policy` maps to one action off a pre-vetted safe menu. Also holds the built-in policies. |
 | Execute | `execute.py` | impure (git writes) | The only place that mutates. Enforces the hard invariants (below) and refuses rather than forces. |
