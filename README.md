@@ -112,7 +112,7 @@ git_timeout = 120                     # ceiling on a single git call; clones get
 
 Each repo has a `status`: `active` (default), `dormant`, or `retired`. Retired repos are skipped during sync.
 
-`search_paths` are what `syncer issues` scans for repos that moved or aren't tracked; `exclude_paths` disclaims a subtree inside them, for directories another registry owns. **Syncer never writes to the registry** — `issues` reports drift and you fix the paths by hand.
+`search_paths` are what `syncer issues` scans for repos that moved or aren't tracked; `exclude_paths` disclaims a subtree inside them, for directories another registry owns. **Syncer never modifies a registry that holds repos** — `issues` reports drift and you fix the paths by hand. Only `config init` and `config scan --write` write one, and both refuse the moment the file lists any.
 
 `issues` also flags a clone whose `origin` disagrees with what the registry declares. `gh repo clone <bare-name>` resolves to the authenticated user, so a reference repo that also exists under your own account silently gets your fork as its upstream and pulls from it forever — which went unnoticed for three months on two repos. Comparison normalises https, scp-style SSH and `ssh://` with a port to the same thing, so cloning over SSH against an https registry isn't a false positive. Report-only: a deliberate fork is indistinguishable from a mistake without asking, so the remote is never rewritten.
 

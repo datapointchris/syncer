@@ -121,11 +121,13 @@ current/non-current split needs the same treatment.
 - **`repos.json`** (default `$XDG_CONFIG_HOME/syncer/repos.json`, repointed by `repos_file` in
   `config.toml`) — the repo **identity registry**: `owner`, `host`, `search_paths`,
   `exclude_paths`, and per-repo `{name, path, status, description, owner?, sync_policy?,
-  toolchain?}`. Portable across machines. **syncer never modifies it** — it's shared
-  infrastructure (also read by `forge` and `indy`). `issues` reports drift but tells you to fix
-  paths by hand. `config init` *creates* one that is absent, which is the single write and not a
-  modification: it refuses the moment a file is there. A tool that can only tell you to hand-write
-  a file whose shape it already knows has pushed its own job onto the reader.
+  toolchain?}`. Portable across machines. **syncer never modifies one that holds repos** — it's
+  shared infrastructure (also read by `forge` and `indy`). `issues` reports drift but tells you to
+  fix paths by hand. Exactly two commands write, and both only *create*: `config init` scaffolds
+  one that is absent, and `config scan --write` fills one that is absent or still empty. Both
+  refuse the moment the file lists repos, and `scan` treats an unparsable file as content too —
+  the last one to clobber silently. A tool that can only tell you to hand-write a file whose shape
+  it already knows, from data already on disk, has pushed its own job onto the reader.
 
   The fleet keeps its registry at `~/dev/repos.json` and points `repos_file` there, because forge
   and indy read the same file. That sharing is a **fleet fact, not a syncer fact** — the default
