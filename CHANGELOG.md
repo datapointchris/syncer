@@ -1,6 +1,16 @@
 # CHANGELOG
 
 
+## v9.0.0 (2026-08-04)
+
+### Chores
+
+- Merge the 8.0.0 release commit
+  ([`8fc12a4`](https://github.com/datapointchris/syncer/commit/8fc12a43593478ea40383aac9bc67421f9768137))
+
+semantic-release pushed the version bump while the check/apply split was being written locally.
+
+
 ## v8.0.0 (2026-08-04)
 
 ### Documentation
@@ -31,10 +41,33 @@ ctx.obj['dry_run'] went with it; nothing ever read it.
 BREAKING CHANGE: `syncer` no longer runs the sync report. Use `syncer check`, and `syncer check
   --apply` to execute. The flags are unchanged otherwise.
 
+- **cli**: Split check and apply into verbs
+  ([`77e4405`](https://github.com/datapointchris/syncer/commit/77e4405d6117d603c4143b109bdd9410ec2abe5e))
+
+`check --apply` put the write inside the read: the flag did not parameterise the check, it changed
+  what the command did. `--dry-run` was the proof — a flag whose only job was cancelling another
+  flag ("force report-only, even with --apply"). Both are gone.
+
+`syncer check` reports and never writes. `syncer apply` executes. check is apply's dry run by
+  construction, same classification and same decided actions, so there is nothing left for --dry-run
+  to mean.
+
+`branches` had the same --apply and is now `--per-branch` on both verbs. It was never a separate
+  operation -- report_branches differs from run_sync by one include_lifecycle flag, so the CLI now
+  says what the code says, and the two real axes (what to do, how to group) are one verb and one
+  option instead of four commands.
+
+The remaining flags -- policy, jobs, repos-file, json -- genuinely parameterise both verbs and stay
+  on both.
+
+BREAKING CHANGE: `syncer check --apply` is `syncer apply`. `syncer branches` is `syncer check
+  --per-branch`, and `syncer branches --apply` is `syncer apply --per-branch`. `--dry-run` is
+  removed; `syncer check` is the dry run.
+
 ### Breaking Changes
 
-- **cli**: `syncer` no longer runs the sync report. Use `syncer check`, and `syncer check --apply`
-  to execute. The flags are unchanged otherwise.
+- **cli**: `syncer check --apply` is `syncer apply`. `syncer branches` is `syncer check
+  --per-branch`, and `syncer branches --apply` is `syncer apply
 
 
 ## v7.0.0 (2026-08-04)
