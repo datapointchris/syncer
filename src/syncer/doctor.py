@@ -45,13 +45,13 @@ from syncer.config import resolve_policy_name
 from syncer.diagnose import classify_failure
 from syncer.diagnose import hint_lines
 from syncer.diagnose import remote_host
+from syncer.output import ICON_ERR
+from syncer.output import ICON_OK
+from syncer.output import ICON_WARN
 from syncer.output import err_console
 from syncer.output import error
 from syncer.output import hint
 from syncer.output import success
-from syncer.repos import ICON_ERR
-from syncer.repos import ICON_OK
-from syncer.repos import ICON_WARN
 from syncer.repos import GitFailure
 from syncer.repos import run_command
 

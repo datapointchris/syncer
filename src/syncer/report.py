@@ -43,6 +43,15 @@ from syncer.diagnose import group_failures
 from syncer.execute import Outcome
 from syncer.execute import execute
 from syncer.execute import protection_refusal
+from syncer.output import ICON_DOT
+from syncer.output import ICON_DOWNLOAD
+from syncer.output import ICON_ERR
+from syncer.output import ICON_MOVE
+from syncer.output import ICON_OK
+from syncer.output import ICON_PULL
+from syncer.output import ICON_PUSH
+from syncer.output import ICON_WARN
+from syncer.output import console
 from syncer.output import err_console
 from syncer.output import error
 from syncer.output import hint
@@ -52,17 +61,8 @@ from syncer.policy import Policy
 from syncer.policy import PrimaryState
 from syncer.policy import decide
 from syncer.policy import is_watched_remote
-from syncer.repos import ICON_DOT
-from syncer.repos import ICON_DOWNLOAD
-from syncer.repos import ICON_ERR
-from syncer.repos import ICON_MOVE
-from syncer.repos import ICON_OK
-from syncer.repos import ICON_PULL
-from syncer.repos import ICON_PUSH
-from syncer.repos import ICON_WARN
 from syncer.repos import GitFailure
 from syncer.repos import Repo
-from syncer.repos import console
 from syncer.repos import find_repo_in_search_paths
 from syncer.repos import origin_mismatch
 
@@ -468,8 +468,13 @@ def render_report(report: RepoBranchReport, apply: bool) -> None:
     mode = 'apply' if apply else 'report-only'
     console.print(f'[bold]{report.label}[/bold] [blue](policy: {report.policy_name}, {mode})[/blue]')
     if report.origin_mismatch:
-        console.print(f'  [yellow]{ICON_WARN}  origin is {report.origin_mismatch}[/yellow]')
-        console.print(f'    [yellow]registry expects {report.expected_url} (fix the remote or repos.json by hand)[/yellow]')
+        # soft_wrap: both lines are URLs, and the point of the check is to hand you two you can
+        # compare and copy. Rich's own wrapping breaks them mid-path.
+        console.print(f'  [yellow]{ICON_WARN}  origin is {escape(report.origin_mismatch)}[/yellow]', soft_wrap=True)
+        console.print(
+            f'    [yellow]registry expects {escape(report.expected_url)} (fix the remote or repos.json by hand)[/yellow]',
+            soft_wrap=True,
+        )
     for row in report.rows:
         if apply and row.outcome is not None:
             console.print(f'{_branch_prefix(row.state)} {_outcome_suffix(row.outcome)}')

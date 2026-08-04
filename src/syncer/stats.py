@@ -5,16 +5,14 @@ from datetime import datetime
 from operator import itemgetter
 from pathlib import Path
 
-from rich.console import Console
 from rich.table import Table
 
 from syncer.config import SyncerConfig
+from syncer.output import console
 from syncer.repos import Repo
 from syncer.tracking import SyncRunEvent
 from syncer.tracking import find_stale_repos
 from syncer.tracking import read_events
-
-console = Console(highlight=False)
 
 BLOCK_FULL = '\u2588'
 

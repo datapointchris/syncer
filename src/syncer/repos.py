@@ -6,10 +6,6 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from rich.console import Console
-
-console = Console(highlight=False)
-
 # Ceiling on a single git invocation. Generous enough for a fetch over a VPN; the point is that
 # a wedged call eventually reports instead of holding a worker thread forever.
 GIT_TIMEOUT_SECONDS = 120
@@ -107,41 +103,6 @@ def run_command(args: list[str], *, cwd: Path | None = None, timeout: int) -> su
         )
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(args, returncode=TIMEOUT_RETURNCODE, stdout='', stderr=f'timed out after {timeout}s')
-
-
-# Nerd font icons
-ICON_OK = '\uf00c'
-ICON_WARN = '\uf071'
-ICON_ERR = '\uf00d'
-ICON_DOWNLOAD = '\uf0ed'
-ICON_PULL = '\uf019'
-ICON_PUSH = '\uf093'
-ICON_MOVE = '\uf0ec'
-ICON_DOT = '\uf444'
-
-LINE_WIDTH = 80
-
-ALL_ICONS = {ICON_OK, ICON_WARN, ICON_ERR, ICON_DOWNLOAD, ICON_PULL, ICON_PUSH, ICON_MOVE}
-
-
-def _display_width(text: str) -> int:
-    """Calculate display width accounting for double-width nerd font icons."""
-    return sum(2 if ch in ALL_ICONS else 1 for ch in text)
-
-
-def _status_line(icon: str, name: str, msg: str, color: str, branch: str | None = None) -> str:
-    prefix = f'{icon}  {name} '
-    prefix_w = _display_width(prefix)
-    if branch:
-        # Displayed: {prefix}{padding} ({branch}) {msg}
-        branch_w = len(f' ({branch}) ')
-        msg_w = len(msg)
-        padding = '_' * max(1, LINE_WIDTH - prefix_w - branch_w - msg_w)
-        return f'[{color}]{prefix}{padding}[/{color}] [blue]({branch})[/blue] [{color}]{msg}[/{color}]'
-    # Displayed: {prefix}{padding} {msg}
-    suffix_w = len(f' {msg}')
-    padding = '_' * max(1, LINE_WIDTH - prefix_w - suffix_w)
-    return f'[{color}]{prefix}{padding} {msg}[/{color}]'
 
 
 class Repo:

@@ -16,6 +16,14 @@ from pathlib import Path
 
 from syncer.config import SyncerConfig
 from syncer.config import ToolConfig
+from syncer.output import ICON_DOWNLOAD
+from syncer.output import ICON_ERR
+from syncer.output import ICON_MOVE
+from syncer.output import ICON_OK
+from syncer.output import ICON_PULL
+from syncer.output import ICON_PUSH
+from syncer.output import ICON_WARN
+from syncer.output import console
 from syncer.policy import Action
 from syncer.report import DEFAULT_JITTER_SECONDS
 from syncer.report import DEFAULT_JOBS
@@ -25,14 +33,6 @@ from syncer.report import gather_reports
 from syncer.report import render_failure_summary
 from syncer.report import render_report
 from syncer.report import report_severity
-from syncer.repos import ICON_DOWNLOAD
-from syncer.repos import ICON_ERR
-from syncer.repos import ICON_MOVE
-from syncer.repos import ICON_OK
-from syncer.repos import ICON_PULL
-from syncer.repos import ICON_PUSH
-from syncer.repos import ICON_WARN
-from syncer.repos import console
 from syncer.tracking import BranchSnapshot
 from syncer.tracking import RepoSnapshot
 from syncer.tracking import RepoStatus

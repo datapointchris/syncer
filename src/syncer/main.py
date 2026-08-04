@@ -11,7 +11,6 @@ import typer
 from pyselfupdate import Config
 from pyselfupdate import notify
 from pyselfupdate.typercmd import run_update
-from rich.console import Console
 
 from syncer.commands.config_cmd import config_app
 from syncer.commands.policy_cmd import policy_app
@@ -24,12 +23,13 @@ from syncer.config import resolve_registry
 from syncer.doctor import doctor_exit_code
 from syncer.doctor import render_doctor
 from syncer.doctor import run_doctor
+from syncer.output import ICON_MOVE
+from syncer.output import ICON_WARN
+from syncer.output import _status_line
+from syncer.output import console
 from syncer.report import DEFAULT_JOBS
 from syncer.report import report_branches
-from syncer.repos import ICON_MOVE
-from syncer.repos import ICON_WARN
 from syncer.repos import Repo
-from syncer.repos import _status_line
 from syncer.repos import find_repo_in_search_paths
 from syncer.repos import origin_mismatch
 from syncer.stats import show_stats
@@ -40,7 +40,6 @@ from syncer.tracking import migrate_legacy_events
 app = typer.Typer(invoke_without_command=True, rich_markup_mode='rich')
 app.add_typer(config_app, name='config', rich_help_panel='Manage')
 app.add_typer(policy_app, name='policy', rich_help_panel='Inspect')
-console = Console()
 
 # Shared by the `update` command and the daily check in the callback below, so
 # the notice cannot name a release the update command would not install.

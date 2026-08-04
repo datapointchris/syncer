@@ -4,14 +4,14 @@ from unittest.mock import patch
 
 import pytest
 
-from syncer.repos import ALL_ICONS
-from syncer.repos import ICON_ERR
-from syncer.repos import ICON_OK
+from syncer.output import ALL_ICONS
+from syncer.output import ICON_ERR
+from syncer.output import ICON_OK
+from syncer.output import _display_width
+from syncer.output import _status_line
 from syncer.repos import TIMEOUT_RETURNCODE
 from syncer.repos import Repo
-from syncer.repos import _display_width
 from syncer.repos import _noninteractive_env
-from syncer.repos import _status_line
 from syncer.repos import find_repo_in_search_paths
 from syncer.repos import normalize_remote_url
 from syncer.repos import origin_mismatch
