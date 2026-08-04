@@ -353,7 +353,9 @@ class TestFailureRecording:
         """default_branch probes several refs by design; recording those would bury the real
         failures under noise on every repo whose origin/HEAD was never set."""
         repo = _make_repo(git_repo)
-        assert repo.default_branch == 'main'
+        # Not asserting the name: `git init` honours init.defaultBranch, so this is 'main' on a
+        # configured machine and 'master' on a stock CI runner.
+        assert repo.default_branch is not None
         assert repo.failures == []
 
     def test_a_successful_call_records_nothing(self, git_repo):

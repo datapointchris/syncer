@@ -170,8 +170,11 @@ class TestUnverifiableRepoIsNotSynced:
         out a hint for the wrong machine."""
         config = self._repo_with_dead_remote(tmp_path)
         report = _build(config.repos[0], config, cli_policy='observe')
-        assert str(tmp_path) in report.expected_url
-        assert 'github.com' not in report.expected_url
+        # What collect_failures groups on: the real origin when it differs from the registry's
+        # expectation, and the expectation itself when it does not.
+        grouped_on = report.origin_mismatch or report.expected_url
+        assert str(tmp_path) in grouped_on
+        assert 'github.com' not in grouped_on
 
     def test_local_counts_survive_for_the_stale_warnings(self, tmp_path):
         config = self._repo_with_dead_remote(tmp_path)
@@ -299,40 +302,55 @@ class TestOriginMismatchReporting:
     place. So it annotates the branch report rather than replacing it the way a lifecycle
     status would, and it lifts the repo to WARNING so it sorts near the prompt."""
 
-    def _clone_with_origin(self, tmp_path, origin):
-        path = tmp_path / 'homelab'
-        subprocess.run(['git', 'init', '-b', 'main', str(path)], capture_output=True)
-        subprocess.run(['git', 'config', 'user.email', 't@t'], cwd=path, capture_output=True)
-        subprocess.run(['git', 'config', 'user.name', 'T'], cwd=path, capture_output=True)
-        (path / 'README.md').write_text('# x\n')
-        subprocess.run(['git', 'add', '.'], cwd=path, capture_output=True)
-        subprocess.run(['git', 'commit', '-m', 'init'], cwd=path, capture_output=True)
-        subprocess.run(['git', 'remote', 'add', 'origin', origin], cwd=path, capture_output=True)
-        config = SyncerConfig(owner='khuedoan', host='https://github.com', search_paths=[], repos=[])
-        return RepoConfig(name='homelab', path=str(path)), config
+    def _clone_with_origin(self, tmp_path, *, expects_its_own_origin: bool):
+        """A real clone of a real local remote, so the fetch actually succeeds.
+
+        These used to point origin at a live github.com URL, which made them pass on a machine
+        with credentials and fail on one without — the mismatch check compares two strings and
+        never needed the network to do it.
+        """
+        repo_path = _make_cloned_repo(tmp_path, 'homelab')
+        real_origin = str(tmp_path / 'homelab.git')
+        clone_url = real_origin if expects_its_own_origin else 'https://github.com/khuedoan/homelab'
+        config = SyncerConfig(
+            owner='khuedoan',
+            host='https://github.com',
+            search_paths=[],
+            repos=[RepoConfig(name='homelab', path=str(repo_path), clone_url=clone_url)],
+        )
+        return config.repos[0], config, real_origin
 
     def test_flagged_when_the_origin_is_someone_elses(self, tmp_path):
-        repo_config, config = self._clone_with_origin(tmp_path, 'https://github.com/datapointchris/homelab')
+        repo_config, config, real_origin = self._clone_with_origin(tmp_path, expects_its_own_origin=False)
         report = _build(repo_config, config)
-        assert report.origin_mismatch == 'https://github.com/datapointchris/homelab'
+        assert report.origin_mismatch == real_origin
         assert report.expected_url == 'https://github.com/khuedoan/homelab'
 
     def test_silent_when_the_origin_matches(self, tmp_path):
-        repo_config, config = self._clone_with_origin(tmp_path, 'https://github.com/khuedoan/homelab')
+        repo_config, config, _ = self._clone_with_origin(tmp_path, expects_its_own_origin=True)
         assert _build(repo_config, config).origin_mismatch is None
 
     def test_the_branch_report_is_annotated_not_replaced(self, tmp_path):
         """A lifecycle status would return instead of classifying — losing every branch row for
         a repo whose only problem is where it points."""
-        repo_config, config = self._clone_with_origin(tmp_path, 'https://github.com/datapointchris/homelab')
-        # observe has scope ALL, so main is classified despite having no upstream to track.
+        repo_config, config, _ = self._clone_with_origin(tmp_path, expects_its_own_origin=False)
         report = _build(repo_config, config, cli_policy='observe')
         assert report.lifecycle is None
         assert [row.state.branch for row in report.rows] == ['main']
 
     def test_lifts_an_otherwise_clean_repo_to_warning(self, tmp_path):
-        repo_config, config = self._clone_with_origin(tmp_path, 'https://github.com/datapointchris/homelab')
+        repo_config, config, _ = self._clone_with_origin(tmp_path, expects_its_own_origin=False)
         assert report_severity(_build(repo_config, config)) == Severity.WARNING
+
+    def test_it_survives_a_failed_fetch(self, tmp_path):
+        """The check needs no network, and a repo pointing at a host you have no credential for
+        fails exactly like a network problem — this is the line that tells them apart, so
+        dropping it on the failure path would lose the diagnosis when it matters most."""
+        repo_config, config, real_origin = self._clone_with_origin(tmp_path, expects_its_own_origin=False)
+        shutil.rmtree(tmp_path / 'homelab.git')
+        report = _build(repo_config, config)
+        assert report.error is not None
+        assert report.origin_mismatch == real_origin
 
 
 class TestWatchedRemoteBranches:

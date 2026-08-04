@@ -273,10 +273,11 @@ def _failed_report(repo: Repo, label: str, repo_config: RepoConfig, error: str, 
         error=error,
         error_detail=detail,
         failures=list(repo.failures),
-        # The clone's real origin, not the registry's expected URL: these failures come from
-        # fetching, so the host to name in a hint is the one git actually talked to. They differ
-        # exactly when origin_mismatch fires, and there the expected URL is the wrong answer.
-        expected_url=repo.origin_url or repo.url,
+        expected_url=repo.url,
+        # Still computed, because it needs no network and may be the reason the fetch failed:
+        # a repo pointing at a host you have no credential for fails exactly like this, and
+        # "fetch failed" alone would send you to debug the network instead of the remote.
+        origin_mismatch=origin_mismatch(repo),
         uncommitted=len(repo.uncommitted_changes),
         stashes=repo.stash_count,
     )
@@ -450,8 +451,16 @@ def _branch_json(report: RepoBranchReport) -> dict:
 
 
 def collect_failures(reports: list[RepoBranchReport]) -> list[FailureGroup]:
-    """Every git failure across the run, collapsed to one group per (cause, host)."""
-    return group_failures((report.label, report.expected_url, failure) for report in reports for failure in report.failures)
+    """Every git failure across the run, collapsed to one group per (cause, host).
+
+    Grouped on the host git actually talked to: `origin_mismatch` holds the clone's real origin
+    whenever it differs from the registry, and where it does not, `expected_url` is that same
+    URL. Grouping on the registry's expectation alone would file a corporate host's outage under
+    github.com and offer a hint for the wrong machine.
+    """
+    return group_failures(
+        (report.label, report.origin_mismatch or report.expected_url, failure) for report in reports for failure in report.failures
+    )
 
 
 def render_failure_summary(reports: list[RepoBranchReport]) -> None:
@@ -495,6 +504,11 @@ def render_report(report: RepoBranchReport, apply: bool) -> None:
         console.print(f'[red]{ICON_ERR}  {report.label} — {report.error}[/red]')
         for line in report.error_detail.splitlines() if report.error_detail else []:
             console.print(f'    {escape(line)}', soft_wrap=True)
+        if report.origin_mismatch:
+            # Printed here too: a repo pointing at a host you have no credential for fails
+            # exactly like a network problem, and this is the line that tells them apart.
+            console.print(f'    [yellow]origin is {escape(report.origin_mismatch)}[/yellow]', soft_wrap=True)
+            console.print(f'    [yellow]registry expects {escape(report.expected_url)}[/yellow]', soft_wrap=True)
         console.print()
         return
     mode = 'apply' if apply else 'report-only'
