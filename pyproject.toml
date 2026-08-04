@@ -10,7 +10,7 @@ dependencies = [
     "typer>=0.15.0",
     "rich>=13.0.0",
     "pydantic>=2.6.0",
-    "pyselfupdate[typer]>=0.2.1",
+    "pyselfupdate[typer]>=0.2.2",
 ]
 
 [project.urls]
