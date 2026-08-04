@@ -58,7 +58,7 @@ would be refused — rendering the decided `push` alone would promise a push `--
 
 ## Two surfaces, one core
 
-`run_sync` (`sync.py`, the default `syncer` run) and `report_branches` (`report.py`, `syncer
+`run_sync` (`sync.py`, `syncer check`) and `report_branches` (`report.py`, `syncer
 branches`) share `gather_reports` + `render_report`. The difference is a single
 `include_lifecycle` flag:
 
@@ -184,7 +184,7 @@ which `config init` **writes**, and `TEMPLATE_*`, which `config example` **print
 They used to be one pair, on the reasoning that the annotated example a user reads should be
 byte-for-byte the file `init` writes. The cost was observed, not theoretical: `init` shipped a
 `[policies.laptop]` block that `policy list` renders indistinguishably from a built-in, a
-`[repo_overrides]` entry for a repo nobody has, and three fake repos — so the very first `syncer`
+`[repo_overrides]` entry for a repo nobody has, and three fake repos — so the very first `syncer check`
 run printed three `would clone` lines for repos that never existed. **A scaffold must have nothing
 in it to delete**; a reference must have everything. Those are different documents.
 
@@ -287,7 +287,7 @@ a missing credential from a mis-pointed registry from a host that was never reac
   `your-github-username` names the wrong problem.
 - **`PROBE_TIMEOUT_SECONDS` is not `git_timeout`.** The latter is sized for fetching a monorepo
   over a VPN; a diagnostic that hangs two minutes per host is one nobody waits for.
-- **Exit 1 on FAIL, 0 on WARN**, so `syncer doctor && syncer --apply` stops on a box that was
+- **Exit 1 on FAIL, 0 on WARN**, so `syncer doctor && syncer check --apply` stops on a box that was
   never going to work but not on one whose repos simply are not cloned yet.
 - It **never writes anything**, unlike `config edit`, which seeds a template.
 

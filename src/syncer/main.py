@@ -39,7 +39,7 @@ from syncer.sync import run_sync
 from syncer.tracking import events_file_for
 from syncer.tracking import migrate_legacy_events
 
-app = typer.Typer(invoke_without_command=True, rich_markup_mode='rich')
+app = typer.Typer(no_args_is_help=True, rich_markup_mode='rich')
 app.add_typer(config_app, name='config', rich_help_panel='Manage')
 app.add_typer(policy_app, name='policy', rich_help_panel='Inspect')
 
@@ -49,9 +49,9 @@ UPDATE_CONFIG = Config(tool='syncer', owner='datapointchris')
 
 _EPILOG = (
     '[bold]Examples[/bold]\n\n'
-    '[cyan]syncer[/cyan] — report every repo across all branches (read-only)\n\n'
-    "[cyan]syncer --apply[/cyan] — pull, push, fast-forward, and clone what's safe\n\n"
-    '[cyan]syncer -p mirror --apply[/cyan] — run the aggressive mirror policy this once\n\n'
+    '[cyan]syncer check[/cyan] — report every repo across all branches (read-only)\n\n'
+    "[cyan]syncer check --apply[/cyan] — pull, push, fast-forward, and clone what's safe\n\n"
+    '[cyan]syncer check -p mirror --apply[/cyan] — run the aggressive mirror policy this once\n\n'
     '[cyan]syncer branches[/cyan] — quick per-branch view, no lifecycle or history\n\n'
     '[cyan]syncer issues[/cyan] — find moved, missing, or untracked repos\n\n'
     '[cyan]syncer config init[/cyan] — start from scratch on a new machine'
@@ -75,6 +75,25 @@ def _version_callback(value: bool) -> None:
 @app.callback(epilog=_EPILOG)
 def main(
     ctx: typer.Context,
+    version: Annotated[
+        bool, typer.Option('--version', '-V', callback=_version_callback, is_eager=True, help='Show the installed version and exit')
+    ] = False,
+) -> None:
+    """Check whether local git repos are synced, across every branch.
+
+    [bold]syncer check[/bold] reports the state of every repo (read-only); add
+    [bold]--apply[/bold] to execute each policy's safe actions.
+    """
+    # Never raises and never prints an error; the notice is deferred to exit so
+    # it lands after the command's own output. `syncer update` is the only place
+    # an update failure is reported. Skipped for `update` itself, which is about
+    # to do the thing the notice would suggest.
+    if ctx.invoked_subcommand != 'update':
+        notify(UPDATE_CONFIG)
+
+
+@app.command(rich_help_panel='Sync')
+def check(
     apply: Annotated[
         bool, typer.Option('--apply', help='Execute the decided actions (pull/push/ff/clone); default is report-only')
     ] = False,
@@ -86,39 +105,28 @@ def main(
         typer.Option('--repos-file', '-c', help='Use a different repo registry; replaces the default set entirely'),
     ] = None,
     json_output: Annotated[bool, typer.Option('--json', help='Emit the run as JSON on stdout instead of a report')] = False,
-    version: Annotated[
-        bool, typer.Option('--version', '-V', callback=_version_callback, is_eager=True, help='Show the installed version and exit')
-    ] = False,
 ) -> None:
-    """Check whether local git repos are synced, across every branch.
+    """Report every repo across all branches, with lifecycle, cloning, and run history.
 
-    Running [bold]syncer[/bold] with no command reports the state of every repo (read-only).
-    Add [bold]--apply[/bold] to execute each policy's safe actions. Repos are checked concurrently
-    and shown least-to-most urgent, so anything needing attention sits nearest the prompt.
+    Read-only by default; --apply executes each policy's safe actions, enforcing the hard
+    safety invariants (never force, never touch a dirty tree, refuse rather than force).
+    Repos are checked concurrently and shown least-to-most urgent, so anything needing
+    attention sits nearest the prompt.
+
+    Exits 1 if any repo reached an error state, so it can gate a script.
     """
-    ctx.ensure_object(dict)
-    ctx.obj['dry_run'] = dry_run
-
-    # Never raises and never prints an error; the notice is deferred to exit so
-    # it lands after the command's own output. `syncer update` is the only place
-    # an update failure is reported. Skipped for `update` itself, which is about
-    # to do the thing the notice would suggest.
-    if ctx.invoked_subcommand != 'update':
-        notify(UPDATE_CONFIG)
-
-    if ctx.invoked_subcommand is None:
-        syncer_config, repos_path = resolve_registry(repos_file)
-        tool_config = load_tool_config()
-        reports = run_sync(
-            syncer_config,
-            tool_config,
-            _events_file(repos_path, repos_file),
-            cli_policy=policy,
-            apply=apply and not dry_run,
-            jobs=jobs,
-            as_json=json_output,
-        )
-        raise typer.Exit(exit_code_for(reports))
+    syncer_config, repos_path = resolve_registry(repos_file)
+    tool_config = load_tool_config()
+    reports = run_sync(
+        syncer_config,
+        tool_config,
+        _events_file(repos_path, repos_file),
+        cli_policy=policy,
+        apply=apply and not dry_run,
+        jobs=jobs,
+        as_json=json_output,
+    )
+    raise typer.Exit(exit_code_for(reports))
 
 
 @app.command(rich_help_panel='Sync')
@@ -132,7 +140,7 @@ def branches(
     ] = None,
     json_output: Annotated[bool, typer.Option('--json', help='Emit the report as JSON on stdout')] = False,
 ) -> None:
-    """Per-branch report only — like the default run without lifecycle, cloning, or history.
+    """Per-branch report only — like `syncer check` without lifecycle, cloning, or history.
 
     Classifies every local branch (ahead/behind/gone/no-upstream/…) and shows the action the
     resolved policy would take. Read-only by default; --apply executes it, enforcing the hard

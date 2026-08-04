@@ -2,11 +2,35 @@ import json
 import shutil
 import subprocess
 
+import pytest
 from typer.testing import CliRunner
 
 from syncer.main import app
 
 runner = CliRunner()
+
+
+class TestBareInvocation:
+    """The run used to hang off the root callback, so `syncer` scanned every repo and
+    `syncer --apply` mutated them — a write one flag away from the bare invocation. It is
+    `syncer check` now, and bare shows help. See cli-design.md, 'No args shows help'."""
+
+    def test_bare_invocation_shows_help(self, monkeypatch):
+        monkeypatch.setattr('syncer.main.notify', lambda *_: None)
+        result = runner.invoke(app, [])
+        assert 'Usage:' in result.output
+        assert 'check' in result.output
+
+    @pytest.mark.parametrize('flag', ['--apply', '--dry-run', '--policy=standard', '--jobs=2', '--repos-file=x.json', '--json'])
+    def test_action_flags_are_rejected_at_the_root(self, flag, monkeypatch):
+        """Flags on the root callback are the tell that a default is really a command."""
+        monkeypatch.setattr('syncer.main.notify', lambda *_: None)
+        assert runner.invoke(app, [flag]).exit_code != 0
+
+    @pytest.mark.parametrize('flag', ['--apply', '--dry-run', '--policy=standard', '--jobs=2', '--json'])
+    def test_check_accepts_them_instead(self, flag, monkeypatch):
+        monkeypatch.setattr('syncer.main.notify', lambda *_: None)
+        assert 'No such option' not in runner.invoke(app, ['check', flag, '--help']).output
 
 
 class TestIssuesMasterCheck:
@@ -81,13 +105,13 @@ class TestExitCodesAndJson:
     def test_a_healthy_run_exits_zero(self, tmp_path, monkeypatch):
         repo = self._healthy_repo(tmp_path)
         registry = self._registry(tmp_path, [{'name': 'api', 'path': str(repo)}])
-        assert self._run(registry, monkeypatch, tmp_path).exit_code == 0
+        assert self._run(registry, monkeypatch, tmp_path, 'check').exit_code == 0
 
     def test_an_unreadable_repo_exits_one(self, tmp_path, monkeypatch):
         repo = self._healthy_repo(tmp_path)
         shutil.rmtree(tmp_path / 'api.git')  # origin gone, so nothing can be verified
         registry = self._registry(tmp_path, [{'name': 'api', 'path': str(repo)}])
-        assert self._run(registry, monkeypatch, tmp_path).exit_code == 1
+        assert self._run(registry, monkeypatch, tmp_path, 'check').exit_code == 1
 
     def test_a_repo_merely_needing_a_push_still_exits_zero(self, tmp_path, monkeypatch):
         """WARNING stays 0: 'ahead' is the normal state of a machine somebody works on, and an
@@ -95,13 +119,13 @@ class TestExitCodesAndJson:
         repo = self._healthy_repo(tmp_path)
         subprocess.run(['git', 'commit', '--allow-empty', '-m', 'local'], cwd=repo, capture_output=True)
         registry = self._registry(tmp_path, [{'name': 'api', 'path': str(repo)}])
-        assert self._run(registry, monkeypatch, tmp_path).exit_code == 0
+        assert self._run(registry, monkeypatch, tmp_path, 'check').exit_code == 0
 
     def test_json_is_parseable_and_carries_the_failure_reason(self, tmp_path, monkeypatch):
         repo = self._healthy_repo(tmp_path)
         shutil.rmtree(tmp_path / 'api.git')
         registry = self._registry(tmp_path, [{'name': 'api', 'path': str(repo)}])
-        result = self._run(registry, monkeypatch, tmp_path, '--json')
+        result = self._run(registry, monkeypatch, tmp_path, 'check', '--json')
         payload = json.loads(result.stdout)  # nothing else may be on stdout
         assert payload['summary']['failed'] == 1
         assert payload['repos'][0]['status'] == 'unverified'
@@ -141,7 +165,7 @@ class TestCloneFailureReachesTheScreen:
         monkeypatch.setattr('syncer.main.notify', lambda *_: None)
         monkeypatch.setattr('syncer.config.TOOL_CONFIG_PATH', tmp_path / 'absent.toml')
         monkeypatch.setattr('syncer.tracking.STATE_DIR', tmp_path / 'state')
-        return runner.invoke(app, ['--apply', '-c', str(registry)])
+        return runner.invoke(app, ['check', '--apply', '-c', str(registry)])
 
     def test_the_url_and_gits_reason_are_both_printed(self, tmp_path, monkeypatch):
         bad_url = str(tmp_path / 'no-such-repo.git')
