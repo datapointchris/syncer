@@ -12,6 +12,7 @@ from typing import NamedTuple
 from pydantic import BaseModel
 from pydantic import ValidationError
 from pydantic import field_validator
+from pydantic import model_validator
 
 from syncer.output import error
 from syncer.output import hint
@@ -225,6 +226,24 @@ class SyncerConfig(BaseModel):
         except (KeyError, IndexError) as exc:
             raise ValueError(f'url_template {template!r} has an unknown placeholder: {exc}') from exc
         return template
+
+    @model_validator(mode='after')
+    def validate_resolved_url_is_well_formed(self) -> SyncerConfig:
+        """Catch a doubled scheme, which the default `host` makes an easy mistake.
+
+        `host` ships as 'https://github.com' — scheme included — so writing the obvious-looking
+        template 'https://{host}/{owner}/{name}' yields 'https://https://github.com/...'. git
+        then reports `Could not resolve host: https`, which names neither setting responsible.
+        Structural, so it belongs here rather than in a check that has to reach the network.
+        """
+        if self.url_template is None:
+            return self
+        sample = self.url_template.format(host=self.host, owner=self.owner or 'owner', name='name')
+        if sample.count('://') > 1:
+            raise ValueError(
+                f'url_template and host both supply a scheme, giving {sample!r} — drop the scheme from one of them (host is {self.host!r})'
+            )
+        return self
 
 
 class ToolConfig(BaseModel):

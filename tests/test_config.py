@@ -168,6 +168,19 @@ class TestResolveCloneUrl:
         with pytest.raises(ValueError, match='unknown placeholder'):
             self._config(url_template='git@{host}:{project}/{name}.git')
 
+    def test_a_doubled_scheme_is_rejected(self):
+        """`host` ships as 'https://github.com', scheme included, so the obvious-looking
+        template doubles it — and git then reports `Could not resolve host: https`, naming
+        neither setting responsible."""
+        with pytest.raises(ValueError, match='both supply a scheme'):
+            self._config(host='https://git.corp', url_template='https://{host}/{owner}/{name}.git')
+
+    def test_a_single_scheme_from_the_template_is_fine(self):
+        """The legitimate version of the same shape: a bare host, scheme in the template."""
+        config = self._config(owner='p', host='git.corp', url_template='https://{host}/{owner}/{name}.git')
+        repo = RepoConfig(name='api', path='~/code/api')
+        assert resolve_clone_url(repo, config) == 'https://git.corp/p/api.git'
+
 
 class TestResolvePolicies:
     def test_builtins_available_with_no_user_policies(self):
