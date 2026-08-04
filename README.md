@@ -61,7 +61,7 @@ The default `syncer` run and `syncer branches` share the same policy engine and 
 
 Two files, deliberately split. `syncer config path` prints where both resolve to.
 
-**`~/.config/syncer/config.toml`** — machine-local tool config: which registry to read, the default policy, custom policies, per-repo overrides, and the git timeout. `syncer config example` prints a fully annotated one showing every option.
+**`~/.config/syncer/config.toml`** — machine-local tool config: which registry to read, the default policy, custom policies, per-repo overrides, and the git timeout. `syncer config example` prints a fully annotated one showing every option. The scaffolded file carries a worked example policy named `laptop` — yours to edit or delete, not a built-in, however much `syncer policy list` makes it look like one on a fresh machine.
 
 ```toml
 # repos_file = "~/shared/repos.json"  # defaults to ~/.config/syncer/repos.json
