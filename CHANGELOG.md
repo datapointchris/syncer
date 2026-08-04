@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v9.0.1 (2026-08-04)
+
+### Bug Fixes
+
+- Report the update in the verb that ran it
+  ([`22e7eda`](https://github.com/datapointchris/syncer/commit/22e7edade5cb45a68bea14d1818ac8f43fde7c62))
+
+pyselfupdate 0.2.2 says "updated" and "update failed" where it used to say "upgraded" and "upgrade
+  failed". The command is `update`; one command, one vocabulary.
+
+
 ## v9.0.0 (2026-08-04)
 
 ### Chores
