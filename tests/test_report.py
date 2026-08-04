@@ -13,13 +13,16 @@ from syncer.policy import BranchState
 from syncer.policy import Policy
 from syncer.policy import PrimaryState
 from syncer.report import BranchRow
+from syncer.report import RepoBranchReport
 from syncer.report import Severity
 from syncer.report import _branch_line
 from syncer.report import _build_repo_report
 from syncer.report import _row_severity
 from syncer.report import gather_reports
+from syncer.report import render_failure_summary
 from syncer.report import report_branches
 from syncer.report import report_severity
+from syncer.repos import GitFailure
 
 
 def _build(repo_config, config, *, cli_policy=None, apply=False, include_lifecycle=True):
@@ -166,6 +169,52 @@ class TestUnverifiableRepoIsNotSynced:
         (Path(config.repos[0].path) / 'dirty.txt').write_text('x\n')
         report = _build(config.repos[0], config, cli_policy='observe')
         assert report.uncommitted == 1
+
+
+class TestFailureSummary:
+    """hint() existed from the start and was used only by the config commands, so nothing on the
+    sync surface ever told you what to *do* about a failure."""
+
+    def _report(self, name, url, stderr):
+        return RepoBranchReport(
+            label=name,
+            path=f'~/{name}',
+            name=name,
+            expected_url=url,
+            lifecycle='clone_failed',
+            failures=[GitFailure(argv=('clone',), returncode=128, stderr=stderr)],
+        )
+
+    def test_one_cause_across_many_repos_prints_one_block(self, capsys):
+        stderr = 'ssh: connect to host git.corp port 22: Network is unreachable'
+        reports = [self._report(f'repo{i}', 'git@git.corp:p/r.git', stderr) for i in range(4)]
+        render_failure_summary(reports)
+        out = capsys.readouterr().err
+        assert out.count('Network is unreachable') == 1
+        assert 'repo0, repo1, repo2, repo3' in out
+
+    def test_the_hint_names_the_real_host_not_a_vendor(self, capsys):
+        stderr = 'git@bitbucket.corp: Permission denied (publickey).'
+        render_failure_summary([self._report('api', 'git@bitbucket.corp:p/api.git', stderr)])
+        out = capsys.readouterr().err
+        assert 'bitbucket.corp' in out
+        assert 'gh auth login' not in out
+
+    def test_an_unrecognised_failure_gets_no_invented_cause(self, capsys):
+        render_failure_summary([self._report('api', 'https://git.corp/p/api.git', 'error: novel thing')])
+        out = capsys.readouterr().err
+        assert 'error: novel thing' in out  # raw output always survives
+        assert '→' not in out  # ...but nothing is claimed about why
+
+    def test_a_clean_run_prints_nothing(self, capsys):
+        render_failure_summary([RepoBranchReport(label='a', path='~/a', name='a')])
+        assert capsys.readouterr().err == ''
+
+    def test_it_goes_to_stderr_so_it_never_corrupts_piped_output(self, capsys):
+        render_failure_summary([self._report('api', 'git@h.corp:p/api.git', 'Host key verification failed.')])
+        captured = capsys.readouterr()
+        assert 'Host key' in captured.err
+        assert captured.out == ''
 
 
 class TestReportOrdering:

@@ -22,6 +22,7 @@ from syncer.report import DEFAULT_JOBS
 from syncer.report import RepoBranchReport
 from syncer.report import Severity
 from syncer.report import gather_reports
+from syncer.report import render_failure_summary
 from syncer.report import render_report
 from syncer.report import report_severity
 from syncer.repos import ICON_DOWNLOAD
@@ -166,6 +167,7 @@ def run_sync(
     # Reports are sorted synced → errors, so the repos needing attention land nearest the prompt.
     for report in reports:
         render_report(report, apply)
+    render_failure_summary(reports)
 
     summary.duration_ms = int((time.monotonic() - start) * 1000)
     event = SyncRunEvent(

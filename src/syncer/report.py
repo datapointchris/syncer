@@ -38,9 +38,14 @@ from syncer.config import ToolConfig
 from syncer.config import resolve_clone_url
 from syncer.config import resolve_policies
 from syncer.config import resolve_policy_name
+from syncer.diagnose import FailureGroup
+from syncer.diagnose import group_failures
 from syncer.execute import Outcome
 from syncer.execute import execute
 from syncer.execute import protection_refusal
+from syncer.output import err_console
+from syncer.output import error
+from syncer.output import hint
 from syncer.policy import Action
 from syncer.policy import BranchState
 from syncer.policy import Policy
@@ -267,6 +272,7 @@ def _failed_report(repo: Repo, label: str, repo_config: RepoConfig, error: str, 
         error=error,
         error_detail=detail,
         failures=list(repo.failures),
+        expected_url=repo.url,
         uncommitted=len(repo.uncommitted_changes),
         stashes=repo.stash_count,
     )
@@ -306,7 +312,17 @@ def _build_repo_report(
     )
 
     def lifecycle(status: str, detail: str | None = None) -> RepoBranchReport:
-        return RepoBranchReport(label=label, path=repo_config.path, name=repo_config.name, lifecycle=status, lifecycle_detail=detail)
+        # Carries the url and any recorded failures so a clone rejection can be grouped by cause
+        # with everything else that failed this run, rather than only existing as detail text.
+        return RepoBranchReport(
+            label=label,
+            path=repo_config.path,
+            name=repo_config.name,
+            lifecycle=status,
+            lifecycle_detail=detail,
+            failures=list(repo.failures),
+            expected_url=repo.url,
+        )
 
     if not repo.exists:
         if not include_lifecycle:
@@ -401,6 +417,36 @@ def gather_reports(
     return reports
 
 
+def collect_failures(reports: list[RepoBranchReport]) -> list[FailureGroup]:
+    """Every git failure across the run, collapsed to one group per (cause, host)."""
+    return group_failures((report.label, report.expected_url, failure) for report in reports for failure in report.failures)
+
+
+def render_failure_summary(reports: list[RepoBranchReport]) -> None:
+    """One block per root cause, after the per-repo output.
+
+    The per-repo lines already carry each failure's stderr, but twenty repos behind one dead VPN
+    means twenty identical blobs and no statement of the single thing to fix. This says it once,
+    and it is the only place on the sync surface that tells you what to *do* — hint() existed
+    but was used exclusively by the config commands.
+    """
+    groups = collect_failures(reports)
+    if not groups:
+        return
+    err_console.print()
+    for group in groups:
+        error(f'{ICON_ERR}  {group.summary}')
+        hint(f'    {", ".join(group.repos)}')
+        for line in group.stderr.splitlines():
+            # Every word kept — the cause is a summary and summaries lose things — but blank
+            # lines dropped, since git's footer leaves a gap in the middle of the block.
+            if line.strip():
+                hint(f'    {escape(line)}')
+        for line in group.hints:
+            hint(f'  → {line}')
+        err_console.print()
+
+
 def render_report(report: RepoBranchReport, apply: bool) -> None:
     if report.lifecycle:
         icon, color, message, _ = LIFECYCLE_STYLE[report.lifecycle]
@@ -447,3 +493,4 @@ def report_branches(
     console.print()
     for report in reports:
         render_report(report, apply)
+    render_failure_summary(reports)
