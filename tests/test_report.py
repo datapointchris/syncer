@@ -84,6 +84,22 @@ class TestBuildRepoReport:
         assert report is not None
         assert report.lifecycle == 'would_clone'
 
+    def test_clone_failure_carries_the_url_and_gits_error(self, tmp_path):
+        """The work-box report: every repo said 'clone failed' and nothing else, so auth, a bad
+        url_template and a dead network were one indistinguishable line."""
+        config = SyncerConfig(
+            owner='demo',
+            host='https://github.com',
+            search_paths=[],
+            repos=[RepoConfig(name='ghost', path=str(tmp_path / 'ghost'), clone_url=str(tmp_path / 'no-such-repo.git'))],
+        )
+        report = _build(config.repos[0], config, apply=True)
+        assert report is not None
+        assert report.lifecycle == 'clone_failed'
+        assert report.lifecycle_detail
+        assert str(tmp_path / 'no-such-repo.git') in report.lifecycle_detail
+        assert len(report.lifecycle_detail.splitlines()) > 1  # the URL, then git's own words
+
     def test_apply_attaches_outcomes(self, tmp_path):
         repo_path = _make_cloned_repo(tmp_path, 'beta')
         _git(repo_path, 'commit', '--allow-empty', '-m', 'unpushed')

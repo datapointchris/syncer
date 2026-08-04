@@ -330,6 +330,41 @@ class TestNonInteractiveExecution:
             assert repo.default_branch is None
 
 
+class TestClone:
+    """A failed clone must carry git's own words. Auth, an unknown host key, DNS, a bad
+    url_template and a timeout are otherwise one indistinguishable 'clone failed' line, and
+    capture_output means git's message never reaches the terminal by itself."""
+
+    def test_a_successful_clone_reports_no_error(self, tmp_path, git_repo):
+        repo = _make_repo(tmp_path / 'dest', url=str(git_repo))
+        ok, err = repo.clone()
+        assert ok is True
+        assert err == ''
+        assert (tmp_path / 'dest' / '.git').is_dir()
+
+    def test_a_failed_clone_returns_gits_stderr(self, tmp_path):
+        repo = _make_repo(tmp_path / 'dest', url=str(tmp_path / 'no-such-repo.git'))
+        ok, err = repo.clone()
+        assert ok is False
+        assert err  # the actual reason, not a bare False
+
+    def test_a_clone_timeout_returns_its_reason(self, tmp_path):
+        repo = _make_repo(tmp_path / 'dest', url='https://example.invalid/x.git', timeout=1)
+        with patch('syncer.repos.subprocess.run', side_effect=subprocess.TimeoutExpired(cmd='git', timeout=5)):
+            ok, err = repo.clone()
+        assert ok is False
+        assert 'timed out' in err
+
+    def test_clone_scales_its_timeout_from_the_configured_one(self, tmp_path):
+        """config.toml and the README both promise clones get 5x git_timeout; before this the
+        clone used a hard-coded 600s and ignored the setting entirely."""
+        repo = _make_repo(tmp_path / 'dest', url='https://example.invalid/x.git', timeout=30)
+        with patch('syncer.repos.run_command') as run:
+            run.return_value = subprocess.CompletedProcess([], returncode=0, stdout='', stderr='')
+            repo.clone()
+        assert run.call_args.kwargs['timeout'] == 150
+
+
 class TestContainsBranch:
     """Integration has two proofs: ancestry, and patch equivalence for squash/cherry-pick
     integration, which rewrites commits so ancestry can never see them."""

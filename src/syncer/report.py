@@ -27,6 +27,8 @@ from enum import IntEnum
 from functools import partial
 from pathlib import Path
 
+from rich.markup import escape
+
 from syncer.classify import classify_repo
 from syncer.config import RepoConfig
 from syncer.config import SyncerConfig
@@ -284,7 +286,14 @@ def _build_repo_report(
         if found:
             return lifecycle('path_mismatch', f'found at {found} (update repos.json manually)')
         if apply:
-            return lifecycle('cloned' if repo.clone() else 'clone_failed', f'cloned to {path}' if repo.exists else None)
+            cloned, err = repo.clone()
+            if cloned:
+                return lifecycle('cloned', f'cloned to {path}')
+            # Name the URL as well as the error: a wrong url_template or an empty registry
+            # owner produces a URL that git rejects for reasons its message alone never
+            # explains ('repository not found' reads as a permissions problem).
+            detail = f'{repo.url}\n{err}' if err else f'{repo.url}\ngit clone failed with no output'
+            return lifecycle('clone_failed', detail)
         return lifecycle('would_clone')
     if not repo.is_git_repo:
         return lifecycle('not_git') if include_lifecycle else None
@@ -353,8 +362,12 @@ def render_report(report: RepoBranchReport, apply: bool) -> None:
     if report.lifecycle:
         icon, color, message, _ = LIFECYCLE_STYLE[report.lifecycle]
         console.print(f'[{color}]{icon}  {report.label} — {message}[/{color}]')
-        if report.lifecycle_detail:
-            console.print(f'    {report.lifecycle_detail}')
+        for line in report.lifecycle_detail.splitlines() if report.lifecycle_detail else []:
+            # escape(): the detail can carry raw git stderr, and Rich would swallow anything in
+            # square brackets as a style tag. soft_wrap: Rich's own wrapping breaks mid-URL and
+            # drops the indent on the continuation, and a URL you cannot copy is the half of the
+            # diagnosis that matters.
+            console.print(f'    {escape(line)}', soft_wrap=True)
         console.print()
         return
     if report.error:

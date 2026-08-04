@@ -83,3 +83,57 @@ class TestIssuesMasterCheck:
         result = self._run_issues(registry, monkeypatch, tmp_path)
         assert result.exit_code == 0
         assert 'All repos healthy' in result.stdout
+
+
+class TestCloneFailureReachesTheScreen:
+    """End to end through the real CLI, because every layer already held the reason and the
+    user still saw a bare 'clone failed': git's stderr was dropped in Repo.clone, the detail
+    slot was hard-coded to None at the call site, and nothing asserted the rendered output.
+    A unit test on any single layer would have passed throughout.
+
+    Deliberately a nonexistent local path, not an unreachable host — no DNS, no network, and
+    the same code path.
+    """
+
+    def _run(self, tmp_path, monkeypatch, clone_url):
+        registry = tmp_path / 'work-repos.json'
+        registry.write_text(
+            json.dumps(
+                {
+                    'owner': 'someone',
+                    'host': 'https://github.com',
+                    'search_paths': [],
+                    'repos': [{'name': 'ghost', 'path': str(tmp_path / 'ghost'), 'clone_url': clone_url}],
+                }
+            )
+        )
+        monkeypatch.setattr('syncer.main.notify', lambda *_: None)
+        monkeypatch.setattr('syncer.config.TOOL_CONFIG_PATH', tmp_path / 'absent.toml')
+        monkeypatch.setattr('syncer.tracking.STATE_DIR', tmp_path / 'state')
+        return runner.invoke(app, ['--apply', '-c', str(registry)])
+
+    def test_the_url_and_gits_reason_are_both_printed(self, tmp_path, monkeypatch):
+        bad_url = str(tmp_path / 'no-such-repo.git')
+        result = self._run(tmp_path, monkeypatch, bad_url)
+        assert 'clone failed' in result.stdout
+        # The URL, because a wrong url_template or an empty registry owner is a likely cause
+        # and git's message alone never names the setting that produced it. Contiguous in the
+        # output is part of the assertion: Rich hard-wraps at 80 columns without soft_wrap,
+        # which would break the URL mid-path and defeat a copy-paste.
+        assert bad_url in result.stdout
+        # git's own words, not our summary of them.
+        assert 'fatal:' in result.stdout
+
+    def test_a_successful_clone_says_where_it_landed(self, tmp_path, monkeypatch):
+        source = tmp_path / 'source'
+        subprocess.run(['git', 'init', str(source)], capture_output=True)
+        subprocess.run(['git', 'config', 'user.email', 'test@test.com'], cwd=source, capture_output=True)
+        subprocess.run(['git', 'config', 'user.name', 'Test'], cwd=source, capture_output=True)
+        (source / 'README.md').write_text('# src\n')
+        subprocess.run(['git', 'add', '.'], cwd=source, capture_output=True)
+        subprocess.run(['git', 'commit', '-m', 'init'], cwd=source, capture_output=True)
+
+        result = self._run(tmp_path, monkeypatch, str(source))
+        assert 'cloned' in result.stdout
+        assert 'clone failed' not in result.stdout
+        assert (tmp_path / 'ghost' / '.git').is_dir()

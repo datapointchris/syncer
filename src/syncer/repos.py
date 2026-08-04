@@ -12,8 +12,10 @@ console = Console(highlight=False)
 # Ceiling on a single git invocation. Generous enough for a fetch over a VPN; the point is that
 # a wedged call eventually reports instead of holding a worker thread forever.
 GIT_TIMEOUT_SECONDS = 120
-# Cloning a large repo legitimately takes minutes, and it happens once per repo.
-CLONE_TIMEOUT_SECONDS = 600
+# Cloning a large repo legitimately takes minutes, and it happens once per repo. A multiple of
+# the configured timeout rather than a constant, so raising git_timeout for a slow network
+# raises the clone ceiling too — which is what config.toml and the README always claimed.
+CLONE_TIMEOUT_MULTIPLIER = 5
 # Exit code for a timeout, matching the shell's convention for a command killed by `timeout`.
 TIMEOUT_RETURNCODE = 124
 
@@ -396,10 +398,18 @@ class Repo:
         )
         return result.returncode == 0 and result.stdout.strip() == 'true'
 
-    def clone(self) -> bool:
+    def clone(self) -> tuple[bool, str]:
+        """Clone into the registry path. Returns (ok, stderr), like every other mutator.
+
+        Returning the stderr is what makes a failed clone diagnosable at all: auth, an unknown
+        host key, DNS, a bad url_template and a timeout are otherwise indistinguishable, and
+        capture_output means git's own message never reaches the terminal either.
+        """
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        result = run_command(['git', 'clone', self.url, str(self.path)], timeout=CLONE_TIMEOUT_SECONDS)
-        return result.returncode == 0
+        # --quiet, as fetch does: git writes progress to stderr even when it succeeds, and
+        # without it the returned text is chatter on success and chatter-plus-error on failure.
+        result = run_command(['git', 'clone', '--quiet', self.url, str(self.path)], timeout=self.timeout * CLONE_TIMEOUT_MULTIPLIER)
+        return result.returncode == 0, result.stderr.strip()
 
 
 def find_repo_in_search_paths(name: str, search_paths: list[Path], claimed_paths: set[Path] | None = None) -> Path | None:
