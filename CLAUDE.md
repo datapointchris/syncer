@@ -1,7 +1,7 @@
 # syncer
 
 A CLI that checks whether local git repos are synced before you switch machines, and
-optionally performs the safe sync actions. Report-only by default; `--apply` mutates.
+optionally performs the safe sync actions. `check` reports and never writes; `apply` mutates.
 
 This file covers the architecture and the conventions specific to this repo. Universal
 rules (commits, git safety, Python style) live in `~/.claude/CLAUDE.md` — not restated here.
@@ -54,25 +54,25 @@ modifiers are **execute-time gates, never decision inputs** — `decide()` is in
 (asserted in `TestDecideModifierInvariance`). `protected` is the same kind of gate and is likewise
 invisible to `decide()`. Because it is *static config* rather than live repo state, though,
 `protection_refusal()` is shared with the reporter so a report-only run marks the actions that
-would be refused — rendering the decided `push` alone would promise a push `--apply` never makes.
+would be refused — rendering the decided `push` alone would promise a push `apply` never makes.
 
 ## Two surfaces, one core
 
-`run_sync` (`sync.py`, `syncer check`) and `report_branches` (`report.py`, `syncer
-branches`) share `gather_reports` + `render_report`. The difference is a single
-`include_lifecycle` flag:
+`run_sync` (`sync.py`) and `report_branches` (`report.py`, `--per-branch`) share
+`gather_reports` + `render_report`. The difference is a single `include_lifecycle` flag,
+which is why the CLI exposes it as an option on both verbs rather than a fourth command:
 
-- **default run** (`include_lifecycle=True`): also clones missing repos under `--apply`, flags
+- **default run** (`include_lifecycle=True`): also clones missing repos under `apply`, flags
   moved/not-git/no-remote repos, emits a run event, prints a summary line, and warns about repos
   left dirty for days.
-- **`branches`** (`include_lifecycle=False`): pure per-branch view, skips non-git repos, no events.
+- **`--per-branch`** (`include_lifecycle=False`): pure per-branch view, skips non-git repos, no events.
 
 There is no second sync path — the old default-branch `sync_repos` loop was deleted, not kept
 alongside. If you're tempted to special-case the default run, add it behind `include_lifecycle`.
 
 ## Safety invariants (execute.py)
 
-`--apply` is safe by construction. `execute()` re-verifies **every** precondition live,
+`apply` is safe by construction. `execute()` re-verifies **every** precondition live,
 immediately before each write — it never trusts the (possibly stale) `BranchState` from classify
 time — and refuses rather than forces. Guaranteed independent of any policy:
 
@@ -261,7 +261,7 @@ one line and survives a copy-paste.
 
 `policy show` renders a **computed** decision matrix: every `PrimaryState` × three synthetic
 `BranchState`s (default / current / neither), each cell produced by calling `decide()`. That is
-only possible because `decide()` is pure, and it means the table cannot drift from what `--apply`
+only possible because `decide()` is pure, and it means the table cannot drift from what `apply`
 does. Never replace it with a written-down table, and iterate the enums rather than listing their
 members — `test_policy_cmd.py` asserts the matrix agrees with `decide()` cell for cell.
 
@@ -287,20 +287,20 @@ a missing credential from a mis-pointed registry from a host that was never reac
   `your-github-username` names the wrong problem.
 - **`PROBE_TIMEOUT_SECONDS` is not `git_timeout`.** The latter is sized for fetching a monorepo
   over a VPN; a diagnostic that hangs two minutes per host is one nobody waits for.
-- **Exit 1 on FAIL, 0 on WARN**, so `syncer doctor && syncer check --apply` stops on a box that was
+- **Exit 1 on FAIL, 0 on WARN**, so `syncer doctor && syncer apply` stops on a box that was
   never going to work but not on one whose repos simply are not cloned yet.
 - It **never writes anything**, unlike `config edit`, which seeds a template.
 
 ## Exit codes and `--json`
 
 **One rule, stated once in `exit_code_for` (`report.py`): exit 1 iff any report reaches
-`Severity.ERROR`.** Report-only and `--apply` share it; they differ only in which severities they
+`Severity.ERROR`.** `check` and `apply` share it; they differ only in which severities they
 can produce. WARNING stays 0 on purpose — a repo that is `ahead` is the normal state of a machine
 somebody works on, and a code that is non-zero every day is one nobody can automate against.
 `issues` exits 1 when it found any, because printing "N issue(s) found" and exiting 0 is the
 exact shape of a check whose caller has to scrape text for what the exit code should have said.
 
-`--json` (default run, `branches`, both to **stdout**, everything else on stderr) reuses the
+`--json` (both verbs, either view, all to **stdout**, everything else on stderr) reuses the
 existing `RepoSnapshot`/`RunSummary` models rather than building a parallel shape, which is what
 guarantees the JSON and the event stream agree about a run by construction. There is no
 console-mode abstraction: an `as_json` flag skips the renderers, and that is all.

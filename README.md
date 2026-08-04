@@ -2,7 +2,7 @@
 
 Check if local git repos are fully synced before switching machines.
 
-Syncer fetches every configured repo concurrently, classifies each branch (ahead/behind/gone/…), and shows what a per-machine [sync policy](#sync-policies) would do. It's **report-only by default**; `syncer check --apply` executes the safe actions (fast-forward, push, clone, prune). Output is ordered so anything needing attention lands at the bottom, nearest the prompt.
+Syncer fetches every configured repo concurrently, classifies each branch (ahead/behind/gone/…), and shows what a per-machine [sync policy](#sync-policies) would do. `syncer check` reports and never writes; `syncer apply` executes the safe actions (fast-forward, push, clone, prune). Output is ordered so anything needing attention lands at the bottom, nearest the prompt.
 
 ## Installing
 
@@ -31,8 +31,8 @@ syncer config init                     # minimal config + empty registry, at the
 syncer config scan ~/code ~/tools      # build registry entries from the repos already on disk
 syncer config edit registry            # or name them by hand
 syncer doctor                          # can this machine actually run syncer? names what is wrong
-syncer check                           # report-only
-syncer check --apply                   # execute the safe actions
+syncer check                           # report only, never writes
+syncer apply                           # execute the safe actions
 ```
 
 `config init` writes a **minimal** starter — nothing in either file needs deleting. The fully annotated versions, with every option exercised, are reference material: `syncer config example config` and `syncer config example registry`.
@@ -43,24 +43,23 @@ syncer check --apply                   # execute the safe actions
 and registry paths *and what chose each of them*, whether the remotes can actually be reached
 (with git's own error and what to do about it), and how many repos are cloned — in prerequisite
 order, so the first failure is the one to act on. It exits 1 on a real problem, so
-`syncer doctor && syncer check --apply` stops on a box that was never going to work.
+`syncer doctor && syncer apply` stops on a box that was never going to work.
 
 `config init` creates whichever of the two files is missing and **never rewrites one that exists** — the registry is shared infrastructure that `forge` and `indy` also read, so syncer scaffolds one that is absent and modifies no existing one. `syncer config init registry` does just that file; `syncer config path` says where both landed.
 
 ## Usage
 
 ```bash
-syncer check             # report-only: classify every repo/branch, show what would happen
-syncer check --apply     # execute each policy's safe actions (pull/push/ff/clone)
-syncer check --dry-run   # force report-only, even with --apply
-syncer check --json      # emit the run as JSON on stdout instead of a report
-syncer check -p observe  # override the resolved policy for this run
-syncer check -j 8        # limit concurrency to 8 repos at a time (default 16)
+syncer check              # classify every repo/branch and show what would happen; never writes
+syncer apply              # execute each policy's safe actions (pull/push/ff/clone)
+syncer check --per-branch # per-branch view: no lifecycle, cloning, or run history
+syncer check --json       # emit the run as JSON on stdout instead of a report
+syncer apply -p observe   # override the resolved policy for this run
+syncer apply -j 8         # limit concurrency to 8 repos at a time (default 16)
 syncer check -c work.json # use a different registry; replaces the default set entirely
 syncer doctor            # can this machine run syncer? git, paths, reachability, clones
 syncer issues            # report path mismatches, missing/untracked repos, master branches
-syncer branches          # per-branch report only (no lifecycle/clone, no event tracking)
-syncer branches --apply  # execute the decided action per branch
+syncer apply --per-branch # execute the decided action per branch
 syncer stats             # run history and repo insights (commits, age, dirty, stale)
 syncer config            # inspect, edit, scan, and validate the config and registry
 syncer policy            # list policies and show what each one decides
@@ -68,7 +67,7 @@ syncer demo              # run against temp repos to show each status state
 syncer version           # print installed version
 ```
 
-The default `syncer` run and `syncer branches` share the same policy engine and concurrency; the difference is that the default run also handles repo lifecycle (clone missing repos, flag moved/untracked/no-remote repos), records a run in the history (`syncer stats`), and warns about repos left dirty for days.
+The repo-level view and `--per-branch` share the same policy engine and concurrency; the difference is that the repo-level one also handles repo lifecycle (clone missing repos, flag moved/untracked/no-remote repos), records a run in the history (`syncer stats`), and warns about repos left dirty for days.
 
 ### Exit codes
 
@@ -80,7 +79,7 @@ The default `syncer` run and `syncer branches` share the same policy engine and 
 
 **A repo that is `ahead` exits 0.** That is the normal state of a machine somebody works on, and an exit code that is non-zero every day is one nobody can automate against. `1` means something is genuinely wrong: a clone that failed, a repo whose state could not be verified, an action that was refused at write time.
 
-`syncer check --json` and `syncer branches --json` write the whole run to **stdout** as JSON with nothing else mixed in — the report, the per-repo detail, and the grouped failure causes with git's own stderr. The sync JSON is built from the same snapshots the event stream records, so it cannot disagree with `syncer stats` about what happened.
+`--json` on either verb writes the whole run to **stdout** as JSON with nothing else mixed in — the report, the per-repo detail, and the grouped failure causes with git's own stderr. The sync JSON is built from the same snapshots the event stream records, so it cannot disagree with `syncer stats` about what happened.
 
 ## Config
 
@@ -139,7 +138,7 @@ Run history goes to `$XDG_STATE_HOME/syncer/<registry>-events.jsonl` — state r
 
 ## Sync policies
 
-Both `syncer` and `syncer branches` classify every branch (per-branch `ahead`/`behind`/`gone`/`no_upstream`/…, computed after `fetch --prune` and repointing `origin/HEAD`) and report the action a policy *would* take; `--apply` executes those actions. Policies are **machine-local** and live in `config.toml`, so the same repo can sync aggressively on an always-on box and report-only on a laptop.
+Both views classify every branch (per-branch `ahead`/`behind`/`gone`/`no_upstream`/…, computed after `fetch --prune` and repointing `origin/HEAD`) and report the action a policy *would* take; `syncer apply` executes those actions. Policies are **machine-local** and live in `config.toml`, so the same repo can sync aggressively on an always-on box and report-only on a laptop.
 
 `--apply` is safe by construction: it enforces hard invariants no policy can override — never `--force`, never mutate a dirty working tree, fast-forward only under strict ancestry, `rebase_push` aborts cleanly on conflict, and any precondition that fails at write time is refused (never forced) rather than mutated.
 

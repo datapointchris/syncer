@@ -13,7 +13,8 @@ runner = CliRunner()
 class TestBareInvocation:
     """The run used to hang off the root callback, so `syncer` scanned every repo and
     `syncer --apply` mutated them — a write one flag away from the bare invocation. It is
-    `syncer check` now, and bare shows help. See cli-design.md, 'No args shows help'."""
+    `syncer check` / `syncer apply` now, and bare shows help. See cli-design.md, 'No args
+    shows help'."""
 
     def test_bare_invocation_shows_help(self, monkeypatch):
         monkeypatch.setattr('syncer.main.notify', lambda *_: None)
@@ -21,16 +22,32 @@ class TestBareInvocation:
         assert 'Usage:' in result.output
         assert 'check' in result.output
 
-    @pytest.mark.parametrize('flag', ['--apply', '--dry-run', '--policy=standard', '--jobs=2', '--repos-file=x.json', '--json'])
+    @pytest.mark.parametrize('flag', ['--policy=standard', '--jobs=2', '--repos-file=x.json', '--json', '--per-branch'])
     def test_action_flags_are_rejected_at_the_root(self, flag, monkeypatch):
         """Flags on the root callback are the tell that a default is really a command."""
         monkeypatch.setattr('syncer.main.notify', lambda *_: None)
         assert runner.invoke(app, [flag]).exit_code != 0
 
-    @pytest.mark.parametrize('flag', ['--apply', '--dry-run', '--policy=standard', '--jobs=2', '--json'])
-    def test_check_accepts_them_instead(self, flag, monkeypatch):
+    @pytest.mark.parametrize('verb', ['check', 'apply'])
+    @pytest.mark.parametrize('flag', ['--policy=standard', '--jobs=2', '--json', '--per-branch'])
+    def test_both_verbs_accept_them_instead(self, verb, flag, monkeypatch):
         monkeypatch.setattr('syncer.main.notify', lambda *_: None)
-        assert 'No such option' not in runner.invoke(app, ['check', flag, '--help']).output
+        assert 'No such option' not in runner.invoke(app, [verb, flag, '--help']).output
+
+
+class TestWritingIsAVerbNotAFlag:
+    """`check --apply` put the write inside the read, and `--dry-run` existed only to cancel
+    it — a flag whose whole job is undoing another flag. `check` is now the dry run."""
+
+    @pytest.mark.parametrize('verb', ['check', 'apply'])
+    @pytest.mark.parametrize('flag', ['--apply', '--dry-run'])
+    def test_the_old_flags_are_gone(self, verb, flag, monkeypatch):
+        monkeypatch.setattr('syncer.main.notify', lambda *_: None)
+        assert runner.invoke(app, [verb, flag]).exit_code != 0
+
+    def test_branches_is_no_longer_a_command(self, monkeypatch):
+        monkeypatch.setattr('syncer.main.notify', lambda *_: None)
+        assert runner.invoke(app, ['branches']).exit_code != 0
 
 
 class TestIssuesMasterCheck:
@@ -134,7 +151,7 @@ class TestExitCodesAndJson:
     def test_branches_json_carries_per_branch_state(self, tmp_path, monkeypatch):
         repo = self._healthy_repo(tmp_path)
         registry = self._registry(tmp_path, [{'name': 'api', 'path': str(repo)}])
-        result = self._run(registry, monkeypatch, tmp_path, 'branches', '--json')
+        result = self._run(registry, monkeypatch, tmp_path, 'check', '--per-branch', '--json')
         payload = json.loads(result.stdout)
         assert payload['repos'][0]['branches'][0]['branch'] == 'main'
         assert payload['repos'][0]['branches'][0]['state'] == 'synced'
@@ -165,7 +182,7 @@ class TestCloneFailureReachesTheScreen:
         monkeypatch.setattr('syncer.main.notify', lambda *_: None)
         monkeypatch.setattr('syncer.config.TOOL_CONFIG_PATH', tmp_path / 'absent.toml')
         monkeypatch.setattr('syncer.tracking.STATE_DIR', tmp_path / 'state')
-        return runner.invoke(app, ['check', '--apply', '-c', str(registry)])
+        return runner.invoke(app, ['apply', '-c', str(registry)])
 
     def test_the_url_and_gits_reason_are_both_printed(self, tmp_path, monkeypatch):
         bad_url = str(tmp_path / 'no-such-repo.git')

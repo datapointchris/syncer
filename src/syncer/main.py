@@ -49,10 +49,10 @@ UPDATE_CONFIG = Config(tool='syncer', owner='datapointchris')
 
 _EPILOG = (
     '[bold]Examples[/bold]\n\n'
-    '[cyan]syncer check[/cyan] — report every repo across all branches (read-only)\n\n'
-    "[cyan]syncer check --apply[/cyan] — pull, push, fast-forward, and clone what's safe\n\n"
-    '[cyan]syncer check -p mirror --apply[/cyan] — run the aggressive mirror policy this once\n\n'
-    '[cyan]syncer branches[/cyan] — quick per-branch view, no lifecycle or history\n\n'
+    '[cyan]syncer check[/cyan] — report every repo across all branches; never writes\n\n'
+    "[cyan]syncer apply[/cyan] — pull, push, fast-forward, and clone what's safe\n\n"
+    '[cyan]syncer apply -p mirror[/cyan] — run the aggressive mirror policy this once\n\n'
+    '[cyan]syncer check --per-branch[/cyan] — quick per-branch view, no lifecycle or history\n\n'
     '[cyan]syncer issues[/cyan] — find moved, missing, or untracked repos\n\n'
     '[cyan]syncer config init[/cyan] — start from scratch on a new machine'
 )
@@ -81,8 +81,9 @@ def main(
 ) -> None:
     """Check whether local git repos are synced, across every branch.
 
-    [bold]syncer check[/bold] reports the state of every repo (read-only); add
-    [bold]--apply[/bold] to execute each policy's safe actions.
+    Two verbs over the same run: [bold]check[/bold] reports what each policy would do and never
+    writes, [bold]apply[/bold] executes it. Both take [bold]--per-branch[/bold] to swap the
+    repo-level view for a per-branch one.
     """
     # Never raises and never prints an error; the notice is deferred to exit so
     # it lands after the command's own output. `syncer update` is the only place
@@ -92,66 +93,71 @@ def main(
         notify(UPDATE_CONFIG)
 
 
+PerBranch = Annotated[bool, typer.Option('--per-branch', help='Per-branch view: no lifecycle, cloning, or run history')]
+Policy = Annotated[str | None, typer.Option('--policy', '-p', help='Override the resolved policy for every repo')]
+Jobs = Annotated[int, typer.Option('--jobs', '-j', help='Max repos to process concurrently')]
+ReposFile = Annotated[
+    Path | None, typer.Option('--repos-file', '-c', help='Use a different repo registry; replaces the default set entirely')
+]
+JsonOutput = Annotated[bool, typer.Option('--json', help='Emit the run as JSON on stdout instead of a report')]
+
+
+def _run(*, apply: bool, per_branch: bool, policy: str | None, jobs: int, repos_file: Path | None, as_json: bool) -> None:
+    """Both verbs are the same run; only whether it writes and how it is grouped differ."""
+    if per_branch:
+        reports = report_branches(
+            resolve_config(repos_file), load_tool_config(), cli_policy=policy, apply=apply, jobs=jobs, as_json=as_json
+        )
+    else:
+        syncer_config, repos_path = resolve_registry(repos_file)
+        reports = run_sync(
+            syncer_config,
+            load_tool_config(),
+            _events_file(repos_path, repos_file),
+            cli_policy=policy,
+            apply=apply,
+            jobs=jobs,
+            as_json=as_json,
+        )
+    raise typer.Exit(exit_code_for(reports))
+
+
 @app.command(rich_help_panel='Sync')
 def check(
-    apply: Annotated[
-        bool, typer.Option('--apply', help='Execute the decided actions (pull/push/ff/clone); default is report-only')
-    ] = False,
-    dry_run: Annotated[bool, typer.Option('--dry-run', '-n', help='Force report-only, even with --apply')] = False,
-    policy: Annotated[str | None, typer.Option('--policy', '-p', help='Override the resolved policy for every repo')] = None,
-    jobs: Annotated[int, typer.Option('--jobs', '-j', help='Max repos to process concurrently')] = DEFAULT_JOBS,
-    repos_file: Annotated[
-        Path | None,
-        typer.Option('--repos-file', '-c', help='Use a different repo registry; replaces the default set entirely'),
-    ] = None,
-    json_output: Annotated[bool, typer.Option('--json', help='Emit the run as JSON on stdout instead of a report')] = False,
+    per_branch: PerBranch = False,
+    policy: Policy = None,
+    jobs: Jobs = DEFAULT_JOBS,
+    repos_file: ReposFile = None,
+    json_output: JsonOutput = False,
 ) -> None:
-    """Report every repo across all branches, with lifecycle, cloning, and run history.
+    """Report what each policy would do to every repo. Never writes.
 
-    Read-only by default; --apply executes each policy's safe actions, enforcing the hard
-    safety invariants (never force, never touch a dirty tree, refuse rather than force).
     Repos are checked concurrently and shown least-to-most urgent, so anything needing
-    attention sits nearest the prompt.
+    attention sits nearest the prompt. --per-branch swaps the repo-level view (which also
+    clones missing repos under `apply`, and records run history) for a pure per-branch one.
 
     Exits 1 if any repo reached an error state, so it can gate a script.
     """
-    syncer_config, repos_path = resolve_registry(repos_file)
-    tool_config = load_tool_config()
-    reports = run_sync(
-        syncer_config,
-        tool_config,
-        _events_file(repos_path, repos_file),
-        cli_policy=policy,
-        apply=apply and not dry_run,
-        jobs=jobs,
-        as_json=json_output,
-    )
-    raise typer.Exit(exit_code_for(reports))
+    _run(apply=False, per_branch=per_branch, policy=policy, jobs=jobs, repos_file=repos_file, as_json=json_output)
 
 
 @app.command(rich_help_panel='Sync')
-def branches(
-    policy: Annotated[str | None, typer.Option('--policy', '-p', help='Override the resolved policy for every repo')] = None,
-    apply: Annotated[bool, typer.Option('--apply', help='Execute the decided action per branch (safe actions only)')] = False,
-    jobs: Annotated[int, typer.Option('--jobs', '-j', help='Max repos to process concurrently')] = DEFAULT_JOBS,
-    repos_file: Annotated[
-        Path | None,
-        typer.Option('--repos-file', '-c', help='Use a different repo registry; replaces the default set entirely'),
-    ] = None,
-    json_output: Annotated[bool, typer.Option('--json', help='Emit the report as JSON on stdout')] = False,
+def apply(
+    per_branch: PerBranch = False,
+    policy: Policy = None,
+    jobs: Jobs = DEFAULT_JOBS,
+    repos_file: ReposFile = None,
+    json_output: JsonOutput = False,
 ) -> None:
-    """Per-branch report only — like `syncer check` without lifecycle, cloning, or history.
+    """Execute each policy's safe actions: pull, push, fast-forward, clone, prune.
 
-    Classifies every local branch (ahead/behind/gone/no-upstream/…) and shows the action the
-    resolved policy would take. Read-only by default; --apply executes it, enforcing the hard
-    safety invariants (never force, never touch a dirty tree, refuse rather than force).
+    Enforces the hard safety invariants — never force, never touch a dirty tree or one whose
+    cleanliness cannot be verified, refuse rather than force. `syncer check` is this command's
+    dry run: same classification and the same decided actions, without the writes.
 
     Exits 1 if any repo reached an error state, so it can gate a script.
     """
-    syncer_config = resolve_config(repos_file)
-    tool_config = load_tool_config()
-    reports = report_branches(syncer_config, tool_config, cli_policy=policy, apply=apply, jobs=jobs, as_json=json_output)
-    raise typer.Exit(exit_code_for(reports))
+    _run(apply=True, per_branch=per_branch, policy=policy, jobs=jobs, repos_file=repos_file, as_json=json_output)
 
 
 @app.command(rich_help_panel='Inspect')
