@@ -22,6 +22,33 @@ therefore exhaustively testable without touching git:
 of primary-states × policies as a no-git truth table. Keep git and FS I/O out of `policy.py`
 — that boundary is load-bearing, not incidental.
 
+## A failed git call is never a state
+
+Every accessor on `Repo` used to convert a non-zero exit into a benign-looking value — `[]`
+branches, `(0, 0)` counts, a clean tree — and the results were indistinguishable from real
+answers. `(0, 0)` in particular is `SYNCED`, so a repo whose fetch died reported as fully in
+sync: the exact opposite of the one question this tool exists to answer, stated confidently.
+
+Three rules follow, and none of them is optional:
+
+- **`Repo._git` records.** A non-zero exit appends a `GitFailure` (argv, returncode, stderr) to
+  `repo.failures` unless the call passes `probe=True`. Recording is the default so a git call
+  added later is visible without anyone remembering to opt in — the same direction
+  `PROTECTED_ALLOWED` takes. `probe=True` is for the handful of calls that ask a yes/no question
+  (`merge-base --is-ancestor`, the `rev-parse --verify` probes, `git cherry`), where non-zero
+  *is* the answer; adding one anywhere else needs an argument, not a habit.
+- **An unmeasurable repo is an error, not a state.** `refresh_remote()` returns the fetch's
+  failure, and `_build_repo_report` returns a `_failed_report` **before** `build_branch_rows` —
+  which is also what refuses execution, since no `execute()` call is ever constructed. Such a
+  report carries **zero rows** on purpose: a row is a claim about a branch, and the whole point
+  is that no such claim can be made. There is deliberately no `PrimaryState.UNKNOWN` — every
+  policy's rule for it would be `report` forever, and a state name could never carry git's
+  stderr, which is the only thing that makes the failure actionable.
+- **Unknown resolves toward refusal.** `ahead_behind` returns `None` rather than `(0, 0)`;
+  `remotes()` returns `None` (cannot ask) distinctly from `[]` (none configured), because
+  reporting the first as `no remote` sends you to fix something that is fine. Every
+  `execute.py` guard treats "cannot verify" as "do not proceed".
+
 `decide()` depends only on the primary state plus the branch's role/name. The `dirty`/`stashed`
 modifiers are **execute-time gates, never decision inputs** — `decide()` is invariant to them
 (asserted in `TestDecideModifierInvariance`). `protected` is the same kind of gate and is likewise
@@ -50,7 +77,11 @@ immediately before each write — it never trusts the (possibly stale) `BranchSt
 time — and refuses rather than forces. Guaranteed independent of any policy:
 
 1. Never `--force`/`-f`/`--force-with-lease` (no such argv is ever constructed).
-2. Never mutate a branch whose working tree is dirty.
+2. Never mutate a branch whose working tree is dirty — **or whose cleanliness cannot be
+   verified**. Gates call `repo.is_dirty`, which answers `True` when `git status` itself fails.
+   The old `uncommitted_changes` returned `[]` on failure, so callers testing its truthiness
+   read a broken git as a clean tree, i.e. as permission to mutate. Anything that gates a write
+   on a git read needs that polarity: a `list | None` cannot express it, because `None` is falsy.
 3. `fast_forward`/`pull_ff`/`ff_ref` require strict ancestry (upstream strictly ahead), re-checked
    at write time.
 4. `rebase_push` aborts on conflict and downgrades to a refusal — never a half-rebase.
@@ -256,6 +287,17 @@ The schema (`tracking.py`) evolves **additively** —
 `RepoSnapshot` gained `policy` + `branches: list[BranchSnapshot]`, both defaulting empty so
 pre-existing event lines still validate. Never make an existing snapshot field required; add new
 fields with defaults and keep the legacy-parse test green (`test_tracking.py`).
+
+Additive fields are only half of it, because the stream is read by **every** version, not just
+newer ones. `RepoSnapshot.status` is therefore typed `str`, not the `RepoStatus` Literal: adding
+one status member made the *previous release* refuse to read its own history file with a pydantic
+traceback, since a closed Literal on the read side rejects anything written by a newer syncer.
+`RepoStatus` remains the **write** vocabulary — `_repo_status`/`_operation_status` are annotated
+with it, so mypy checks every literal where a snapshot is built — while parsing tolerates values
+it does not know. For the same reason `read_events` skips a line it cannot parse instead of
+raising: history is a side channel, and one truncated write must not take down the sync report
+the user actually asked for. Widening a persisted enum without doing both is a silent break that
+only shows up on the machine running the older version.
 
 ## Testing & release
 

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel
+from pydantic import ValidationError
 
 from syncer.config import LEGACY_DATA_DIR
 from syncer.config import STATE_DIR
@@ -59,6 +60,8 @@ def migrate_legacy_events(events_file: Path, adopt_global: bool = False) -> None
         LEGACY_DATA_DIR.rmdir()
 
 
+# The write-side vocabulary. Kept as a Literal so a typo where snapshots are built is a type
+# error, but never used to *parse* a stored event — see RepoSnapshot.status.
 RepoStatus = Literal[
     'synced',
     'issues',
@@ -70,6 +73,12 @@ RepoStatus = Literal[
     'not_git',
     'no_remote',
     'path_mismatch',
+    # 'we tried and git rejected it' — folded into 'missing' before, which made it
+    # indistinguishable in history from a repo nobody had got round to cloning.
+    'clone_failed',
+    # A repo whose state could not be measured. Distinct from 'issues', which means the state
+    # was read and is untidy.
+    'unverified',
 ]
 
 
@@ -84,12 +93,21 @@ class BranchSnapshot(BaseModel):
     is_current: bool = False
     action: str | None = None
     outcome: str | None = None
+    # git's stderr for a failed outcome. Dropped before, so history recorded that a push failed
+    # but never why — and by the time anyone looks, the run is long gone.
+    outcome_message: str | None = None
 
 
 class RepoSnapshot(BaseModel):
     name: str
     path: str
-    status: RepoStatus
+    # `str`, not RepoStatus, deliberately. The vocabulary below is the *write* contract, checked
+    # by mypy where snapshots are built; a closed Literal here is a *read* contract, and it makes
+    # every older syncer choke on a stream a newer one wrote — adding one status member was
+    # enough to make the previous release refuse to read its own history file. An append-only
+    # record read across versions has to tolerate values it does not know; stats.py already
+    # falls through to the raw string for anything it does not recognise.
+    status: str
     branch: str | None = None
     uncommitted: int = 0
     unpushed: int = 0
@@ -108,6 +126,9 @@ class RunSummary(BaseModel):
     pushed: int
     pull_pushed: int = 0
     issues: int
+    # Repos whose state could not be established at all, counted apart from `issues`: a run
+    # where nothing could be verified is not the same as a run where everything needs a push.
+    failed: int = 0
     duration_ms: int
 
 
@@ -126,13 +147,23 @@ def emit_event(event: SyncRunEvent, events_file: Path) -> None:
 
 
 def read_events(events_file: Path) -> list[SyncRunEvent]:
+    """Parse the run history, skipping any line that will not parse.
+
+    Skipping rather than raising because history is a side channel: the sync report is the
+    thing the user asked for, and a single unreadable line — a truncated write, or one written
+    by a version this one predates — must not take the whole run down with it.
+    """
     if not events_file.exists():
         return []
     events = []
     for line in events_file.read_text().splitlines():
         line = line.strip()
-        if line:
+        if not line:
+            continue
+        try:
             events.append(SyncRunEvent.model_validate_json(line))
+        except ValidationError:
+            continue
     return events
 
 

@@ -1,3 +1,4 @@
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -111,6 +112,60 @@ class TestBuildRepoReport:
         assert main_row.action == Action.PUSH
         assert main_row.outcome is not None
         assert main_row.outcome.status == 'done'
+
+
+class TestUnverifiableRepoIsNotSynced:
+    """The deepest bug this tool had: classify_repo did not even bind the fetch's result, and
+    ahead_behind returned (0, 0) when rev-list failed — which _primary_from_counts reads as
+    SYNCED. So a repo that had never once reached its remote reported as fully in sync, which
+    is the exact opposite of the one question syncer exists to answer.
+    """
+
+    def _repo_with_dead_remote(self, tmp_path):
+        repo_path = _make_cloned_repo(tmp_path, 'orphan')
+        shutil.rmtree(tmp_path / 'orphan.git')  # origin is gone; every fetch now fails
+        return _config_for([repo_path])
+
+    def test_a_dead_fetch_is_an_error_not_synced(self, tmp_path):
+        config = self._repo_with_dead_remote(tmp_path)
+        report = _build(config.repos[0], config, cli_policy='observe')
+        assert report is not None
+        assert report.error is not None
+        assert report_severity(report) == Severity.ERROR
+        assert not any(row.state.primary == PrimaryState.SYNCED for row in report.rows)
+
+    def test_it_carries_gits_own_reason(self, tmp_path):
+        config = self._repo_with_dead_remote(tmp_path)
+        report = _build(config.repos[0], config, cli_policy='observe')
+        assert report.error_detail
+        assert report.failures
+
+    def test_no_branch_rows_are_claimed(self, tmp_path):
+        """A row is a claim about a branch, and the point is that no such claim can be made."""
+        config = self._repo_with_dead_remote(tmp_path)
+        report = _build(config.repos[0], config, cli_policy='observe')
+        assert report.rows == []
+
+    def test_apply_executes_nothing(self, tmp_path):
+        """Returning before build_branch_rows is what refuses execution: no execute() call is
+        ever constructed for a repo whose state could not be established."""
+        config = self._repo_with_dead_remote(tmp_path)
+        report = _build(config.repos[0], config, cli_policy='mirror', apply=True)
+        assert report.rows == []
+        assert report.error is not None
+
+    def test_branches_view_reports_it_too(self, tmp_path):
+        """A branch view built on unverified refs tells the same lie the default run did."""
+        config = self._repo_with_dead_remote(tmp_path)
+        report = _build(config.repos[0], config, cli_policy='observe', include_lifecycle=False)
+        assert report is not None
+        assert report.error is not None
+
+    def test_local_counts_survive_for_the_stale_warnings(self, tmp_path):
+        config = self._repo_with_dead_remote(tmp_path)
+        (Path(config.repos[0].path) / 'dirty.txt').write_text('x\n')
+        report = _build(config.repos[0], config, cli_policy='observe')
+        assert report.uncommitted == 1
 
 
 class TestReportOrdering:

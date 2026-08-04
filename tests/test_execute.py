@@ -86,9 +86,11 @@ class GitSpy:
         self._original = repo._git
         repo._git = self._record  # type: ignore[method-assign]
 
-    def _record(self, *args: str):
+    def _record(self, *args: str, **kwargs):
+        # **kwargs so the spy stays transparent to _git's keyword-only options (probe=), rather
+        # than needing an edit every time one is added.
         self.calls.append(args)
-        return self._original(*args)
+        return self._original(*args, **kwargs)
 
     @property
     def flat_args(self) -> list[str]:

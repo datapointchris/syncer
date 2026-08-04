@@ -6,7 +6,8 @@ refuses rather than forces when a precondition fails. The hard invariants it gua
 independent of any policy:
 
 1. Never --force / -f / --force-with-lease (no such argv is ever constructed).
-2. Never mutate a branch whose working tree is dirty (the current branch).
+2. Never mutate a branch whose working tree is dirty — or whose cleanliness cannot be verified.
+   `git status` failing used to read as a clean tree, i.e. as permission to mutate.
 3. fast_forward / pull_ff / ff_ref require strict ancestry (upstream strictly ahead), re-checked here.
 4. rebase_push aborts on conflict and downgrades to a refusal — never a half-rebase.
 5. delete_local only under the full GONE ∧ integrated ∧ ¬current ∧ ¬default ∧ ¬merge-target ∧
@@ -57,7 +58,11 @@ def _refused(state: BranchState, action: Action, reason: str) -> Outcome:
 
 
 def _is_strictly_behind(repo: Repo, branch: str, upstream: str) -> bool:
-    ahead, behind = repo.ahead_behind(branch, upstream)
+    """Invariant 3. False when the counts cannot be read at all — unverified is not permission."""
+    counts = repo.ahead_behind(branch, upstream)
+    if counts is None:
+        return False
+    ahead, behind = counts
     return behind > 0 and ahead == 0
 
 
@@ -66,7 +71,7 @@ def _pull_ff(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
         return _refused(state, Action.PULL_FF, 'pull_ff requires the branch to be current')
     if not state.upstream:
         return _refused(state, Action.PULL_FF, 'no upstream to fast-forward from')
-    if repo.uncommitted_changes:  # invariant 2, re-checked live
+    if repo.is_dirty:  # invariant 2, re-checked live
         return _refused(state, Action.PULL_FF, 'working tree is dirty')
     if not _is_strictly_behind(repo, state.branch, state.upstream):  # invariant 3
         return _refused(state, Action.PULL_FF, 'upstream is not strictly ahead')
@@ -102,11 +107,14 @@ def _fast_forward(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
 
 
 def _push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
-    if repo.uncommitted_changes:
+    if repo.is_dirty:
         return _refused(state, Action.PUSH, 'working tree is dirty')
     if not state.upstream:
         return _refused(state, Action.PUSH, 'no upstream; use set_upstream_push')
-    ahead, behind = repo.ahead_behind(state.branch, state.upstream)
+    counts = repo.ahead_behind(state.branch, state.upstream)
+    if counts is None:
+        return _refused(state, Action.PUSH, 'cannot read ahead/behind counts')
+    ahead, behind = counts
     if ahead == 0:
         return _refused(state, Action.PUSH, 'nothing to push')
     if behind > 0:
@@ -120,11 +128,14 @@ def _push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
 def _rebase_push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     if not state.is_current:
         return _refused(state, Action.REBASE_PUSH, 'rebase_push requires the branch to be current')
-    if repo.uncommitted_changes:  # invariant 2
+    if repo.is_dirty:  # invariant 2
         return _refused(state, Action.REBASE_PUSH, 'working tree is dirty')
     if not state.upstream:
         return _refused(state, Action.REBASE_PUSH, 'no upstream to rebase onto')
-    ahead, behind = repo.ahead_behind(state.branch, state.upstream)
+    counts = repo.ahead_behind(state.branch, state.upstream)
+    if counts is None:
+        return _refused(state, Action.REBASE_PUSH, 'cannot read ahead/behind counts')
+    ahead, behind = counts
     if not (ahead > 0 and behind > 0):
         return _refused(state, Action.REBASE_PUSH, 'branch is not diverged')
     if not repo.pull_rebase():  # invariant 4: conflict → abort → refuse, never half-rebase
@@ -139,7 +150,7 @@ def _rebase_push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
 def _set_upstream_push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     if state.upstream:
         return _refused(state, Action.SET_UPSTREAM_PUSH, 'branch already has an upstream')
-    if repo.uncommitted_changes:
+    if repo.is_dirty:
         return _refused(state, Action.SET_UPSTREAM_PUSH, 'working tree is dirty')
     ok, err = repo.push_branch(state.branch, set_upstream=True)
     if ok:
@@ -155,7 +166,7 @@ def _delete_local(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
         return _refused(state, Action.DELETE_LOCAL, 'refusing to delete the current branch')
     if state.is_default:
         return _refused(state, Action.DELETE_LOCAL, 'refusing to delete the default branch')
-    if repo.uncommitted_changes:
+    if repo.is_dirty:
         return _refused(state, Action.DELETE_LOCAL, 'working tree is dirty')
     target = policy.merge_target or repo.default_branch
     if not target:

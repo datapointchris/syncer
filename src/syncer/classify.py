@@ -12,7 +12,22 @@ from syncer.policy import BranchState
 from syncer.policy import Policy
 from syncer.policy import PrimaryState
 from syncer.policy import Scope
+from syncer.repos import GitFailure
 from syncer.repos import Repo
+
+
+class ClassifyError(Exception):
+    """A branch's state could not be measured even though the fetch succeeded.
+
+    Raised rather than guessed at: every fallback value available here is indistinguishable
+    from a real state — (0, 0) reads as SYNCED, an empty upstream reads as NO_UPSTREAM — so
+    the caller turns this into a repo-level error instead of a plausible-looking branch row.
+    """
+
+    def __init__(self, branch: str, failure: GitFailure) -> None:
+        super().__init__(f'could not classify {branch}: {failure.command}')
+        self.branch = branch
+        self.failure = failure
 
 
 def _primary_from_counts(ahead: int, behind: int) -> PrimaryState:
@@ -52,7 +67,10 @@ def classify_branch(
         if target:
             merged_into_target = repo.contains_branch(branch, target)
     else:
-        ahead, behind = repo.ahead_behind(branch, upstream_short)
+        counts = repo.ahead_behind(branch, upstream_short)
+        if counts is None:
+            raise ClassifyError(branch, repo.failures[-1])
+        ahead, behind = counts
         primary = _primary_from_counts(ahead, behind)
 
     return BranchState(
@@ -79,18 +97,33 @@ def _branches_in_scope(repo: Repo, scope: Scope, default: str | None, current: s
     return repo.local_branches()
 
 
-def classify_repo(repo: Repo, policy: Policy) -> list[BranchState]:
-    """Classify every branch the policy's scope selects, after prune + set-head."""
-    if policy.prune:
-        repo.fetch_prune()
-    else:
-        repo.fetch()
+def refresh_remote(repo: Repo, policy: Policy) -> GitFailure | None:
+    """Run the read-side remediation, returning the fetch's failure if it had one.
+
+    Split out of classify_repo so the caller can stop before classifying: every state below is
+    measured against remote-tracking refs, so a dead fetch does not degrade the report, it
+    invalidates it. set_head_auto's own failure is deliberately not escalated — it is
+    remediation for a renamed default, not the measurement.
+    """
+    failure = repo.fetch_prune() if policy.prune else repo.fetch()
+    if failure is not None:
+        return failure
     repo.set_head_auto()
+    return None
+
+
+def classify_repo(repo: Repo, policy: Policy, *, fetched: bool = False) -> list[BranchState]:
+    """Classify every branch the policy's scope selects, after prune + set-head.
+
+    `fetched=True` when the caller already ran refresh_remote and checked its result.
+    """
+    if not fetched:
+        refresh_remote(repo, policy)
 
     default = repo.default_branch
     current = repo.current_branch
     detached = current == 'HEAD'
-    dirty_current = bool(repo.uncommitted_changes)
+    dirty_current = repo.is_dirty
     stashed = repo.stash_count > 0
 
     states = [

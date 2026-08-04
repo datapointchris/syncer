@@ -25,6 +25,7 @@ from syncer.report import gather_reports
 from syncer.report import render_report
 from syncer.report import report_severity
 from syncer.repos import ICON_DOWNLOAD
+from syncer.repos import ICON_ERR
 from syncer.repos import ICON_MOVE
 from syncer.repos import ICON_OK
 from syncer.repos import ICON_PULL
@@ -33,24 +34,28 @@ from syncer.repos import ICON_WARN
 from syncer.repos import console
 from syncer.tracking import BranchSnapshot
 from syncer.tracking import RepoSnapshot
+from syncer.tracking import RepoStatus
 from syncer.tracking import RunSummary
 from syncer.tracking import SyncRunEvent
 from syncer.tracking import emit_event
 from syncer.tracking import find_stale_repos
 from syncer.tracking import read_events
 
-_LIFECYCLE_TO_STATUS = {
+_LIFECYCLE_TO_STATUS: dict[str, RepoStatus] = {
     'would_clone': 'missing',
     'cloned': 'cloned',
-    'clone_failed': 'missing',
+    'clone_failed': 'clone_failed',
     'path_mismatch': 'path_mismatch',
     'not_git': 'not_git',
     'no_remote': 'no_remote',
 }
 _ISSUE_STATUSES = {'issues', 'not_git', 'no_remote', 'path_mismatch', 'missing'}
+# Counted apart from _ISSUE_STATUSES: these are runs where syncer could not find out, which is
+# a different thing from finding out that a repo needs attention.
+_FAILED_STATUSES = {'clone_failed', 'unverified'}
 
 
-def _operation_status(report: RepoBranchReport) -> str:
+def _operation_status(report: RepoBranchReport) -> RepoStatus:
     """Status for a repo where actions ran and nothing needs attention (severity OPERATION)."""
     acted = {row.action for row in report.rows if row.outcome is not None and row.outcome.status == 'done'}
     if Action.REBASE_PUSH in acted or (acted & {Action.FAST_FORWARD, Action.PULL_FF, Action.FF_REF} and Action.PUSH in acted):
@@ -60,11 +65,13 @@ def _operation_status(report: RepoBranchReport) -> str:
     return 'pulled'
 
 
-def _repo_status(report: RepoBranchReport) -> str:
+def _repo_status(report: RepoBranchReport) -> RepoStatus:
     if report.lifecycle:
         return _LIFECYCLE_TO_STATUS[report.lifecycle]
     if report.error:
-        return 'issues'
+        # Keyed on git having failed, not on the report being empty: an unknown policy also
+        # produces no rows, but that is a config problem, not a repo syncer could not read.
+        return 'unverified' if report.failures else 'issues'
     severity = report_severity(report)
     if severity == Severity.SYNCED:
         return 'synced'
@@ -85,6 +92,7 @@ def _snapshot(report: RepoBranchReport) -> RepoSnapshot:
             is_current=row.state.is_current,
             action=row.action.value,
             outcome=row.outcome.status if row.outcome is not None else None,
+            outcome_message=row.outcome.message or None if row.outcome is not None else None,
         )
         for row in report.rows
     ]
@@ -92,7 +100,7 @@ def _snapshot(report: RepoBranchReport) -> RepoSnapshot:
     return RepoSnapshot(
         name=report.name,
         path=report.path,
-        status=status,  # type: ignore[arg-type]
+        status=status,
         branch=default_row.state.branch if default_row else None,
         uncommitted=report.uncommitted,
         unpushed=default_row.state.ahead if default_row else 0,
@@ -114,6 +122,7 @@ def _summary(snapshots: list[RepoSnapshot]) -> RunSummary:
         pushed=counts['pushed'],
         pull_pushed=counts['pull_pushed'],
         issues=issues,
+        failed=sum(count for status, count in counts.items() if status in _FAILED_STATUSES),
         duration_ms=0,
     )
 
@@ -130,6 +139,10 @@ def _print_summary_line(summary: RunSummary) -> None:
         parts.append(f'[green]{ICON_MOVE}  {summary.pull_pushed} pull+pushed[/green]')
     if summary.issues:
         parts.append(f'[yellow]{ICON_WARN}  {summary.issues} need attention[/yellow]')
+    if summary.failed:
+        # Red and worded separately from `issues`: yellow "need attention" reads as "there is
+        # work to do", when the truth is that syncer could not find out whether there is.
+        parts.append(f'[red]{ICON_ERR}  {summary.failed} unverified[/red]')
     console.print('  │  '.join(parts))
 
 

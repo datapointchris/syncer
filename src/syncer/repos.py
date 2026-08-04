@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 from rich.console import Console
@@ -18,6 +19,28 @@ GIT_TIMEOUT_SECONDS = 120
 CLONE_TIMEOUT_MULTIPLIER = 5
 # Exit code for a timeout, matching the shell's convention for a command killed by `timeout`.
 TIMEOUT_RETURNCODE = 124
+
+
+@dataclass(frozen=True, slots=True)
+class GitFailure:
+    """A git call that failed, kept so the reason can reach the user.
+
+    The habit this exists to break: every accessor below used to convert a non-zero exit into a
+    benign-looking value ([] branches, (0,0) counts, a clean tree), which is how a repo whose
+    fetch died still reported `synced`.
+    """
+
+    argv: tuple[str, ...]
+    returncode: int
+    stderr: str
+
+    @property
+    def timed_out(self) -> bool:
+        return self.returncode == TIMEOUT_RETURNCODE
+
+    @property
+    def command(self) -> str:
+        return ' '.join(('git', *self.argv))
 
 
 def normalize_remote_url(url: str) -> str:
@@ -128,9 +151,21 @@ class Repo:
         self.owner = owner
         self.url = url or f'{host}/{owner}/{name}'
         self.timeout = timeout
+        # Thread-confined: report.py builds one Repo per worker task, so a plain list is safe.
+        self.failures: list[GitFailure] = []
 
-    def _git(self, *args: str) -> subprocess.CompletedProcess[str]:
-        return run_command(['git', *args], cwd=self.path, timeout=self.timeout)
+    def _git(self, *args: str, probe: bool = False) -> subprocess.CompletedProcess[str]:
+        """Run git in this repo, recording a non-zero exit unless it is a probe.
+
+        Recording is the default so a git call added later is visible without anyone
+        remembering to opt in — the same direction PROTECTED_ALLOWED takes. `probe=True` is for
+        the handful of calls that ask a yes/no question, where non-zero *is* the answer and
+        recording it would bury the real failures in noise.
+        """
+        result = run_command(['git', *args], cwd=self.path, timeout=self.timeout)
+        if result.returncode != 0 and not probe:
+            self.failures.append(GitFailure(argv=args, returncode=result.returncode, stderr=result.stderr.strip()))
+        return result
 
     @property
     def exists(self) -> bool:
@@ -140,10 +175,21 @@ class Repo:
     def is_git_repo(self) -> bool:
         return (self.path / '.git').is_dir()
 
+    def remotes(self) -> list[str] | None:
+        """Configured remote names, or None when git could not be asked.
+
+        Distinguished because they need different words: a repo with no remote is a repo you
+        never pushed anywhere, while a `git remote` that failed says nothing about remotes at
+        all — reporting the second as 'no remote' sends you to fix something that is fine.
+        """
+        result = self._git('remote')
+        if result.returncode != 0:
+            return None
+        return [line for line in result.stdout.strip().splitlines() if line]
+
     @property
     def has_remote(self) -> bool:
-        result = self._git('remote')
-        return bool(result.stdout.strip())
+        return bool(self.remotes())
 
     @property
     def origin_url(self) -> str | None:
@@ -158,14 +204,16 @@ class Repo:
 
     @property
     def default_branch(self) -> str | None:
-        result = self._git('symbolic-ref', 'refs/remotes/origin/HEAD')
+        # probe: every call here asks "does this ref exist", and walking the fallback chain is
+        # the normal path on a repo whose origin/HEAD was never set.
+        result = self._git('symbolic-ref', 'refs/remotes/origin/HEAD', probe=True)
         if result.returncode == 0:
             branch = result.stdout.strip().replace('refs/remotes/origin/', '')
             # Verify the tracking ref exists (could be stale after a rename)
-            if self._git('rev-parse', '--verify', f'refs/remotes/origin/{branch}').returncode == 0:
+            if self._git('rev-parse', '--verify', f'refs/remotes/origin/{branch}', probe=True).returncode == 0:
                 return branch
         for branch in ('main', 'master'):
-            check = self._git('rev-parse', '--verify', f'refs/heads/{branch}')
+            check = self._git('rev-parse', '--verify', f'refs/heads/{branch}', probe=True)
             if check.returncode == 0:
                 return branch
         return None
@@ -175,8 +223,23 @@ class Repo:
         return self.current_branch == 'HEAD'
 
     @property
-    def uncommitted_changes(self) -> list[str]:
+    def is_dirty(self) -> bool:
+        """True when the tree has changes *or* git could not tell us.
+
+        Invariant 2 is 'never mutate a tree you cannot verify is clean'. Returning a list and
+        letting callers test its truthiness made a failing `git status` read as clean — i.e. as
+        permission to mutate — so the unknown case has to answer True, which a `list | None`
+        could never do: None is falsy.
+        """
         result = self._git('status', '--porcelain')
+        return result.returncode != 0 or bool(result.stdout.strip())
+
+    @property
+    def uncommitted_changes(self) -> list[str]:
+        """The changed paths, for counting only. Use is_dirty for any safety decision."""
+        result = self._git('status', '--porcelain')
+        if result.returncode != 0:
+            return []
         return [line for line in result.stdout.strip().splitlines() if line]
 
     def local_branches(self) -> list[str]:
@@ -217,25 +280,31 @@ class Repo:
         upstream_short, _, track = result.stdout.rstrip('\n').partition('\t')
         return upstream_short, track.strip() == '[gone]'
 
-    def ahead_behind(self, branch: str, upstream: str) -> tuple[int, int]:
-        """Return (ahead, behind) commit counts of `branch` relative to `upstream`."""
+    def ahead_behind(self, branch: str, upstream: str) -> tuple[int, int] | None:
+        """(ahead, behind) commit counts of `branch` vs `upstream`, or None if git could not say.
+
+        None rather than (0, 0): the counts feed _primary_from_counts, which reads (0, 0) as
+        SYNCED — so a missing remote-tracking ref after a failed fetch used to make a repo that
+        had never reached its remote report as fully in sync.
+        """
         result = self._git('rev-list', '--left-right', '--count', f'{branch}...{upstream}')
         if result.returncode != 0:
-            return 0, 0
+            return None
         parts = result.stdout.split()
         if len(parts) != 2:
-            return 0, 0
+            return None
         return int(parts[0]), int(parts[1])
 
     def _target_ref(self, target: str) -> str:
         ref = f'origin/{target}'
-        if self._git('rev-parse', '--verify', ref).returncode != 0:
+        if self._git('rev-parse', '--verify', ref, probe=True).returncode != 0:
             ref = target
         return ref
 
     def is_merged_into(self, branch: str, target: str) -> bool:
         """True if `branch` is an ancestor of `target` (prefer origin/<target> if present)."""
-        return self._git('merge-base', '--is-ancestor', branch, self._target_ref(target)).returncode == 0
+        # probe: --is-ancestor answers with its exit code; non-zero means "no", not "broke".
+        return self._git('merge-base', '--is-ancestor', branch, self._target_ref(target), probe=True).returncode == 0
 
     def is_patch_applied_in(self, branch: str, target: str) -> bool:
         """True if every commit unique to `branch` has a patch-equivalent commit in `target`.
@@ -245,7 +314,9 @@ class Repo:
         and '+' when it is not. A multi-commit branch collapsed into a single squash commit has
         no matching patch-ids and correctly reports '+' — a false negative costs only a refusal.
         """
-        result = self._git('cherry', self._target_ref(target), branch)
+        # probe: a missing target ref is an ordinary "cannot prove it", and the caller's only
+        # response is to refuse the delete — which is already the safe outcome.
+        result = self._git('cherry', self._target_ref(target), branch, probe=True)
         if result.returncode != 0:
             return False
         return all(line.startswith('-') for line in result.stdout.splitlines() if line.strip())
@@ -322,13 +393,21 @@ class Repo:
             return 0
         return int(result.stdout.strip())
 
-    def fetch(self) -> bool:
-        result = self._git('fetch', '--quiet')
-        return result.returncode == 0
+    def fetch(self) -> GitFailure | None:
+        """Refresh remote-tracking refs. Returns the failure, or None on success.
 
-    def fetch_prune(self) -> bool:
+        The return value is the measurement's validity: every branch state below is computed
+        against these refs, so a caller that ignores it is reporting on stale or absent data.
+        That is exactly what classify_repo did, which is how a repo that had never reached its
+        remote reported as synced.
+        """
+        result = self._git('fetch', '--quiet')
+        return None if result.returncode == 0 else self.failures[-1]
+
+    def fetch_prune(self) -> GitFailure | None:
+        """fetch --prune, so a deleted upstream branch classifies as gone rather than synced."""
         result = self._git('fetch', '--prune', '--quiet')
-        return result.returncode == 0
+        return None if result.returncode == 0 else self.failures[-1]
 
     def set_head_auto(self) -> None:
         """Repoint origin/HEAD to the remote's real default (fixes stale ref after a
@@ -337,20 +416,12 @@ class Repo:
             return
         self._git('remote', 'set-head', 'origin', '--auto')
 
-    def pull(self) -> bool:
-        result = self._git('pull', '--ff-only')
-        return result.returncode == 0
-
     def pull_rebase(self) -> bool:
         result = self._git('pull', '--rebase')
         return result.returncode == 0
 
     def rebase_abort(self) -> bool:
         result = self._git('rebase', '--abort')
-        return result.returncode == 0
-
-    def push(self) -> bool:
-        result = self._git('push')
         return result.returncode == 0
 
     def merge_ff_only(self, upstream: str) -> tuple[bool, str]:
@@ -408,7 +479,12 @@ class Repo:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         # --quiet, as fetch does: git writes progress to stderr even when it succeeds, and
         # without it the returned text is chatter on success and chatter-plus-error on failure.
-        result = run_command(['git', 'clone', '--quiet', self.url, str(self.path)], timeout=self.timeout * CLONE_TIMEOUT_MULTIPLIER)
+        argv = ('clone', '--quiet', self.url, str(self.path))
+        # Not _git: there is no repo to run inside yet. Records by hand so a clone failure joins
+        # the same set the failure summary groups by cause.
+        result = run_command(['git', *argv], timeout=self.timeout * CLONE_TIMEOUT_MULTIPLIER)
+        if result.returncode != 0:
+            self.failures.append(GitFailure(argv=argv, returncode=result.returncode, stderr=result.stderr.strip()))
         return result.returncode == 0, result.stderr.strip()
 
 

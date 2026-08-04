@@ -29,7 +29,9 @@ from pathlib import Path
 
 from rich.markup import escape
 
+from syncer.classify import ClassifyError
 from syncer.classify import classify_repo
+from syncer.classify import refresh_remote
 from syncer.config import RepoConfig
 from syncer.config import SyncerConfig
 from syncer.config import ToolConfig
@@ -53,6 +55,7 @@ from syncer.repos import ICON_OK
 from syncer.repos import ICON_PULL
 from syncer.repos import ICON_PUSH
 from syncer.repos import ICON_WARN
+from syncer.repos import GitFailure
 from syncer.repos import Repo
 from syncer.repos import console
 from syncer.repos import find_repo_in_search_paths
@@ -123,6 +126,11 @@ class RepoBranchReport:
     policy_name: str | None = None
     rows: list[BranchRow] = field(default_factory=list)
     error: str | None = None
+    # Git's own words for `error`, rendered under it. An error a user cannot act on is barely
+    # better than no error, and every realistic cause here is named only in git's stderr.
+    error_detail: str | None = None
+    # Every git call that failed while building this report, for the grouped failure summary.
+    failures: list[GitFailure] = field(default_factory=list)
     lifecycle: str | None = None
     lifecycle_detail: str | None = None
     # The clone's actual origin when it disagrees with the registry, and what was expected.
@@ -232,15 +240,36 @@ def _watched_remote_branches(repo: Repo, policy: Policy) -> list[tuple[str, str]
     return [(branch, repo.branch_age(f'origin/{branch}')) for branch in repo.remote_only_branches() if is_watched_remote(branch, policy)]
 
 
-def build_branch_rows(repo: Repo, policy: Policy, apply: bool) -> list[BranchRow]:
+def build_branch_rows(repo: Repo, policy: Policy, apply: bool, *, fetched: bool = False) -> list[BranchRow]:
     """Classify → decide → (execute if apply) for every in-scope branch. Shared by both surfaces."""
     rows = []
-    for state in classify_repo(repo, policy):
+    for state in classify_repo(repo, policy, fetched=fetched):
         action = decide(state, policy)
         outcome = execute(action, state, repo, policy) if apply else None
         blocked = protection_refusal(action, state, policy)
         rows.append(BranchRow(state=state, action=action, outcome=outcome, blocked=blocked))
     return rows
+
+
+def _failed_report(repo: Repo, label: str, repo_config: RepoConfig, error: str, policy_name: str | None = None) -> RepoBranchReport:
+    """A repo whose state could not be established. Never carries branch rows.
+
+    Rows are the thing being refused: a row is a claim about a branch, and the whole point is
+    that no such claim can be made. Local counts are still read so the stale-repo warnings keep
+    working when only the network half failed.
+    """
+    detail = repo.failures[-1].stderr if repo.failures else None
+    return RepoBranchReport(
+        label=label,
+        path=repo_config.path,
+        name=repo_config.name,
+        policy_name=policy_name,
+        error=error,
+        error_detail=detail,
+        failures=list(repo.failures),
+        uncommitted=len(repo.uncommitted_changes),
+        stashes=repo.stash_count,
+    )
 
 
 def _build_repo_report(
@@ -297,7 +326,10 @@ def _build_repo_report(
         return lifecycle('would_clone')
     if not repo.is_git_repo:
         return lifecycle('not_git') if include_lifecycle else None
-    if not repo.has_remote:
+    remotes = repo.remotes()
+    if remotes is None:
+        return _failed_report(repo, label, repo_config, 'cannot read this repo (git failed)')
+    if not remotes:
         return lifecycle('no_remote') if include_lifecycle else None
 
     policy_name = resolve_policy_name(repo_config, tool_config, cli_policy)
@@ -307,7 +339,18 @@ def _build_repo_report(
             label=label, path=repo_config.path, name=repo_config.name, policy_name=policy_name, error=f'unknown policy {policy_name!r}'
         )
 
-    rows = build_branch_rows(repo, policy, apply)
+    # Before classifying, not after: every branch state is measured against remote-tracking
+    # refs, so a dead fetch invalidates the whole report rather than degrading it. Returning
+    # here is also what refuses execution for this repo — no execute() call is constructed.
+    # Before classifying, not after: every branch state is measured against remote-tracking
+    # refs, so a dead fetch invalidates the whole report rather than degrading it. Returning
+    # here is also what refuses execution for this repo — no execute() call is constructed.
+    if refresh_remote(repo, policy) is not None:
+        return _failed_report(repo, label, repo_config, 'fetch failed — sync state not verified against origin', policy_name)
+    try:
+        rows = build_branch_rows(repo, policy, apply, fetched=True)
+    except ClassifyError as exc:
+        return _failed_report(repo, label, repo_config, f'could not classify {exc.branch}', policy_name)
     return RepoBranchReport(
         label=label,
         path=repo_config.path,
@@ -371,7 +414,9 @@ def render_report(report: RepoBranchReport, apply: bool) -> None:
         console.print()
         return
     if report.error:
-        console.print(f'[red]{report.label}: {report.error}[/red]')
+        console.print(f'[red]{ICON_ERR}  {report.label} — {report.error}[/red]')
+        for line in report.error_detail.splitlines() if report.error_detail else []:
+            console.print(f'    {escape(line)}', soft_wrap=True)
         console.print()
         return
     mode = 'apply' if apply else 'report-only'

@@ -4,7 +4,6 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 
 from syncer.tracking import BranchSnapshot
 from syncer.tracking import RepoSnapshot
@@ -64,6 +63,9 @@ class TestRepoSnapshot:
         event = SyncRunEvent.model_validate_json(legacy)
         assert event.repos[0].branches == []
         assert event.repos[0].policy is None
+        # Every field added since must default, or a schema change silently orphans the history
+        # it was added to make sense of.
+        assert event.summary.failed == 0
 
     def test_per_branch_snapshot_round_trip(self):
         snap = RepoSnapshot(
@@ -83,9 +85,30 @@ class TestRepoSnapshot:
             snap = RepoSnapshot(name='r', path='/r', status=status)
             assert snap.status == status
 
-    def test_invalid_status_rejected(self):
-        with pytest.raises(ValidationError):
-            RepoSnapshot(name='r', path='/r', status='bogus')
+    def test_an_unreadable_line_does_not_take_the_run_down(self, tmp_path):
+        """History is a side channel; the sync report is what the user asked for. A truncated
+        write or a line from a version this one predates must not abort the whole run."""
+        events_file = tmp_path / 'events.jsonl'
+        emit_event(_make_event(), events_file)
+        with events_file.open('a') as handle:
+            handle.write('{"not": "an event"}\n')
+        emit_event(_make_event(config_name='after'), events_file)
+
+        events = read_events(events_file)
+        assert len(events) == 2
+        assert events[-1].config_name == 'after'
+
+    def test_an_unknown_status_still_parses(self):
+        """Inverted deliberately — this used to assert a ValidationError.
+
+        The event stream is an append-only record read across versions, so a closed Literal on
+        the read side means every older syncer chokes on a stream a newer one wrote: adding one
+        status member was enough to make the previous release refuse to read its own history
+        file with a pydantic traceback. The write-side vocabulary is still constrained, by
+        typing _repo_status as RepoStatus so mypy checks every literal at the point it is built.
+        """
+        snap = RepoSnapshot(name='r', path='/r', status='a-status-from-a-future-version')
+        assert snap.status == 'a-status-from-a-future-version'
 
 
 class TestRunSummary:

@@ -325,9 +325,69 @@ class TestNonInteractiveExecution:
     def test_a_timed_out_git_call_reads_as_failure(self, git_repo):
         repo = _make_repo(git_repo, timeout=1)
         with patch('syncer.repos.subprocess.run', side_effect=subprocess.TimeoutExpired(cmd='git', timeout=1)):
-            assert repo.fetch_prune() is False
+            failure = repo.fetch_prune()
+            assert failure is not None
+            assert failure.timed_out
             assert repo.local_branches() == []
             assert repo.default_branch is None
+
+
+class TestFailureRecording:
+    """Every accessor used to turn a non-zero exit into a benign value, so a broken git looked
+    like a healthy repo. Recording is the default; probe=True is the argued-for exception."""
+
+    def test_a_failed_call_is_recorded(self, git_repo):
+        repo = _make_repo(git_repo)
+        repo._git('rev-parse', '--verify', 'refs/heads/nope')
+        assert len(repo.failures) == 1
+        assert repo.failures[0].returncode != 0
+        assert repo.failures[0].command.startswith('git rev-parse')
+
+    def test_a_probe_is_not_recorded(self, git_repo):
+        repo = _make_repo(git_repo)
+        repo._git('rev-parse', '--verify', 'refs/heads/nope', probe=True)
+        assert repo.failures == []
+
+    def test_walking_the_default_branch_fallbacks_is_not_a_failure(self, git_repo):
+        """default_branch probes several refs by design; recording those would bury the real
+        failures under noise on every repo whose origin/HEAD was never set."""
+        repo = _make_repo(git_repo)
+        assert repo.default_branch == 'main'
+        assert repo.failures == []
+
+    def test_a_successful_call_records_nothing(self, git_repo):
+        repo = _make_repo(git_repo)
+        repo.local_branches()
+        assert repo.failures == []
+
+
+class TestUnknownIsNotClean:
+    """Invariant 2 gates on this. A failing `git status` returning [] read as a clean tree —
+    i.e. as permission to mutate — which is the wrong direction for a safety check."""
+
+    def test_a_dirty_tree_is_dirty(self, git_repo):
+        (git_repo / 'new.txt').write_text('x\n')
+        assert _make_repo(git_repo).is_dirty is True
+
+    def test_a_clean_tree_is_clean(self, git_repo):
+        assert _make_repo(git_repo).is_dirty is False
+
+    def test_an_unreadable_tree_counts_as_dirty(self, git_repo):
+        repo = _make_repo(git_repo, timeout=1)
+        with patch('syncer.repos.subprocess.run', side_effect=subprocess.TimeoutExpired(cmd='git', timeout=1)):
+            assert repo.is_dirty is True
+
+    def test_no_remotes_is_distinct_from_cannot_ask(self, git_repo):
+        repo = _make_repo(git_repo)
+        assert repo.remotes() == []  # a repo you never pushed anywhere
+        with patch('syncer.repos.subprocess.run', side_effect=subprocess.TimeoutExpired(cmd='git', timeout=1)):
+            assert repo.remotes() is None  # says nothing about remotes at all
+
+    def test_unreadable_counts_are_none_not_zero(self, git_repo):
+        """(0, 0) is read as SYNCED by _primary_from_counts, so it can never be the fallback."""
+        repo = _make_repo(git_repo, timeout=1)
+        with patch('syncer.repos.subprocess.run', side_effect=subprocess.TimeoutExpired(cmd='git', timeout=1)):
+            assert repo.ahead_behind('main', 'origin/main') is None
 
 
 class TestClone:

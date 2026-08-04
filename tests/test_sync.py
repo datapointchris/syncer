@@ -4,7 +4,10 @@ from pathlib import Path
 from syncer.config import RepoConfig
 from syncer.config import SyncerConfig
 from syncer.config import ToolConfig
+from syncer.report import LIFECYCLE_STYLE
 from syncer.report import RepoBranchReport
+from syncer.repos import GitFailure
+from syncer.sync import _LIFECYCLE_TO_STATUS
 from syncer.sync import _repo_status
 from syncer.sync import _snapshot
 from syncer.sync import run_sync
@@ -52,6 +55,27 @@ class TestRepoStatus:
 
     def test_error_report_is_issues(self):
         assert _repo_status(RepoBranchReport(label='r', path='~/r', error='unknown policy')) == 'issues'
+
+    def test_a_rejected_clone_is_not_recorded_as_never_tried(self):
+        """Both mapped to 'missing' before, so history could never distinguish 'git said no'
+        from 'nobody has got round to it' — and by then the run is long gone."""
+        assert _repo_status(_lifecycle_report('clone_failed')) == 'clone_failed'
+        assert _repo_status(_lifecycle_report('would_clone')) == 'missing'
+
+    def test_an_unreadable_repo_is_unverified_not_issues(self):
+        """'issues' means the state was read and is untidy; this is the state not being read."""
+        report = RepoBranchReport(
+            label='r',
+            path='~/r',
+            error='fetch failed',
+            failures=[GitFailure(argv=('fetch',), returncode=128, stderr='boom')],
+        )
+        assert _repo_status(report) == 'unverified'
+
+    def test_every_lifecycle_status_has_a_tracking_status(self):
+        """A key in one map and not the other is a KeyError at _repo_status, on a run that has
+        already done all its git work."""
+        assert set(LIFECYCLE_STYLE) == set(_LIFECYCLE_TO_STATUS)
 
 
 class TestSnapshot:
