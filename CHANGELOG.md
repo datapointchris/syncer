@@ -1,6 +1,57 @@
 # CHANGELOG
 
 
+## v6.0.3 (2026-08-04)
+
+### Bug Fixes
+
+- **clone**: Surface git's error when a clone fails
+  ([`ffb16d2`](https://github.com/datapointchris/syncer/commit/ffb16d2766f158dd8a81506b283e7a8a44327127))
+
+A failed clone rendered as a bare 'clone failed' line. Repo.clone dropped result.stderr at the
+  source and the report call site hard-coded the detail slot to None, so auth, an unknown host key,
+  DNS, a bad url_template and a 600s timeout were one indistinguishable line. capture_output means
+  git's own message never reaches the terminal either, so the screen was empty.
+
+clone() now returns (ok, stderr) like every other mutator, and the report names the attempted URL as
+  well as git's words: a wrong url_template or an empty registry owner produces a URL git rejects
+  for reasons its message alone never explains.
+
+Also scales the clone ceiling from git_timeout rather than a hard-coded 600s, which is what
+  config.toml and the README already claimed.
+
+### Chores
+
+- **toolchain**: Adopt the generated configs and CI
+  ([`3ae9763`](https://github.com/datapointchris/syncer/commit/3ae976319ad7983b04b20cbae7c17b4bfc05ab17))
+
+Brings the repo onto forge toolchain manifest 11.
+
+codespell now skips CHANGELOG.md, which semantic-release generates from commit subjects: the typo it
+  caught lives in a commit message that will never be rewritten, and fixing the file is undone on
+  the next release.
+
+### Documentation
+
+- Flush dormant markdownlint violations
+  ([`9b4023c`](https://github.com/datapointchris/syncer/commit/9b4023c67181bb64d64033f0a79e31b814179ea8))
+
+markdownlint only runs on the files a commit touches, so unmodified docs accumulate violations
+  invisibly. The toolchain sync bumps markdownlint to v0.47, which added MD060, and runs --all-files
+  — surfacing every one of them at once, in the middle of an unrelated change.
+
+Table separators are normalized to the compact `| --- |` style MD060 expects, which --fix cannot
+  repair; everything else is markdownlint --fix. CHANGELOG.md is excluded instead of normalized:
+  semantic-release regenerates it on every release, so any fix there is undone and comes back as a
+  rebase conflict.
+
+- Note the scaffolded laptop policy is not a built-in
+  ([`6e2bbfc`](https://github.com/datapointchris/syncer/commit/6e2bbfc456c0f6e465520125ac074523a72c137e))
+
+config init writes a config.toml containing an example [policies.laptop] block, so policy list shows
+  it beside standard/observe/mirror on a fresh machine and it reads as pre-installed.
+
+
 ## v6.0.2 (2026-07-31)
 
 ### Bug Fixes
