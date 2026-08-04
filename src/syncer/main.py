@@ -32,6 +32,7 @@ from syncer.report import exit_code_for
 from syncer.report import report_branches
 from syncer.repos import Repo
 from syncer.repos import find_repo_in_search_paths
+from syncer.repos import find_untracked_repos
 from syncer.repos import origin_mismatch
 from syncer.stats import show_stats
 from syncer.sync import run_sync
@@ -143,39 +144,6 @@ def branches(
     tool_config = load_tool_config()
     reports = report_branches(syncer_config, tool_config, cli_policy=policy, apply=apply, jobs=jobs, as_json=json_output)
     raise typer.Exit(exit_code_for(reports))
-
-
-def find_untracked_repos(search_path: Path, known_paths: set[Path], excluded: set[Path] | None = None, max_depth: int = 3) -> list[Path]:
-    """Find git repos under search_path that no registry entry claims.
-
-    Recurses, because repos are routinely nested more than one level down
-    (~/code/python-projects/, ~/code/sql/, ~/code/refs/). Scanning only direct
-    children silently passed every one of those — which is exactly how twenty
-    reference clones dropped out of tracking without a word.
-
-    Matches on resolved path, not name: two repos can share a basename.
-    Descent stops at a repo, so nested worktrees and vendored checkouts are not
-    reported separately.
-    """
-    excluded = excluded or set()
-    if max_depth <= 0 or not search_path.is_dir() or search_path.resolve() in excluded:
-        return []
-
-    found: list[Path] = []
-    try:
-        entries = sorted(search_path.iterdir())
-    except PermissionError:
-        return []
-
-    for item in entries:
-        if not item.is_dir() or item.is_symlink() or item.name.startswith('.'):
-            continue
-        if (item / '.git').exists():
-            if item.resolve() not in known_paths:
-                found.append(item)
-            continue
-        found.extend(find_untracked_repos(item, known_paths, excluded, max_depth - 1))
-    return found
 
 
 @app.command(rich_help_panel='Inspect')
