@@ -1,6 +1,42 @@
 # CHANGELOG
 
 
+## v8.0.0 (2026-08-04)
+
+### Documentation
+
+- Correct the never-writes-the-registry claim
+  ([`d428c8b`](https://github.com/datapointchris/syncer/commit/d428c8b4e80b593143b534035b1048157b4eff49))
+
+`config scan --write` writes one, so the absolute claim was no longer true. Both writers only ever
+  create: `init` scaffolds an absent file and `scan --write` fills an absent or still-empty one, and
+  both refuse the moment it lists repos. `scan` also treats an unparsable file as content, since
+  that is the last one to clobber silently.
+
+### Features
+
+- **cli**: Move the default run to `syncer check`
+  ([`3bd61d1`](https://github.com/datapointchris/syncer/commit/3bd61d1751fbf3e908e76a3c07e7eb02ccf7670c))
+
+The run hung off the root callback, so bare `syncer` scanned every repo and `syncer --apply` mutated
+  them. Six options lived on that callback, which is the tell that the default was a command wearing
+  the root's clothes -- and one of them wrote.
+
+`syncer check` now owns the run and its flags, sitting beside `branches` in the Sync panel. The root
+  callback keeps only --version and the update notice, and the app takes no_args_is_help so bare
+  shows usage.
+
+ctx.obj['dry_run'] went with it; nothing ever read it.
+
+BREAKING CHANGE: `syncer` no longer runs the sync report. Use `syncer check`, and `syncer check
+  --apply` to execute. The flags are unchanged otherwise.
+
+### Breaking Changes
+
+- **cli**: `syncer` no longer runs the sync report. Use `syncer check`, and `syncer check --apply`
+  to execute. The flags are unchanged otherwise.
+
+
 ## v7.0.0 (2026-08-04)
 
 ### Bug Fixes
