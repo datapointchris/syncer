@@ -46,10 +46,40 @@ STATE_DIR = xdg_state_home() / 'syncer'
 # Where run history lived before the state move. Swept by migrate_legacy_events().
 LEGACY_DATA_DIR = Path.home() / '.local' / 'share' / 'syncer'
 
-# The single source for both `config init` and `config example`, so the annotated example a user
-# reads is byte-for-byte the file `init` writes. Every option appears, exercised — the template
-# doubles as side-by-side reference while editing. A round-trip test parses both of these into
-# their models, which is what stops them drifting from the schema.
+# Two pairs, deliberately: STARTER_* is what `config init` writes, TEMPLATE_* is what
+# `config example` prints.
+#
+# These were one pair, on the reasoning that the annotated example a user reads should be
+# byte-for-byte the file `init` writes. That conflated *teaching* with *scaffolding*, and the cost
+# was observed rather than theoretical: `init` shipped a `[policies.laptop]` block that
+# `policy list` renders indistinguishably from a built-in, a `[repo_overrides]` entry for a repo
+# nobody has, and three fake repos — so the very first `syncer` run printed three `would clone`
+# lines for repos that never existed, teaching a new user on run one that this tool's output is
+# noise. A scaffold should have nothing in it to delete.
+#
+# The invariant's actual purpose — a template cannot drift from the schema — survives, because the
+# round-trip test in test_config_cmd.py parses all four back into their models, and the
+# discoverability test still asserts every PrimaryState and Action appears in TEMPLATE_TOOL_CONFIG.
+
+STARTER_TOOL_CONFIG = """\
+# syncer tool config — machine-local. Every option, annotated: syncer config example config
+
+default_policy = "standard"
+"""
+
+# No `repos_file` line, not even commented out. It is the one setting whose correct value differs
+# per machine and whose wrong value fails every run outright rather than degrading — a config
+# deployed from a shared dotfiles bucket pointed a git-only box at a Syncthing path it could never
+# have. A scaffold should not put the idea in front of someone unprompted.
+
+STARTER_REGISTRY = """\
+{
+  "owner": "",
+  "host": "https://github.com",
+  "search_paths": [],
+  "repos": []
+}
+"""
 
 TEMPLATE_TOOL_CONFIG = """\
 # syncer tool config — machine-local. Policies live here rather than in the repo registry
@@ -378,19 +408,24 @@ def load_tool_config() -> ToolConfig:
 
 
 def init_tool_config() -> Path:
-    """Write the annotated tool config template. Callers check for an existing file first."""
+    """Write the minimal starter config. Callers check for an existing file first.
+
+    The starter, not the annotated template: the annotated one is reference material, printed by
+    `config example`, and scaffolding a file whose contents you must mostly delete is worse than
+    scaffolding nothing.
+    """
     TOOL_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    TOOL_CONFIG_PATH.write_text(TEMPLATE_TOOL_CONFIG)
+    TOOL_CONFIG_PATH.write_text(STARTER_TOOL_CONFIG)
     return TOOL_CONFIG_PATH
 
 
 def init_registry(path: Path) -> Path:
-    """Write the annotated registry template to the path syncer reads. Callers check for an
-    existing file first: creating a registry that is absent is scaffolding, but rewriting one that
-    exists would clobber shared infrastructure that forge and indy also read.
+    """Write an empty starter registry to the path syncer reads. Callers check for an existing
+    file first: creating a registry that is absent is scaffolding, but rewriting one that exists
+    would clobber shared infrastructure that forge and indy also read.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(TEMPLATE_REGISTRY)
+    path.write_text(STARTER_REGISTRY)
     return path
 
 

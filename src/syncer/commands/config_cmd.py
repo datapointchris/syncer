@@ -11,6 +11,7 @@ import os
 import shlex
 import shutil
 import subprocess
+from collections import Counter
 from pathlib import Path
 from typing import Annotated
 from typing import Any
@@ -44,6 +45,9 @@ from syncer.output import error
 from syncer.output import hint
 from syncer.output import success
 from syncer.policy import BUILTIN_POLICIES
+from syncer.repos import Repo
+from syncer.repos import find_untracked_repos
+from syncer.repos import normalize_remote_url
 
 config_app = typer.Typer(
     no_args_is_help=True,
@@ -71,7 +75,10 @@ def config_init(
         typer.Option('--repos-file', '-c', help='Create the registry at this path instead of the resolved one'),
     ] = None,
 ) -> None:
-    """Create the annotated tool config and repo registry, at the paths syncer reads.
+    """Create a minimal tool config and an empty repo registry, at the paths syncer reads.
+
+    Minimal on purpose — nothing in either file needs deleting. The fully annotated versions are
+    reference material: `syncer config example config` and `syncer config example registry`.
 
     Idempotent: a file that already exists is reported and left exactly as it was, never
     rewritten — the registry is shared infrastructure that forge and indy also read, and syncer
@@ -94,7 +101,108 @@ def config_init(
             hint(f'registry already exists at {location.path}{note} — left as is')
         else:
             success(f'created registry at {init_registry(location.path)}{note}')
-            hint('it holds example entries — replace them with your repos, then: syncer config validate')
+            hint('it is empty — add your repos with `syncer config edit registry`, then: syncer doctor')
+            hint('every option, annotated: syncer config example registry')
+
+
+def _registry_has_repos(path: Path) -> bool:
+    """Whether a registry holds anything worth protecting.
+
+    The no-clobber rule guards *content* — a registry forge and indy also read — not the empty
+    scaffold `config init` writes. Refusing to fill that one made the documented flow
+    (`config init` then `config scan --write`) contradict itself. Unreadable counts as content:
+    a file syncer cannot parse is the last one to overwrite silently.
+    """
+    try:
+        return bool(json.loads(path.read_text()).get('repos'))
+    except (OSError, ValueError):
+        return True
+
+
+def _entry_from(path: Path) -> tuple[dict[str, str], str, str]:
+    """One registry entry for a repo on disk, plus the (host, owner) its origin implies.
+
+    Derived from the clone's own origin rather than assumed, so a scan across a directory
+    holding both personal and third-party clones produces entries that are individually right.
+    """
+    repo = Repo(name=path.name, path=path, owner='', host='')
+    origin = repo.origin_url
+    home = str(Path.home())
+    entry = {'name': path.name, 'path': str(path).replace(home, '~', 1), 'status': 'active'}
+    if not origin:
+        return entry, '', ''
+    host, _, tail = normalize_remote_url(origin).partition('/')
+    owner = tail.rpartition('/')[0]
+    if not host or not owner:
+        # A URL the default {host}/{owner}/{name} shape cannot express. The real one is right
+        # here, so record it rather than emitting an entry whose URL cannot be rebuilt.
+        entry['clone_url'] = origin
+        return entry, '', ''
+    return entry, host, owner
+
+
+@config_app.command('scan')
+def config_scan(
+    paths: Annotated[list[Path], typer.Argument(help='Directories to scan for git repos.')],
+    write: Annotated[bool, typer.Option('--write', help='Write the registry instead of printing it')] = False,
+) -> None:
+    """Build registry entries from the repos already on disk, and print them.
+
+    The fresh-machine shortcut: naming thirty repos by hand is the step that makes setting this
+    up feel like work, and the answer is already sitting in the filesystem. Each entry's owner
+    and host come from that clone's real origin, so a directory holding both your repos and
+    third-party clones scans correctly.
+
+    Prints to stdout by default so you can review it — `syncer config scan ~/code > repos.json`
+    works, and so does piping it through jq. `--write` puts it at the path syncer reads, and
+    only when no registry is there: this file is shared with forge and indy, so syncer creates
+    one that is absent and never rewrites one that exists.
+    """
+    found: list[Path] = []
+    for path in paths:
+        expanded = path.expanduser()
+        if not expanded.is_dir():
+            error(f'not a directory: {expanded}')
+            raise typer.Exit(2)
+        found.extend(find_untracked_repos(expanded, known_paths=set()))
+
+    # One pass — each _entry_from shells out to git, so re-deriving would double the cost of a
+    # scan over a directory holding seventy repos.
+    scanned = [_entry_from(repo_path) for repo_path in sorted(found)]
+    hosts = Counter(host for _, host, _ in scanned if host)
+    owners = Counter(owner for _, _, owner in scanned if owner)
+
+    # The commonest host/owner become the registry defaults and every entry that disagrees keeps
+    # its own — which is what the per-repo `owner` override is already for.
+    host = f'https://{hosts.most_common(1)[0][0]}' if hosts else 'https://github.com'
+    owner = owners.most_common(1)[0][0] if owners else ''
+    entries = []
+    for entry, _, entry_owner in scanned:
+        if entry_owner and entry_owner != owner:
+            entry['owner'] = entry_owner
+        entries.append(entry)
+
+    registry = {
+        'owner': owner,
+        'host': host,
+        'search_paths': [str(p.expanduser()).replace(str(Path.home()), '~', 1) for p in paths],
+        'repos': entries,
+    }
+    rendered = json.dumps(registry, indent=2) + '\n'
+
+    if not write:
+        print(rendered, end='')
+        hint(f'found {len(entries)} repos — review, then redirect to {get_repos_file_path()} or re-run with --write')
+        return
+
+    location = registry_location(load_tool_config())
+    if location.path.exists() and _registry_has_repos(location.path):
+        error(f'registry already lists repos at {location.path}{registry_source_note(location.source)} — not overwriting')
+        hint('review the scan and merge it by hand: syncer config scan <paths>')
+        raise typer.Exit(1)
+    location.path.parent.mkdir(parents=True, exist_ok=True)
+    location.path.write_text(rendered)
+    success(f'wrote {len(entries)} repos to {location.path}')
 
 
 @config_app.command('example')
@@ -103,8 +211,9 @@ def config_example(
 ) -> None:
     """Print a fully annotated example of one file, showing every available option.
 
-    Reference material, not a scaffold — `syncer config init` writes these same templates to the
-    paths syncer reads. Meant for side-by-side reading: this in one pane, the real file in another.
+    Reference material, not a scaffold — every option appears here, exercised, so this is the
+    thing to read while editing the real file. `syncer config init` writes a *minimal* starter
+    instead, because a scaffold you have to delete most of is worse than an empty one.
     Syntax-highlighted on a terminal, plain text when redirected, so
     `syncer config example registry > repos.json` stays clean.
     """
@@ -115,7 +224,7 @@ def config_example(
         # A template on screen with no path is the half-answer: it says what to write and never
         # where. On stderr, so a redirect still captures only the template.
         target = TOOL_CONFIG_PATH if which == 'config' else get_repos_file_path()
-        hint(f'reference only — `syncer config init {which}` writes this to {target}')
+        hint(f'reference only — the file syncer reads is {target}; `syncer config edit {which}` opens it')
     else:
         print(template, end='')
 
@@ -240,16 +349,35 @@ def _policy_source(repo_config, tool_config: ToolConfig) -> str:
 
 
 @config_app.command('edit')
-def config_edit() -> None:
-    """Open the tool config in your editor ($VISUAL, then $EDITOR).
+def config_edit(
+    which: Annotated[str, typer.Argument(help='Which file to open: config or registry.')] = 'config',
+    repos_file: Annotated[
+        Path | None,
+        typer.Option('--repos-file', '-c', help='Edit a different registry'),
+    ] = None,
+) -> None:
+    """Open the tool config or the repo registry in your editor ($VISUAL, then $EDITOR).
 
-    Seeds it from the template first if none exists. The editor runs in the foreground, so a
+    Takes the same `config`/`registry` positional as `init` and `example`. It used to open only
+    config.toml, while the file a new machine actually needs edited is the registry — naming your
+    repos is the one step nothing else can do for you.
+
+    Seeds the file from its starter first if none exists. The editor runs in the foreground, so a
     terminal editor blocks until you close it; a GUI editor returns immediately unless you
     configured it to wait (e.g. EDITOR="code --wait").
     """
-    if not TOOL_CONFIG_PATH.exists():
-        path = init_tool_config()
-        hint(f'no config found — created a starter config at {path}')
+    _requested_files(which)
+    if which == 'registry':
+        # Resolved through registry_location so this opens what syncer actually reads, not an
+        # assumed default — the two differ on every machine that sets repos_file.
+        location = registry_location(load_tool_config(), repos_file)
+        target = location.path
+        if not target.exists():
+            hint(f'no registry found — created an empty one at {init_registry(target)}{registry_source_note(location.source)}')
+    else:
+        target = TOOL_CONFIG_PATH
+        if not target.exists():
+            hint(f'no config found — created a starter config at {init_tool_config()}')
 
     editor = os.environ.get('VISUAL') or os.environ.get('EDITOR')
     if not editor:
@@ -265,7 +393,7 @@ def config_edit() -> None:
         error(f'editor not found on PATH: {parts[0]}')
         raise typer.Exit(1)
 
-    subprocess.run([editor_bin, *parts[1:], str(TOOL_CONFIG_PATH)])
+    subprocess.run([editor_bin, *parts[1:], str(target)])
 
 
 @config_app.command('validate')

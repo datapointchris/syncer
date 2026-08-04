@@ -170,7 +170,9 @@ def _not_the_shipped_template(config: SyncerConfig) -> Check:
     if config.owner == _PLACEHOLDER_OWNER:
         found.append(f'owner={_PLACEHOLDER_OWNER}')
     if not found:
-        return Check('identity', Status.OK, 'registry has been edited from the template')
+        # Worded for what was actually established. "Edited from the template" would be a claim
+        # about history, and it is false of a registry nobody has touched yet.
+        return Check('identity', Status.OK, 'no template placeholders')
     # FAIL, not WARN: nobody keeps `your-github-username` on purpose, and a run against these
     # would try to clone repos that were never real.
     return Check(

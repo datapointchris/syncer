@@ -27,12 +27,17 @@ This fetches the latest GitHub release and reinstalls via `uv tool install`.
 On a machine that has never run syncer:
 
 ```bash
-syncer config init      # write both files, annotated, at the paths syncer reads
-syncer config edit      # name your repos, adjust the default policy, add your own
-syncer doctor           # can this machine actually run syncer? names whatever is wrong
-syncer                  # report-only
-syncer --apply          # execute the safe actions
+syncer config init                     # minimal config + empty registry, at the paths syncer reads
+syncer config scan ~/code ~/tools      # build registry entries from the repos already on disk
+syncer config edit registry            # or name them by hand
+syncer doctor                          # can this machine actually run syncer? names what is wrong
+syncer                                 # report-only
+syncer --apply                         # execute the safe actions
 ```
+
+`config init` writes a **minimal** starter — nothing in either file needs deleting. The fully annotated versions, with every option exercised, are reference material: `syncer config example config` and `syncer config example registry`.
+
+`config scan` reads each repo's real `origin` to work out its owner and host, so a directory holding both your own repos and third-party clones scans correctly. It prints to stdout for review; `--write` puts it at the path syncer reads, and only when no registry is there.
 
 **When something does not work, run `syncer doctor` first.** It reports git, the resolved config
 and registry paths *and what chose each of them*, whether the remotes can actually be reached
@@ -57,7 +62,7 @@ syncer issues            # report path mismatches, missing/untracked repos, mast
 syncer branches          # per-branch report only (no lifecycle/clone, no event tracking)
 syncer branches --apply  # execute the decided action per branch
 syncer stats             # run history and repo insights (commits, age, dirty, stale)
-syncer config            # inspect, edit, and validate the config and registry
+syncer config            # inspect, edit, scan, and validate the config and registry
 syncer policy            # list policies and show what each one decides
 syncer demo              # run against temp repos to show each status state
 syncer version           # print installed version

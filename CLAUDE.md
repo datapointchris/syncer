@@ -176,18 +176,40 @@ current/non-current split needs the same treatment.
   `repos_file` pointer, `default_policy`, custom `[policies.*]`, `[repo_overrides]`, and
   `git_timeout`.
 
-`TEMPLATE_TOOL_CONFIG` and `TEMPLATE_REGISTRY` in `config.py` are the **single source** for both
-`config init` and `config example` — changing a config model means changing the template, and a
-round-trip test (`test_config_cmd.py`) parses each back into its model so they cannot drift. A
-second test asserts every `PrimaryState` and `Action` appears in the tool-config template, so a
-new member cannot ship undiscoverable.
+**Scaffolding and teaching are separate, on purpose.** `config.py` holds two pairs: `STARTER_*`,
+which `config init` **writes**, and `TEMPLATE_*`, which `config example` **prints**.
 
-`init` **writes** those templates, `example` **prints** them, and both take the same optional
-positional naming which file — `config`, `registry`, or omitted for both — reusing the vocabulary
-`config path` already established. That positional replaced a `--registry` boolean: a flag whose
-name is a noun answers "which file" in a grammar built for "on or off", and it read as an unrelated
-mode rather than a target. `example` on a terminal also names the path `init` would write to,
-because a template on screen with no path is the half of the answer that cannot be acted on.
+They used to be one pair, on the reasoning that the annotated example a user reads should be
+byte-for-byte the file `init` writes. The cost was observed, not theoretical: `init` shipped a
+`[policies.laptop]` block that `policy list` renders indistinguishably from a built-in, a
+`[repo_overrides]` entry for a repo nobody has, and three fake repos — so the very first `syncer`
+run printed three `would clone` lines for repos that never existed. **A scaffold must have nothing
+in it to delete**; a reference must have everything. Those are different documents.
+
+`STARTER_TOOL_CONFIG` is three lines and deliberately contains no `repos_file`, *not even
+commented out* — it is the one setting whose correct value differs per machine and whose wrong
+value fails every run outright rather than degrading, so a scaffold must not put the idea in front
+of someone unprompted. `STARTER_REGISTRY` has `"repos": []`.
+
+The invariant's real purpose survives: the round-trip test in `test_config_cmd.py` parses **all
+four** back into their models, and the discoverability test still asserts every `PrimaryState` and
+`Action` appears in `TEMPLATE_TOOL_CONFIG` — deliberately the annotated one, since discoverability
+belongs in the reference, which is what resolves its tension with a minimal scaffold.
+
+`init`, `example` and `edit` all take the same positional naming which file — `config`,
+`registry`, or (for `init`) omitted for both — reusing the vocabulary `config path` established.
+That positional replaced a `--registry` boolean: a flag whose name is a noun answers "which file"
+in a grammar built for "on or off", and it read as an unrelated mode rather than a target. `edit`
+gained it late; it opened only `config.toml` while the file a new machine actually needs edited is
+the registry. `example` on a terminal also names the path syncer really reads, because a template
+on screen with no path is the half of the answer that cannot be acted on.
+
+`config scan PATHS...` builds entries from the repos already on disk, deriving each one's owner
+and host from its **real origin** — so a directory holding both your repos and third-party clones
+scans correctly, which is exactly the shape of `exemplar-repos.json`. The commonest host/owner
+become the registry defaults and every entry that disagrees keeps its own. It **prints** by
+default and writes only under `--write`, and only when no registry exists: the same narrow reading
+of the sanctioned single write, because this file is shared with forge and indy.
 
 Every load path raises `ConfigError` carrying one readable line per problem, rather than letting a
 pydantic `ValidationError` escape as a traceback. Policies are constructed one at a time in
