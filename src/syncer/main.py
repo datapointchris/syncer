@@ -28,6 +28,7 @@ from syncer.output import ICON_WARN
 from syncer.output import _status_line
 from syncer.output import console
 from syncer.report import DEFAULT_JOBS
+from syncer.report import exit_code_for
 from syncer.report import report_branches
 from syncer.repos import Repo
 from syncer.repos import find_repo_in_search_paths
@@ -83,6 +84,7 @@ def main(
         Path | None,
         typer.Option('--repos-file', '-c', help='Use a different repo registry; replaces the default set entirely'),
     ] = None,
+    json_output: Annotated[bool, typer.Option('--json', help='Emit the run as JSON on stdout instead of a report')] = False,
     version: Annotated[
         bool, typer.Option('--version', '-V', callback=_version_callback, is_eager=True, help='Show the installed version and exit')
     ] = False,
@@ -106,14 +108,16 @@ def main(
     if ctx.invoked_subcommand is None:
         syncer_config, repos_path = resolve_registry(repos_file)
         tool_config = load_tool_config()
-        run_sync(
+        reports = run_sync(
             syncer_config,
             tool_config,
             _events_file(repos_path, repos_file),
             cli_policy=policy,
             apply=apply and not dry_run,
             jobs=jobs,
+            as_json=json_output,
         )
+        raise typer.Exit(exit_code_for(reports))
 
 
 @app.command(rich_help_panel='Sync')
@@ -125,16 +129,20 @@ def branches(
         Path | None,
         typer.Option('--repos-file', '-c', help='Use a different repo registry; replaces the default set entirely'),
     ] = None,
+    json_output: Annotated[bool, typer.Option('--json', help='Emit the report as JSON on stdout')] = False,
 ) -> None:
     """Per-branch report only — like the default run without lifecycle, cloning, or history.
 
     Classifies every local branch (ahead/behind/gone/no-upstream/…) and shows the action the
     resolved policy would take. Read-only by default; --apply executes it, enforcing the hard
     safety invariants (never force, never touch a dirty tree, refuse rather than force).
+
+    Exits 1 if any repo reached an error state, so it can gate a script.
     """
     syncer_config = resolve_config(repos_file)
     tool_config = load_tool_config()
-    report_branches(syncer_config, tool_config, cli_policy=policy, apply=apply, jobs=jobs)
+    reports = report_branches(syncer_config, tool_config, cli_policy=policy, apply=apply, jobs=jobs, as_json=json_output)
+    raise typer.Exit(exit_code_for(reports))
 
 
 def find_untracked_repos(search_path: Path, known_paths: set[Path], excluded: set[Path] | None = None, max_depth: int = 3) -> list[Path]:
@@ -256,8 +264,12 @@ def issues(
     console.print()
     if issues_found == 0:
         console.print('[blue] All repos healthy.[/blue]')
-    else:
-        console.print(f'[yellow] {issues_found} issue(s) found.[/yellow]')
+        return
+    console.print(f'[yellow] {issues_found} issue(s) found.[/yellow]')
+    # Non-zero, because printing a count and exiting 0 is the exact shape of a check nothing can
+    # be scripted against — the caller has to scrape the text to learn what the exit code
+    # already should have said.
+    raise typer.Exit(1)
 
 
 @app.command(rich_help_panel='Inspect')

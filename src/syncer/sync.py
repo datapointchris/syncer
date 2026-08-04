@@ -24,11 +24,13 @@ from syncer.output import ICON_PULL
 from syncer.output import ICON_PUSH
 from syncer.output import ICON_WARN
 from syncer.output import console
+from syncer.output import emit_json
 from syncer.policy import Action
 from syncer.report import DEFAULT_JITTER_SECONDS
 from syncer.report import DEFAULT_JOBS
 from syncer.report import RepoBranchReport
 from syncer.report import Severity
+from syncer.report import collect_failures
 from syncer.report import gather_reports
 from syncer.report import render_failure_summary
 from syncer.report import render_report
@@ -155,19 +157,22 @@ def run_sync(
     apply: bool = False,
     jobs: int = DEFAULT_JOBS,
     jitter: float = DEFAULT_JITTER_SECONDS,
-) -> None:
+    as_json: bool = False,
+) -> list[RepoBranchReport]:
+    """Run the full sync and render it. Returns the reports so the caller can set an exit code."""
     start = time.monotonic()
     reports = gather_reports(config, tool_config, cli_policy, apply, jobs, jitter, include_lifecycle=True)
     snapshots = [_snapshot(report) for report in reports]
     summary = _summary(snapshots)
 
-    console.print()
-    _print_summary_line(summary)
-    console.print()
-    # Reports are sorted synced → errors, so the repos needing attention land nearest the prompt.
-    for report in reports:
-        render_report(report, apply)
-    render_failure_summary(reports)
+    if not as_json:
+        console.print()
+        _print_summary_line(summary)
+        console.print()
+        # Reports are sorted synced → errors, so repos needing action land nearest the prompt.
+        for report in reports:
+            render_report(report, apply)
+        render_failure_summary(reports)
 
     summary.duration_ms = int((time.monotonic() - start) * 1000)
     event = SyncRunEvent(
@@ -180,7 +185,30 @@ def run_sync(
     emit_event(event, events_file)
 
     stale = find_stale_repos(read_events(events_file))
+    if as_json:
+        # Built from the same snapshots the event stream records, so the JSON and the history
+        # cannot disagree about what happened.
+        emit_json(
+            {
+                'summary': summary.model_dump(),
+                'repos': [snapshot.model_dump() for snapshot in snapshots],
+                'failures': [
+                    {
+                        'cause': group.cause.value if group.cause else None,
+                        'host': group.host,
+                        'repos': list(group.repos),
+                        'stderr': group.stderr,
+                        'hints': list(group.hints),
+                    }
+                    for group in collect_failures(reports)
+                ],
+                'stale': [{'path': path, 'days': days} for path, days in stale],
+            }
+        )
+        return reports
+
     if stale:
         console.print()
         for repo_path, days in stale:
             console.print(f'  [yellow]{ICON_WARN}  {repo_path} has had uncommitted changes for {days} days[/yellow]')
+    return reports

@@ -52,6 +52,7 @@ from syncer.output import ICON_PULL
 from syncer.output import ICON_PUSH
 from syncer.output import ICON_WARN
 from syncer.output import console
+from syncer.output import emit_json
 from syncer.output import err_console
 from syncer.output import error
 from syncer.output import hint
@@ -272,7 +273,10 @@ def _failed_report(repo: Repo, label: str, repo_config: RepoConfig, error: str, 
         error=error,
         error_detail=detail,
         failures=list(repo.failures),
-        expected_url=repo.url,
+        # The clone's real origin, not the registry's expected URL: these failures come from
+        # fetching, so the host to name in a hint is the one git actually talked to. They differ
+        # exactly when origin_mismatch fires, and there the expected URL is the wrong answer.
+        expected_url=repo.origin_url or repo.url,
         uncommitted=len(repo.uncommitted_changes),
         stashes=repo.stash_count,
     )
@@ -417,6 +421,34 @@ def gather_reports(
     return reports
 
 
+def _branch_json(report: RepoBranchReport) -> dict:
+    """One repo as plain data. Mirrors what render_report shows, including why it failed."""
+    return {
+        'name': report.name,
+        'path': report.path,
+        'policy': report.policy_name,
+        'error': report.error,
+        'error_detail': report.error_detail,
+        'origin_mismatch': report.origin_mismatch,
+        'branches': [
+            {
+                'branch': row.state.branch,
+                'state': row.state.primary.value,
+                'ahead': row.state.ahead,
+                'behind': row.state.behind,
+                'is_default': row.state.is_default,
+                'is_current': row.state.is_current,
+                'dirty': row.state.dirty,
+                'action': row.action.value,
+                'blocked': row.blocked,
+                'outcome': row.outcome.status if row.outcome else None,
+                'outcome_message': row.outcome.message or None if row.outcome else None,
+            }
+            for row in report.rows
+        ],
+    }
+
+
 def collect_failures(reports: list[RepoBranchReport]) -> list[FailureGroup]:
     """Every git failure across the run, collapsed to one group per (cause, host)."""
     return group_failures((report.label, report.expected_url, failure) for report in reports for failure in report.failures)
@@ -493,9 +525,26 @@ def report_branches(
     apply: bool = False,
     jobs: int = DEFAULT_JOBS,
     jitter: float = DEFAULT_JITTER_SECONDS,
-) -> None:
+    as_json: bool = False,
+) -> list[RepoBranchReport]:
+    """Per-branch view. Returns the reports so the caller can set an exit code."""
     reports = gather_reports(config, tool_config, cli_policy, apply, jobs, jitter)  # include_lifecycle defaults False
+    if as_json:
+        emit_json({'repos': [_branch_json(report) for report in reports]})
+        return reports
     console.print()
     for report in reports:
         render_report(report, apply)
     render_failure_summary(reports)
+    return reports
+
+
+def exit_code_for(reports: list[RepoBranchReport]) -> int:
+    """1 if any repo reached ERROR, else 0. One rule, stated once, so it cannot drift.
+
+    Report-only and --apply share it; they differ only in which severities they can produce.
+    WARNING stays 0 deliberately — a repo that is `ahead` is the normal state of a machine
+    somebody works on, and an exit code that is non-zero every day is one nobody can automate
+    against, which is the same reason `issues` printing "N found" and exiting 0 was useless.
+    """
+    return 1 if any(report_severity(report) is Severity.ERROR for report in reports) else 0

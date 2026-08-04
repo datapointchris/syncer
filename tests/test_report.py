@@ -164,6 +164,15 @@ class TestUnverifiableRepoIsNotSynced:
         assert report is not None
         assert report.error is not None
 
+    def test_the_failure_names_the_host_git_actually_talked_to(self, tmp_path):
+        """A fetch failure is about the clone's real origin, not the registry's expected URL.
+        Grouping on the latter would put a corporate host's outage under github.com and hand
+        out a hint for the wrong machine."""
+        config = self._repo_with_dead_remote(tmp_path)
+        report = _build(config.repos[0], config, cli_policy='observe')
+        assert str(tmp_path) in report.expected_url
+        assert 'github.com' not in report.expected_url
+
     def test_local_counts_survive_for_the_stale_warnings(self, tmp_path):
         config = self._repo_with_dead_remote(tmp_path)
         (Path(config.repos[0].path) / 'dirty.txt').write_text('x\n')

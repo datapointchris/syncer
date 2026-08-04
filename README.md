@@ -48,6 +48,7 @@ order, so the first failure is the one to act on. It exits 1 on a real problem, 
 syncer                   # report-only: classify every repo/branch, show what would happen
 syncer --apply           # execute each policy's safe actions (pull/push/ff/clone)
 syncer --dry-run         # force report-only, even with --apply
+syncer --json            # emit the run as JSON on stdout instead of a report
 syncer -p observe        # override the resolved policy for this run
 syncer -j 8              # limit concurrency to 8 repos at a time (default 16)
 syncer -c work.json      # use a different registry; replaces the default set entirely
@@ -63,6 +64,18 @@ syncer version           # print installed version
 ```
 
 The default `syncer` run and `syncer branches` share the same policy engine and concurrency; the difference is that the default run also handles repo lifecycle (clone missing repos, flag moved/untracked/no-remote repos), records a run in the history (`syncer stats`), and warns about repos left dirty for days.
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | nothing reached an error — including repos that merely need a push |
+| `1` | at least one repo reached an error state (`syncer`, `branches`, `doctor`), or at least one issue was found (`issues`) |
+| `2` | usage error — an unknown flag or argument |
+
+**A repo that is `ahead` exits 0.** That is the normal state of a machine somebody works on, and an exit code that is non-zero every day is one nobody can automate against. `1` means something is genuinely wrong: a clone that failed, a repo whose state could not be verified, an action that was refused at write time.
+
+`syncer --json` and `syncer branches --json` write the whole run to **stdout** as JSON with nothing else mixed in — the report, the per-repo detail, and the grouped failure causes with git's own stderr. The sync JSON is built from the same snapshots the event stream records, so it cannot disagree with `syncer stats` about what happened.
 
 ## Config
 

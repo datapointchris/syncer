@@ -267,6 +267,20 @@ a missing credential from a mis-pointed registry from a host that was never reac
   never going to work but not on one whose repos simply are not cloned yet.
 - It **never writes anything**, unlike `config edit`, which seeds a template.
 
+## Exit codes and `--json`
+
+**One rule, stated once in `exit_code_for` (`report.py`): exit 1 iff any report reaches
+`Severity.ERROR`.** Report-only and `--apply` share it; they differ only in which severities they
+can produce. WARNING stays 0 on purpose — a repo that is `ahead` is the normal state of a machine
+somebody works on, and a code that is non-zero every day is one nobody can automate against.
+`issues` exits 1 when it found any, because printing "N issue(s) found" and exiting 0 is the
+exact shape of a check whose caller has to scrape text for what the exit code should have said.
+
+`--json` (default run, `branches`, both to **stdout**, everything else on stderr) reuses the
+existing `RepoSnapshot`/`RunSummary` models rather than building a parallel shape, which is what
+guarantees the JSON and the event stream agree about a run by construction. There is no
+console-mode abstraction: an `as_json` flag skips the renderers, and that is all.
+
 ## Concurrency
 
 Repos are processed on a `ThreadPoolExecutor` (default `DEFAULT_JOBS = 16`, `-j` to tune). Git
