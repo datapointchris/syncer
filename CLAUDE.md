@@ -241,8 +241,31 @@ only possible because `decide()` is pure, and it means the table cannot drift fr
 does. Never replace it with a written-down table, and iterate the enums rather than listing their
 members — `test_policy_cmd.py` asserts the matrix agrees with `decide()` cell for cell.
 
-`config validate` checks **structure**; `syncer issues` checks **reality** (do the paths exist).
-Both help texts say so. Blurring them means neither gets trusted.
+Three diagnostics, three questions, and every help text says which:
+
+| Command | Answers |
+| --- | --- |
+| `config validate` | is the **structure** right — do both files parse and cross-reference |
+| `syncer issues` | is **reality** right — do the registry's paths exist, has anything moved |
+| `syncer doctor` | is this **machine** able to run syncer at all |
+
+Blurring them means none of them gets trusted. `doctor` (`doctor.py`) exists because the first
+two could both pass on a box where nothing worked: a first run that failed could not distinguish
+a missing credential from a mis-pointed registry from a host that was never reachable. Its rules:
+
+- **Prerequisite order, and the first FAIL is the actionable one.** No value in reporting that a
+  registry lists no repos when git is not installed.
+- **Nothing assumes GitHub.** Reachability is proved with `git ls-remote` against the URL the
+  registry actually resolves to, so Bitbucket Data Center, an internal GitLab and a bare SSH host
+  are all first-class. `gh` is never invoked — a test asserts it.
+- **Never probe what is already known to be fake.** A registry still holding template
+  placeholders skips the network checks entirely; reporting a DNS failure for
+  `your-github-username` names the wrong problem.
+- **`PROBE_TIMEOUT_SECONDS` is not `git_timeout`.** The latter is sized for fetching a monorepo
+  over a VPN; a diagnostic that hangs two minutes per host is one nobody waits for.
+- **Exit 1 on FAIL, 0 on WARN**, so `syncer doctor && syncer --apply` stops on a box that was
+  never going to work but not on one whose repos simply are not cloned yet.
+- It **never writes anything**, unlike `config edit`, which seeds a template.
 
 ## Concurrency
 

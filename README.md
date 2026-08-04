@@ -29,10 +29,16 @@ On a machine that has never run syncer:
 ```bash
 syncer config init      # write both files, annotated, at the paths syncer reads
 syncer config edit      # name your repos, adjust the default policy, add your own
-syncer config validate  # both files, plus their cross-references
+syncer doctor           # can this machine actually run syncer? names whatever is wrong
 syncer                  # report-only
 syncer --apply          # execute the safe actions
 ```
+
+**When something does not work, run `syncer doctor` first.** It reports git, the resolved config
+and registry paths *and what chose each of them*, whether the remotes can actually be reached
+(with git's own error and what to do about it), and how many repos are cloned — in prerequisite
+order, so the first failure is the one to act on. It exits 1 on a real problem, so
+`syncer doctor && syncer --apply` stops on a box that was never going to work.
 
 `config init` creates whichever of the two files is missing and **never rewrites one that exists** — the registry is shared infrastructure that `forge` and `indy` also read, so syncer scaffolds one that is absent and modifies no existing one. `syncer config init registry` does just that file; `syncer config path` says where both landed.
 
@@ -45,6 +51,7 @@ syncer --dry-run         # force report-only, even with --apply
 syncer -p observe        # override the resolved policy for this run
 syncer -j 8              # limit concurrency to 8 repos at a time (default 16)
 syncer -c work.json      # use a different registry; replaces the default set entirely
+syncer doctor            # can this machine run syncer? git, paths, reachability, clones
 syncer issues            # report path mismatches, missing/untracked repos, master branches
 syncer branches          # per-branch report only (no lifecycle/clone, no event tracking)
 syncer branches --apply  # execute the decided action per branch

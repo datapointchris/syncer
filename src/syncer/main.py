@@ -21,6 +21,9 @@ from syncer.config import load_tool_config
 from syncer.config import resolve_clone_url
 from syncer.config import resolve_config
 from syncer.config import resolve_registry
+from syncer.doctor import doctor_exit_code
+from syncer.doctor import render_doctor
+from syncer.doctor import run_doctor
 from syncer.report import DEFAULT_JOBS
 from syncer.report import report_branches
 from syncer.repos import ICON_MOVE
@@ -271,6 +274,28 @@ def stats(
     """
     syncer_config, repos_path = resolve_registry(repos_file)
     show_stats(syncer_config, _events_file(repos_path, repos_file))
+
+
+@app.command(rich_help_panel='Inspect')
+def doctor(
+    repos_file: Annotated[
+        Path | None,
+        typer.Option('--repos-file', '-c', help='Check a different repo registry'),
+    ] = None,
+) -> None:
+    """Check whether this machine can run syncer at all, and say which part is wrong.
+
+    Completes the trio: [bold]config validate[/bold] checks structure, [bold]issues[/bold] checks
+    reality (do the registry's paths exist), and this checks the machine — git, the resolved
+    config and registry paths with the reason each was chosen, whether the remotes can actually
+    be reached, and how many repos are cloned. Read-only, and never writes a config.
+
+    Exits 1 if any check fails, so [bold]syncer doctor && syncer --apply[/bold] stops on a box
+    that was never going to work.
+    """
+    checks = run_doctor(repos_file)
+    render_doctor(checks)
+    raise typer.Exit(doctor_exit_code(checks))
 
 
 @app.command(rich_help_panel='Manage')
