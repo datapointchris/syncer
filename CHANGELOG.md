@@ -1,6 +1,204 @@
 # CHANGELOG
 
 
+## v7.0.0 (2026-08-04)
+
+### Bug Fixes
+
+- **config**: Reject a url_template that doubles the scheme
+  ([`c5e766d`](https://github.com/datapointchris/syncer/commit/c5e766dc4a1d0e7d1862e20f8121426a0ba30490))
+
+The registry `host` ships as 'https://github.com', scheme included, so writing the obvious-looking
+  template 'https://{host}/{owner}/{name}' silently produces 'https://https://github.com/...'. git
+  then reports `Could not resolve host: https`, which names neither setting responsible and reads
+  like a network fault.
+
+Caught at load time rather than by a connectivity check, because a URL carrying two schemes is
+  malformed on inspection.
+
+- **report**: Keep the origin check when the fetch fails
+  ([`411cf41`](https://github.com/datapointchris/syncer/commit/411cf41673686f3a1d7ae5dc899718d7546330e9))
+
+CI caught two things a credentialed laptop hid.
+
+The fetch-failure gate returned before computing origin_mismatch, which needs no network and is
+  often the *reason* the fetch failed: a repo pointing at a host you have no credential for fails
+  exactly like a network problem, and without this line the report sends you to debug the network
+  instead of the remote. It is now computed and rendered on the failure path, and the failure
+  summary groups on the real origin rather than the registry's expectation.
+
+The origin-mismatch tests pointed at a live github.com URL, so they passed on a machine with
+  credentials and failed on one without — the check compares two strings and never needed the
+  network. They now use a local bare remote, so the fetch genuinely succeeds everywhere, plus a new
+  case covering the failed-fetch path.
+
+Also stops asserting `git init` produces 'main': it honours init.defaultBranch, which is 'master' on
+  a stock runner.
+
+### Features
+
+- **cli**: Exit non-zero on errors and add --json
+  ([`024f742`](https://github.com/datapointchris/syncer/commit/024f7422d760060c708b838736718dc4e6ee0501))
+
+Every run exited 0 no matter how many repos failed, and `issues` printed "N issue(s) found" and
+  exited 0 too — the exact shape of a check whose caller has to scrape text for what the exit code
+  should have said. There was no machine-readable output on the sync surface at all.
+
+One rule, stated once in exit_code_for: exit 1 iff any report reaches Severity.ERROR. Report-only
+  and --apply share it. WARNING stays 0 on purpose — a repo that is `ahead` is the normal state of a
+  machine somebody works on, and a code that is non-zero every day is one nobody can automate
+  against.
+
+--json reuses the existing RepoSnapshot/RunSummary models rather than a parallel shape, so the JSON
+  and the event stream cannot disagree about a run. Grouped failure causes ride along with git's own
+  stderr.
+
+Also fixes the host a failure is attributed to: a fetch failure is about the clone's real origin,
+  not the registry's expected URL. Grouping on the latter filed a corporate host's outage under
+  github.com and offered a hint for the wrong machine.
+
+BREAKING CHANGE: syncer, syncer branches and syncer issues now exit 1 when they report a problem,
+  where they previously always exited 0.
+
+- **config**: Scaffold a minimal starter and scan repos off disk
+  ([`a39aee1`](https://github.com/datapointchris/syncer/commit/a39aee1ef4aff727bfab771f0b8a5fc7575157f7))
+
+`config init` wrote a teaching document. It shipped a [policies.laptop] block that `policy list`
+  renders indistinguishably from a built-in, a [repo_overrides] entry for a repo nobody has, and
+  three fake repos — so the very first `syncer` run printed three `would clone` lines for repos that
+  never existed, teaching a new user on run one that this tool's output is noise.
+
+STARTER_* is now what `init` writes and TEMPLATE_* what `example` prints. A scaffold must have
+  nothing in it to delete; a reference must have everything. Those are different documents, and the
+  invariant that mattered — a template cannot drift from its model — survives, because the
+  round-trip test now parses all four. The starter config deliberately has no `repos_file` line, not
+  even commented out: it is the one setting whose correct value differs per machine and whose wrong
+  value fails every run outright.
+
+`config scan PATHS...` builds entries from the repos already on disk, deriving each one's owner and
+  host from its real origin, so a directory holding both your repos and third-party clones scans
+  correctly. It prints for review by default; --write refuses a registry that already lists repos,
+  but fills the empty one `init` just wrote — refusing there made the documented two-step flow
+  contradict itself. A URL the default {host}/{owner}/{name} shape cannot express is recorded
+  verbatim as clone_url rather than emitted as an entry that cannot be rebuilt.
+
+`config edit` gains the same config|registry positional the other two take, and resolves through
+  registry_location so it opens what syncer really reads. It opened only config.toml, while the file
+  a new machine needs edited is the registry.
+
+BREAKING CHANGE: `syncer config init` writes a minimal config and an empty registry instead of the
+  annotated templates. Existing files are untouched, as before.
+
+- **doctor**: Check whether this machine can run syncer at all
+  ([`fd0affa`](https://github.com/datapointchris/syncer/commit/fd0affac69cebfc664c96d4600cba1aab0ce49ac))
+
+`config validate` checks structure and `issues` checks reality, and both could pass on a box where
+  nothing worked. A first run that failed had no way to distinguish a missing credential from a
+  mis-pointed registry from a host that was never reachable — the output named a path but never what
+  had chosen it, so the tool looked like it had someone else's layout hard-coded.
+
+doctor runs nine checks in prerequisite order, so the first failure is the one to act on: git, the
+  resolved config/registry/state paths with each one's provenance, both files parsing, template
+  placeholders, whether clone URLs resolve at all, reachability, clones on disk, and policy
+  resolution.
+
+Reachability is proved with `git ls-remote` against the URL the registry actually resolves to —
+  never `gh`, which a corporate Bitbucket or an internal GitLab cannot answer — and a failure is run
+  through the same cause detection the sync report uses, so it names git's words, the cause, and
+  what to do. Its timeout is deliberately not git_timeout: that is sized for fetching a monorepo
+  over a VPN, and a diagnostic nobody waits for is not a diagnostic.
+
+A registry still holding template placeholders skips the network checks entirely, since reporting a
+  DNS failure for `your-github-username` names the wrong problem.
+
+Exits 1 on FAIL and 0 on WARN, so `syncer doctor && syncer --apply` stops on a box that was never
+  going to work but not on one whose repos simply are not cloned yet. Never writes anything.
+
+- **git**: Treat an unverifiable repo as an error, not as synced
+  ([`40c82c5`](https://github.com/datapointchris/syncer/commit/40c82c57c423321d51fbe848e3063e1cb4515dee))
+
+classify_repo never bound the fetch's return value, and ahead_behind returned (0, 0) when rev-list
+  failed — which _primary_from_counts reads as SYNCED. A repo that had never once reached its remote
+  therefore reported as fully in sync, stated confidently, which is the exact opposite of the one
+  question syncer exists to answer. On a machine with no key or credential, BatchMode makes every
+  fetch fail instantly, so that was the whole report.
+
+Repo._git now records a GitFailure for any non-zero exit unless the call passes probe=True,
+  refresh_remote returns the fetch's failure, and _build_repo_report turns that into a repo-level
+  error before classifying — which is also what refuses execution, since no execute() call is
+  constructed. Such a report carries zero rows deliberately: a row is a claim about a branch, and
+  the point is that no claim can be made.
+
+Also closes a safety hole of the same shape. uncommitted_changes returned [] when git status failed,
+  so the invariant-2 gates read a broken git as a clean tree, i.e. as permission to mutate. Gates
+  now call is_dirty, which answers True when it cannot tell.
+
+Run history gains the distinction it was flattening: clone_failed no longer maps to 'missing', so
+  'git said no' is no longer recorded identically to 'nobody has cloned it yet'.
+
+RepoSnapshot.status is typed str rather than the RepoStatus Literal — adding a status member made
+  the previous release refuse to read its own history file, because a closed Literal on the read
+  side rejects anything a newer version wrote. The write vocabulary is still constrained, by mypy.
+  read_events now skips an unparseable line for the same reason.
+
+BREAKING CHANGE: a repo whose state cannot be established now renders as an error instead of
+  reporting synced, and no action runs against it.
+
+- **report**: Group repo failures by cause and hint once
+  ([`dc884fb`](https://github.com/datapointchris/syncer/commit/dc884fba183b30624c899b8f58746de27858c590))
+
+Twenty repos behind one dead VPN produced twenty identical stderr blobs and no statement of the
+  single thing to fix. Failures are now collapsed to one block per (cause, host), and each block
+  says what to do — the first use of output.hint() anywhere on the sync surface, which until now was
+  reachable only from the config commands.
+
+diagnose.py is pure, so its pattern table is exercised against real captured stderr with no
+  fixtures, and three honesty rules are testable statements rather than intentions:
+
+- Unrecognised output yields no cause and no guess. A confident wrong explanation sends someone to
+  fix the wrong thing. - Remedies derive from the resolved URL's host, so `gh auth login` is
+  suggested only when the host really is github.com — a corporate Bitbucket told to run it is noise
+  that teaches you to skip hints. - Raw stderr is always shown; the cause is a summary and summaries
+  lose things.
+
+Host-key patterns are matched before auth ones because a rejected key emits both, and the key is the
+  actionable half. Every auth and host-key hint states the BatchMode caveat: nothing in git's output
+  hints that a credential which works by hand fails here because syncer runs git non-interactively.
+
+### Refactoring
+
+- **output**: Consolidate on one console pair
+  ([`24b2023`](https://github.com/datapointchris/syncer/commit/24b20238a88484e457dee76beefa02bd4012b885))
+
+output.py declared "stdout is data, stderr is everything else", and the entire sync surface bypassed
+  it. There were three separate Console objects — one in repos.py that repos.py never used, plus one
+  each in main.py and stats.py — so every runtime error went to stdout, which is the opposite of the
+  stated contract.
+
+The icons and line helpers move to output.py with them. They are presentation, and repos.py has no
+  business importing rich to run a subprocess; it is now stdlib-only, which is a structural proof
+  that the git layer is only a git layer.
+
+highlight=False globally, which was already the setting on two of the three consoles. Rich's
+  automatic highlighting colours anything shaped like a number or a path, turning a report of branch
+  names and commit counts into confetti.
+
+Also gives the origin-mismatch lines the soft_wrap every other path message has. Both are URLs, the
+  whole point of the check is to hand you two you can compare, and Rich was breaking them mid-path.
+
+- **repos**: Move find_untracked_repos out of main
+  ([`1e54a87`](https://github.com/datapointchris/syncer/commit/1e54a8717c58c726e86c24ebb2941cad4ccb77fb))
+
+It is repo discovery, which is repos.py's domain, and `config scan` needs it too — a second copy in
+  a command module is how two callers drift apart. Its tests move with it, per one test module per
+  source module.
+
+### Breaking Changes
+
+- **config**: `syncer config init` writes a minimal config and an empty registry instead of the
+  annotated templates. Existing files are untouched, as before.
+
+
 ## v6.0.3 (2026-08-04)
 
 ### Bug Fixes
