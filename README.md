@@ -74,7 +74,7 @@ The repo-level view and `--per-branch` share the same policy engine and concurre
 | Code | Meaning |
 | --- | --- |
 | `0` | nothing reached an error — including repos that merely need a push |
-| `1` | at least one repo reached an error state (`syncer`, `branches`, `doctor`), or at least one issue was found (`issues`) |
+| `1` | at least one repo reached an error state (`check`, `apply`, `doctor`), or at least one issue was found (`issues`) |
 | `2` | usage error — an unknown flag or argument |
 
 **A repo that is `ahead` exits 0.** That is the normal state of a machine somebody works on, and an exit code that is non-zero every day is one nobody can automate against. `1` means something is genuinely wrong: a clone that failed, a repo whose state could not be verified, an action that was refused at write time.
@@ -85,7 +85,7 @@ The repo-level view and `--per-branch` share the same policy engine and concurre
 
 Two files, deliberately split. `syncer config path` prints where both resolve to.
 
-**`~/.config/syncer/config.toml`** — machine-local tool config: which registry to read, the default policy, custom policies, per-repo overrides, and the git timeout. `syncer config example` prints a fully annotated one showing every option. The scaffolded file carries a worked example policy named `laptop` — yours to edit or delete, not a built-in, however much `syncer policy list` makes it look like one on a fresh machine.
+**`~/.config/syncer/config.toml`** — machine-local tool config: which registry to read, the default policy, custom policies, per-repo overrides, and the git timeout. `syncer config init` writes a three-line starter with nothing in it to delete; `syncer config example config` prints a fully annotated one showing every option. That annotated version carries a worked example policy named `laptop` — a teaching device, not a built-in, however much `syncer policy list` would make it look like one if you kept it.
 
 ```toml
 # repos_file = "~/shared/repos.json"  # defaults to ~/.config/syncer/repos.json
@@ -140,7 +140,7 @@ Run history goes to `$XDG_STATE_HOME/syncer/<registry>-events.jsonl` — state r
 
 Both views classify every branch (per-branch `ahead`/`behind`/`gone`/`no_upstream`/…, computed after `fetch --prune` and repointing `origin/HEAD`) and report the action a policy *would* take; `syncer apply` executes those actions. Policies are **machine-local** and live in `config.toml`, so the same repo can sync aggressively on an always-on box and report-only on a laptop.
 
-`--apply` is safe by construction: it enforces hard invariants no policy can override — never `--force`, never mutate a dirty working tree, fast-forward only under strict ancestry, `rebase_push` aborts cleanly on conflict, and any precondition that fails at write time is refused (never forced) rather than mutated.
+`apply` is safe by construction: it enforces hard invariants no policy can override — never `--force`, never mutate a dirty working tree, fast-forward only under strict ancestry, `rebase_push` aborts cleanly on conflict, and any precondition that fails at write time is refused (never forced) rather than mutated.
 
 Repos are fetched and processed **concurrently** (default 16 at a time, `-j` to tune), so a single run over many repos takes roughly as long as the slowest repo rather than the sum. A small random jitter staggers the initial fetches so they don't hit the remote all at once. Output is sorted by attention, so anything needing action lands nearest the prompt.
 
@@ -170,7 +170,7 @@ watch_remote = ["develop", "dev", "uat", "prod"]
 
 `push`, `rebase_push`, `set_upstream_push` and `delete_local` are refused. `fast_forward` still runs: advancing a branch to what its upstream already contains publishes nothing and destroys nothing, and refusing it would make the setting useless for exactly the long-lived branches it exists to protect. The permitted set is an allowlist, so any action added later is refused on a protected branch by default.
 
-Like every other policy setting, it is **machine-local** — it lives on a policy in `config.toml`, none of the built-ins protect anything, and the portable registry carries no policy settings at all. A report-only run marks the actions protection would refuse, so you don't have to run `--apply` to see the guard working:
+Like every other policy setting, it is **machine-local** — it lives on a policy in `config.toml`, none of the built-ins protect anything, and the portable registry carries no policy settings at all. A `check` run marks the actions protection would refuse, so you don't have to run `apply` to see the guard working:
 
 ```bash
 syncer policy show laptop --branch develop   # marks every action this stops
@@ -199,7 +199,7 @@ syncer policy show laptop                     # its rules, plus the decision for
 syncer policy show laptop --branch release/2  # ...resolved for a real branch name
 ```
 
-That matrix is computed by calling the rules engine, so it is the policy rather than a description of one — it cannot drift from what `--apply` will do.
+That matrix is computed by calling the rules engine, so it is the policy rather than a description of one — it cannot drift from what `apply` will do.
 
 Policy per repo resolves in order: CLI `--policy` → machine `repo_overrides` → optional `sync_policy` hint in `repos.json` → machine `default_policy` → built-in `standard`. `syncer config show` prints which one won for every repo. The `sync_policy` hint must name a **built-in**, since the registry travels between machines and `config.toml` doesn't; `syncer config validate` enforces that.
 
