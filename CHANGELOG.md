@@ -1,6 +1,56 @@
 # CHANGELOG
 
 
+## v10.0.0 (2026-08-07)
+
+### Chores
+
+- **lint**: Disable SC1091/SC1090 from the forge toolchain
+  ([`9d31437`](https://github.com/datapointchris/syncer/commit/9d31437ee12a8cd41622dbda39ceecca8ff76cff))
+
+### Documentation
+
+- Catch the README up to the verb split
+  ([`2365635`](https://github.com/datapointchris/syncer/commit/2365635c0c48181e426f1ae62440bd0111cb9e25))
+
+The exit-code table still named `syncer` and `branches` as commands, and three passages described
+  `--apply` as a flag. Both went in 8.0.0/9.0.0.
+
+The scaffold claim was older and worse: the README advertised a worked `laptop` policy in the file
+  `config init` writes, which is exactly what 7.0.0 removed — that policy lives only in the
+  annotated `config example` now. The file contradicted itself forty lines apart.
+
+### Features
+
+- **report**: Rank severity by who has to act
+  ([`52d9fb5`](https://github.com/datapointchris/syncer/commit/52d9fb5d32a7cab960bcde7f603a6d72ba605693))
+
+A 75-repo run counted 32 needing attention and then drew 30 of them as green ticks reading "synced,
+  dirty -> skip", indistinguishable from the 43 that were clean. The count and the sort came from
+  _row_severity, which knows a dirty tree is a warning; the icon and colour came from the primary
+  state alone, which says synced. The one repo syncer could actually fix (1 behind) was painted the
+  same yellow as the ones needing hands.
+
+Severity now orders by who has to act. OPERATION applies in check as well as apply, so an unblocked
+  mutating action reads as queued work; a dirty tree outranks it, being the one thing syncer never
+  resolves. Icon comes from the state, colour from the severity, and the arrow renders only when
+  syncer will do something. dirty_refusal joins protection_refusal as a gate the report shows rather
+  than promising an action apply declines, with a test asserting the mirror matches execute() for
+  every action on the menu.
+
+BREAKING CHANGE: summary.issues no longer counts repos whose actions apply would run unobstructed;
+  they are counted in the new summary.pending and recorded with the new "pending" RepoStatus. syncer
+  issues now names what it checked instead of claiming "All repos healthy" for a fleet check was
+  calling untidy.
+
+### Breaking Changes
+
+- **report**: Summary.issues no longer counts repos whose actions apply would run unobstructed; they
+  are counted in the new summary.pending and recorded with the new "pending" RepoStatus. syncer
+  issues now names what it checked instead of claiming "All repos healthy" for a fleet check was
+  calling untidy.
+
+
 ## v9.0.1 (2026-08-04)
 
 ### Bug Fixes
