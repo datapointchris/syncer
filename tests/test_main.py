@@ -88,7 +88,11 @@ class TestIssuesMasterCheck:
         registry = self._registry(tmp_path, owns_branch_naming=False)
         result = self._run_issues(registry, monkeypatch, tmp_path)
         assert result.exit_code == 0
-        assert 'All repos healthy' in result.stdout
+        # The all-clear names the one thing this command measures. It used to read 'All repos
+        # healthy', a verdict on sync state it never looks at — and printed it for a fleet that
+        # `check` was simultaneously calling untidy.
+        assert 'Registry matches the filesystem' in result.stdout
+        assert 'healthy' not in result.stdout
 
 
 class TestExitCodesAndJson:

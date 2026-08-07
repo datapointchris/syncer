@@ -6,6 +6,7 @@ from syncer.config import RepoConfig
 from syncer.config import SyncerConfig
 from syncer.config import ToolConfig
 from syncer.config import resolve_policies
+from syncer.execute import MUTATING_ACTIONS
 from syncer.execute import Outcome
 from syncer.execute import protection_refusal
 from syncer.policy import Action
@@ -16,6 +17,7 @@ from syncer.report import BranchRow
 from syncer.report import RepoBranchReport
 from syncer.report import Severity
 from syncer.report import _branch_line
+from syncer.report import _branch_prefix
 from syncer.report import _build_repo_report
 from syncer.report import _row_severity
 from syncer.report import gather_reports
@@ -265,6 +267,58 @@ class TestReportOrdering:
             assert f'repo{i}' in out
 
 
+class TestSeverityIsOwnershipNotGitState:
+    """Regression lock for a report that counted 32 repos as needing attention and then drew
+    30 of them exactly like the 43 that did not.
+
+    The count and the sort came from _row_severity, which knows a dirty tree is a warning; the
+    icon and colour came from the primary state alone, which says 'synced'. Two notions of
+    'needs attention' in one report means the reader trusts neither.
+    """
+
+    def _row(self, primary, *, action=Action.SKIP, dirty=False, blocked=None, **kwargs):
+        state = BranchState(branch='main', primary=primary, is_default=True, is_current=True, dirty=dirty, **kwargs)
+        return BranchRow(state=state, action=action, blocked=blocked)
+
+    def test_a_dirty_tree_never_renders_as_a_clean_one(self):
+        clean = _branch_prefix(self._row(PrimaryState.SYNCED))
+        dirty = _branch_prefix(self._row(PrimaryState.SYNCED, dirty=True), uncommitted=4)
+        assert '[green]' in clean
+        assert '[green]' not in dirty
+        assert '[yellow]' in dirty
+        # The count, not the bare word: a stray generated file and a day's work read identically
+        # as 'dirty', and the number is already read for the event snapshot.
+        assert '4 uncommitted' in dirty
+
+    def test_an_action_syncer_will_run_is_not_coloured_like_a_problem(self):
+        """`behind` is queued work, not damage. Painting it the same yellow as a dirty tree is
+        what made the colour unreadable — the one repo syncer could fix looked like the worst."""
+        row = self._row(PrimaryState.BEHIND, action=Action.FAST_FORWARD, behind=1)
+        assert _row_severity(row) == Severity.OPERATION
+        assert '[cyan]' in _branch_prefix(row)
+
+    def test_a_dirty_tree_outranks_the_action_band(self):
+        """Every mutator that touches the tree refuses on a dirty one, so the row is yours to
+        clear whatever git state the branch is in — it must not sort as queued work."""
+        row = self._row(PrimaryState.BEHIND, action=Action.FAST_FORWARD, behind=1, dirty=True)
+        assert _row_severity(row) == Severity.WARNING
+
+    def test_a_blocked_action_is_not_queued_work(self):
+        row = self._row(PrimaryState.AHEAD, action=Action.PUSH, ahead=1, blocked="protected by 'main'")
+        assert _row_severity(row) == Severity.WARNING
+
+    def test_the_arrow_appears_only_when_syncer_will_act(self):
+        """`→ skip` after every clean repo spent a column on the least informative word in the
+        vocabulary, and left the arrow meaning nothing where it mattered."""
+        assert '→' not in _branch_line(self._row(PrimaryState.SYNCED))
+        assert '→' not in _branch_line(self._row(PrimaryState.AHEAD, action=Action.REPORT, ahead=1))
+        assert '→ push' in _branch_line(self._row(PrimaryState.AHEAD, action=Action.PUSH, ahead=1))
+
+    def test_every_non_mutating_action_suppresses_the_arrow(self):
+        for action in set(Action) - MUTATING_ACTIONS:
+            assert '→' not in _branch_line(self._row(PrimaryState.SYNCED, action=action)), action
+
+
 class TestProtectedBranchReporting:
     """Protection is static config, so a report-only run can say so. Rendering the decided
     `push` alone would promise a push that --apply is never going to make."""
@@ -275,14 +329,14 @@ class TestProtectedBranchReporting:
         return BranchRow(state=state, action=action, blocked=protection_refusal(action, state, policy))
 
     def test_report_line_marks_an_action_protection_would_refuse(self):
-        line = _branch_line(self._row(Action.PUSH, ['develop']).state, Action.PUSH, "protected by 'develop'")
+        line = _branch_line(self._row(Action.PUSH, ['develop']))
         assert 'would refuse' in line
         assert 'develop' in line
 
     def test_report_line_is_unchanged_when_nothing_is_protected(self):
         row = self._row(Action.PUSH, [])
         assert row.blocked is None
-        assert 'would refuse' not in _branch_line(row.state, row.action, row.blocked)
+        assert 'would refuse' not in _branch_line(row)
 
     def test_a_protection_refusal_is_a_warning_not_an_error(self):
         """It is the guard working as configured. Counting it as an error would paint develop

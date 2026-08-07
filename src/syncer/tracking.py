@@ -65,6 +65,10 @@ def migrate_legacy_events(events_file: Path, adopt_global: bool = False) -> None
 RepoStatus = Literal[
     'synced',
     'issues',
+    # An action is decided and nothing would refuse it, but nothing has run — the `check` half of
+    # what 'pulled'/'pushed' record for `apply`. Distinct from both: a dry run recording 'pulled'
+    # would make the history claim a mutation that never happened.
+    'pending',
     'pulled',
     'pushed',
     'pull_pushed',
@@ -125,6 +129,9 @@ class RunSummary(BaseModel):
     pulled: int
     pushed: int
     pull_pushed: int = 0
+    # Repos `apply` would act on, counted on a `check` run. Defaulted, so events written before
+    # the field existed still parse.
+    pending: int = 0
     issues: int
     # Repos whose state could not be established at all, counted apart from `issues`: a run
     # where nothing could be verified is not the same as a run where everything needs a push.

@@ -52,9 +52,40 @@ Three rules follow, and none of them is optional:
 `decide()` depends only on the primary state plus the branch's role/name. The `dirty`/`stashed`
 modifiers are **execute-time gates, never decision inputs** — `decide()` is invariant to them
 (asserted in `TestDecideModifierInvariance`). `protected` is the same kind of gate and is likewise
-invisible to `decide()`. Because it is *static config* rather than live repo state, though,
-`protection_refusal()` is shared with the reporter so a report-only run marks the actions that
-would be refused — rendering the decided `push` alone would promise a push `apply` never makes.
+invisible to `decide()`.
+
+A gate the reporter can evaluate without executing must still be *shown*, though, or the report
+promises an action `apply` never makes. Two are: `protection_refusal()` (static config) and
+`dirty_refusal()` (one `git status` per repo). Both live in `execute.py` beside the guards they
+mirror, both feed `BranchRow.blocked`, and `TestDirtyRefusalMatchesExecute` asserts the mirror
+agrees with `execute()` for every action on the menu — a mirror that drifts is worse than none,
+because the arrow is the only part of a row anyone acts on. A gate that can only be discovered
+mid-write (a rebase conflict, unreadable counts) stays out of `blocked` deliberately.
+
+## Severity is ownership, not git state
+
+`Severity` orders rows by **who has to do something**, which is not the same as how unusual the
+branch state is, and conflating the two is what made a 75-repo report unreadable: 32 repos were
+counted as needing attention, 30 of them rendered as a green tick reading `synced, dirty → skip`,
+and the one repo syncer could actually fix (`1 behind`) was painted the same yellow as the ones
+needing hands. The count came from `_row_severity`; the icon and colour came from the primary
+state alone. Two notions of "needs attention" in one report means neither gets trusted.
+
+- **`OPERATION` applies in `check`, not just `apply`** — an action is decided and nothing would
+  refuse it, so `apply` clears it without you. `behind → fast_forward` is queued work, not damage.
+- **A dirty tree outranks the action band**, whatever the branch state: it is the one thing syncer
+  will never resolve, and it refuses every mutator that touches the tree.
+- **`_row_severity` is checked before the state's own severity**, so `MUTATING_ACTIONS` (derived
+  from `_MUTATORS`, never listed twice) is what defines "syncer will handle this".
+- **Icon from the state, colour from the severity.** Only the benign tick can understate a
+  severity, so it is the only icon `_SEVERITY_ICON` substitutes.
+- **The action arrow renders only for a mutating action.** `skip`/`report`/`prompt` all mean
+  "syncer changes nothing", which the row conveys by existing — `→ skip` after every clean repo
+  spent a column on the least informative word in the vocabulary.
+
+The summary line splits the same way (`N to sync` in cyan vs `N need you` in yellow), and
+`RepoStatus` gained `pending` for it, because a `check` run recording `pulled` would write a
+mutation that never happened into the history `stats` reads back as fact.
 
 ## Two surfaces, one core
 
@@ -82,6 +113,11 @@ time — and refuses rather than forces. Guaranteed independent of any policy:
    The old `uncommitted_changes` returned `[]` on failure, so callers testing its truthiness
    read a broken git as a clean tree, i.e. as permission to mutate. Anything that gates a write
    on a git read needs that polarity: a `list | None` cannot express it, because `None` is falsy.
+   `_ff_ref` is the sole exemption (`_WORKTREE_SAFE`): `update-ref` moves a ref that is not
+   checked out, so no tree is read or written. **syncer never resolves a dirty tree** — there is
+   no commit or stash action and there will not be one; capturing your uncommitted work is a
+   decision the tool has no standing to make. It reports the tree and refuses everything that
+   would touch it.
 3. `fast_forward`/`pull_ff`/`ff_ref` require strict ancestry (upstream strictly ahead), re-checked
    at write time.
 4. `rebase_push` aborts on conflict and downgrades to a refusal — never a half-rebase.
@@ -273,6 +309,10 @@ Three diagnostics, three questions, and every help text says which:
 | `syncer issues` | is **reality** right — do the registry's paths exist, has anything moved |
 | `syncer doctor` | is this **machine** able to run syncer at all |
 
+Each one's all-clear must name what it *measured*, not pronounce on the fleet. `issues` printed
+"All repos healthy." for a fleet `check` was simultaneously calling untidy — a verdict on sync
+state, from a command that never looks at sync state.
+
 Blurring them means none of them gets trusted. `doctor` (`doctor.py`) exists because the first
 two could both pass on a box where nothing worked: a first run that failed could not distinguish
 a missing credential from a mis-pointed registry from a host that was never reachable. Its rules:
@@ -345,9 +385,10 @@ always wins, and it rmdir's the emptied directory so the migration's retirement 
 observable. Carries the `# MIGRATION (v5.0.0)` marker per `~/dev/standards/data.md`.
 
 The schema (`tracking.py`) evolves **additively** —
-`RepoSnapshot` gained `policy` + `branches: list[BranchSnapshot]`, both defaulting empty so
-pre-existing event lines still validate. Never make an existing snapshot field required; add new
-fields with defaults and keep the legacy-parse test green (`test_tracking.py`).
+`RepoSnapshot` gained `policy` + `branches: list[BranchSnapshot]` and `RunSummary` gained
+`pending`, all defaulted so pre-existing event lines still validate. Never make an existing
+snapshot field required; add new fields with defaults and keep the legacy-parse test green
+(`test_tracking.py`).
 
 Additive fields are only half of it, because the stream is read by **every** version, not just
 newer ones. `RepoSnapshot.status` is therefore typed `str`, not the `RepoStatus` Literal: adding

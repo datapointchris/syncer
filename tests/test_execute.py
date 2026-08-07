@@ -5,7 +5,9 @@ from pathlib import Path
 import pytest
 
 from syncer.classify import classify_branch
+from syncer.execute import MUTATING_ACTIONS
 from syncer.execute import Outcome
+from syncer.execute import dirty_refusal
 from syncer.execute import execute
 from syncer.policy import PROTECTED_ALLOWED
 from syncer.policy import Action
@@ -461,6 +463,69 @@ class TestNonMutatingActions:
         outcome = execute(Action.PROMPT, _state_for(repo, 'main'), repo, POLICY)
         assert outcome.status == 'reported'
         assert isinstance(outcome, Outcome)
+
+
+class TestDirtyRefusalMatchesExecute:
+    """dirty_refusal() mirrors invariant 2 for the reporter, so a report-only run does not
+    promise a push that a dirty tree is going to make apply decline.
+
+    A mirror can drift from what it mirrors, and this is the drift that matters: the report is
+    only worth reading if the arrow it prints is what the next command does. Both directions are
+    asserted here rather than trusting the two to be edited together.
+    """
+
+    def _dirty(self, repo_path: Path) -> None:
+        (repo_path / 'README.md').write_text('# Test\nuncommitted\n')
+
+    def test_no_action_refuses_for_dirt_the_reporter_would_not_predict(self, cloned_repo):
+        repo = _make_repo(cloned_repo)
+        self._dirty(cloned_repo)
+        state = _state_for(repo, 'main')
+        for action in MUTATING_ACTIONS:
+            outcome = execute(action, state, repo, POLICY)
+            if outcome.status == 'refused' and 'dirty' in outcome.message:
+                assert dirty_refusal(action, state, dirty=True) is not None, (
+                    f'{action.value} refuses on a dirty tree but the report shows it unblocked'
+                )
+
+    def test_ff_ref_really_is_indifferent_to_the_tree(self, cloned_repo, tmp_path):
+        """The one exemption in _WORKTREE_SAFE, proved rather than asserted: update-ref moves a
+        ref that is not checked out, so it succeeds on a tree every other mutator refuses."""
+        _git(cloned_repo, 'checkout', '-b', 'feature')
+        _git(cloned_repo, 'push', '-u', 'origin', 'feature')
+        _git(cloned_repo, 'checkout', 'main')
+        second = tmp_path / 'second'
+        subprocess.run(['git', 'clone', '-b', 'feature', str(tmp_path / 'remote.git'), str(second)], capture_output=True)
+        _git(second, 'config', 'user.email', 'test@test.com')
+        _git(second, 'config', 'user.name', 'Test')
+        _commit(second, 'remote.txt', 'remote change')
+        _git(second, 'push')
+
+        repo = _make_repo(cloned_repo)
+        repo.fetch_prune()
+        self._dirty(cloned_repo)
+        state = _state_for(repo, 'feature')
+        assert state.primary == PrimaryState.BEHIND
+        assert repo.is_dirty
+
+        assert dirty_refusal(Action.FF_REF, state, dirty=True) is None
+        assert dirty_refusal(Action.FAST_FORWARD, state, dirty=True) is None  # dispatches to ff_ref
+        assert execute(Action.FAST_FORWARD, state, repo, POLICY).status == 'done'
+
+    def test_a_clean_tree_blocks_nothing(self, cloned_repo):
+        repo = _make_repo(cloned_repo)
+        state = _state_for(repo, 'main')
+        assert all(dirty_refusal(action, state, dirty=False) is None for action in Action)
+
+    def test_non_mutating_actions_are_never_blocked_by_dirt(self, cloned_repo):
+        """skip/report/prompt write nothing, so a dirty tree has no bearing on them — marking
+        them 'would refuse' would put a refusal on the row of every dirty repo that is otherwise
+        perfectly synced."""
+        repo = _make_repo(cloned_repo)
+        self._dirty(cloned_repo)
+        state = _state_for(repo, 'main')
+        for action in set(Action) - MUTATING_ACTIONS:
+            assert dirty_refusal(action, state, dirty=True) is None, action
 
 
 # ---------- protected branches (invariant 8) ---------- #

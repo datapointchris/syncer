@@ -59,8 +59,15 @@ _FAILED_STATUSES = {'clone_failed', 'unverified'}
 
 
 def _operation_status(report: RepoBranchReport) -> RepoStatus:
-    """Status for a repo where actions ran and nothing needs attention (severity OPERATION)."""
+    """Status for a repo at severity OPERATION — syncer owns the next move here.
+
+    No completed action means nothing ran, i.e. a `check`: the actions are decided and
+    unobstructed but still pending. Recording one of the past-tense statuses there would put a
+    mutation that never happened into the history that `stats` reads back.
+    """
     acted = {row.action for row in report.rows if row.outcome is not None and row.outcome.status == 'done'}
+    if not acted:
+        return 'pending'
     if Action.REBASE_PUSH in acted or (acted & {Action.FAST_FORWARD, Action.PULL_FF, Action.FF_REF} and Action.PUSH in acted):
         return 'pull_pushed'
     if Action.PUSH in acted:
@@ -124,6 +131,7 @@ def _summary(snapshots: list[RepoSnapshot]) -> RunSummary:
         pulled=counts['pulled'],
         pushed=counts['pushed'],
         pull_pushed=counts['pull_pushed'],
+        pending=counts['pending'],
         issues=issues,
         failed=sum(count for status, count in counts.items() if status in _FAILED_STATUSES),
         duration_ms=0,
@@ -140,8 +148,13 @@ def _print_summary_line(summary: RunSummary) -> None:
         parts.append(f'[green]{ICON_PUSH}  {summary.pushed} pushed[/green]')
     if summary.pull_pushed:
         parts.append(f'[green]{ICON_MOVE}  {summary.pull_pushed} pull+pushed[/green]')
+    if summary.pending:
+        # Cyan and worded as syncer's job, not yours: these are the repos `apply` clears without
+        # you, and counting them under "need attention" alongside a dirty tree is what made the
+        # number unactionable — you could not tell how much of it was actually yours to do.
+        parts.append(f'[cyan]{ICON_MOVE}  {summary.pending} to sync[/cyan]')
     if summary.issues:
-        parts.append(f'[yellow]{ICON_WARN}  {summary.issues} need attention[/yellow]')
+        parts.append(f'[yellow]{ICON_WARN}  {summary.issues} need you[/yellow]')
     if summary.failed:
         # Red and worded separately from `issues`: yellow "need attention" reads as "there is
         # work to do", when the truth is that syncer could not find out whether there is.

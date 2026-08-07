@@ -72,6 +72,32 @@ class TestRepoStatus:
         )
         assert _repo_status(report) == 'unverified'
 
+    def test_a_check_run_records_pending_not_a_mutation_it_never_made(self, tmp_path):
+        """severity OPERATION now happens in `check` too — the actions are decided and nothing
+        would refuse them. Reusing 'pulled' there would write a mutation into the history that
+        `stats` reads back as fact."""
+        repo_path = _make_cloned_repo(tmp_path, 'behind')
+        second = tmp_path / 'second'
+        subprocess.run(['git', 'clone', str(tmp_path / 'behind.git'), str(second)], capture_output=True)
+        _git(second, 'config', 'user.email', 't@t.com')
+        _git(second, 'config', 'user.name', 'T')
+        _git(second, 'commit', '--allow-empty', '-m', 'remote work')
+        _git(second, 'push')
+        from syncer.report import gather_reports
+
+        # clone_url named explicitly: origin here is a tmp_path bare repo, and the registry's
+        # default github.com URL would trip origin_mismatch and lift the repo to WARNING for a
+        # reason that has nothing to do with what is being asserted.
+        config = SyncerConfig(
+            owner='demo',
+            host='https://github.com',
+            search_paths=[],
+            repos=[RepoConfig(name='behind', path=str(repo_path), clone_url=str(tmp_path / 'behind.git'))],
+        )
+        report = gather_reports(config, ToolConfig(), jitter=0.0)[0]
+        assert report.origin_mismatch is None
+        assert _repo_status(report) == 'pending'
+
     def test_every_lifecycle_status_has_a_tracking_status(self):
         """A key in one map and not the other is a KeyError at _repo_status, on a run that has
         already done all its git work."""

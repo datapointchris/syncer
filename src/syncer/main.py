@@ -245,7 +245,10 @@ def issues(
 
     console.print()
     if issues_found == 0:
-        console.print('[blue] All repos healthy.[/blue]')
+        # Names what was actually checked. 'All repos healthy.' claimed a verdict this command
+        # never measures — it reads the registry against the filesystem and never looks at sync
+        # state, so it printed a clean bill of health for a fleet `check` was calling untidy.
+        console.print('[blue] Registry matches the filesystem. Run [cyan]syncer check[/cyan] for sync state.[/blue]')
         return
     console.print(f'[yellow] {issues_found} issue(s) found.[/yellow]')
     # Non-zero, because printing a count and exiting 0 is the exact shape of a check nothing can

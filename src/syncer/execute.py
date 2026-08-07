@@ -191,6 +191,33 @@ _MUTATORS = {
     Action.DELETE_LOCAL: _delete_local,
 }
 
+# The actions syncer performs, as opposed to the ones that only surface something (skip, report,
+# prompt). Derived from _MUTATORS rather than listed again, so the reporter's notion of "syncer
+# will handle this" cannot drift from the set of things that actually have a mutator.
+MUTATING_ACTIONS = frozenset(_MUTATORS)
+
+# The one mutator that never reads or writes the working tree: update-ref moves a ref that is not
+# checked out, so a dirty tree is irrelevant to it (and _ff_ref accordingly has no dirty guard).
+_WORKTREE_SAFE = frozenset({Action.FF_REF})
+
+
+def dirty_refusal(action: Action, state: BranchState, dirty: bool) -> str | None:
+    """Why a dirty working tree refuses `action`, or None if it admits it.
+
+    Shared with the reporter for the same reason protection_refusal is: rendering the decided
+    `push` alone promises a push that apply is never going to make, and a dirty tree is the
+    commonest reason it will not. Invariant 2 is still enforced inside each mutator against a
+    live `repo.is_dirty` — this only mirrors it for the report, and test_execute.py asserts the
+    two agree for every action on the menu.
+    """
+    if not dirty or action not in MUTATING_ACTIONS:
+        return None
+    # fast_forward dispatches on checkout state, so it inherits _ff_ref's indifference to the
+    # tree whenever the branch is not the current one.
+    if action in _WORKTREE_SAFE or (action == Action.FAST_FORWARD and not state.is_current):
+        return None
+    return 'working tree is dirty'
+
 
 def protection_refusal(action: Action, state: BranchState, policy: Policy) -> str | None:
     """Why `action` is refused on a protected branch, or None if the branch admits it.

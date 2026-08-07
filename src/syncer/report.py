@@ -40,7 +40,9 @@ from syncer.config import resolve_policies
 from syncer.config import resolve_policy_name
 from syncer.diagnose import FailureGroup
 from syncer.diagnose import group_failures
+from syncer.execute import MUTATING_ACTIONS
 from syncer.execute import Outcome
+from syncer.execute import dirty_refusal
 from syncer.execute import execute
 from syncer.execute import protection_refusal
 from syncer.output import ICON_DOT
@@ -74,8 +76,14 @@ DEFAULT_JITTER_SECONDS = 0.3
 
 
 class Severity(IntEnum):
-    """Attention level of a repo's result. Rendered least-to-most so errors land at the
-    bottom, nearest the prompt."""
+    """Who has to do something about a result, least to most. Rendered in this order so the
+    rows needing hands land at the bottom, nearest the prompt.
+
+    The axis is deliberately *ownership*, not git state: a branch that is `behind` is not a
+    problem, it is queued work syncer performs for you under `apply`, and colouring it like a
+    diverged tree trains you to ignore the colour. OPERATION is that band — an action is
+    decided and nothing would refuse it — and it applies in `check` as much as in `apply`.
+    """
 
     SYNCED = 0
     OPERATION = 1
@@ -93,14 +101,32 @@ LIFECYCLE_STYLE = {
     'no_remote': (ICON_ERR, 'red', 'no remote', Severity.ERROR),
 }
 
-_STATE_STYLE = {
-    PrimaryState.SYNCED: (ICON_OK, 'green'),
-    PrimaryState.AHEAD: (ICON_PUSH, 'yellow'),
-    PrimaryState.BEHIND: (ICON_PULL, 'yellow'),
-    PrimaryState.DIVERGED: (ICON_MOVE, 'yellow'),
-    PrimaryState.NO_UPSTREAM: (ICON_WARN, 'yellow'),
-    PrimaryState.GONE: (ICON_ERR, 'red'),
-    PrimaryState.DETACHED: (ICON_WARN, 'red'),
+# Icon says *what* the branch is; colour says *who has to act* (below). Splitting the two is
+# what fixes a dirty-but-synced row rendering as a green tick indistinguishable from a clean
+# one — it kept its icon and colour from the primary state alone, while the count in the summary
+# line and the sort position both came from the severity that knew better.
+_STATE_ICON = {
+    PrimaryState.SYNCED: ICON_OK,
+    PrimaryState.AHEAD: ICON_PUSH,
+    PrimaryState.BEHIND: ICON_PULL,
+    PrimaryState.DIVERGED: ICON_MOVE,
+    PrimaryState.NO_UPSTREAM: ICON_WARN,
+    PrimaryState.GONE: ICON_ERR,
+    PrimaryState.DETACHED: ICON_WARN,
+}
+
+_SEVERITY_COLOR = {
+    Severity.SYNCED: 'green',
+    Severity.OPERATION: 'cyan',
+    Severity.WARNING: 'yellow',
+    Severity.ERROR: 'red',
+}
+
+# Substituted when the state's own icon understates the severity — only the benign tick can,
+# since every other state icon already reads as "look at this".
+_SEVERITY_ICON = {
+    Severity.WARNING: ICON_WARN,
+    Severity.ERROR: ICON_ERR,
 }
 
 _STATE_LABEL = {
@@ -119,8 +145,10 @@ class BranchRow:
     state: BranchState
     action: Action
     outcome: Outcome | None = None
-    # Why protection would refuse this action, computed whether or not --apply ran. Protection
-    # is static config, so a report-only run can and should show it.
+    # Why `apply` would refuse this action, computed whether or not it ran: protection (static
+    # config) or a dirty working tree (read once per repo). Both are knowable without executing,
+    # so a report-only run can and should show them rather than promising an action apply will
+    # decline. Anything a guard can only discover mid-write stays absent here.
     blocked: str | None = None
 
 
@@ -154,9 +182,53 @@ class RepoBranchReport:
     stashes: int = 0
 
 
-def _branch_prefix(state: BranchState) -> str:
-    """The colored state part of a line (icon, branch, flags, detail) without the action arrow."""
-    icon, color = _STATE_STYLE.get(state.primary, (ICON_WARN, 'blue'))
+def _state_severity(state: BranchState) -> Severity:
+    """Severity of the branch state alone, before who-acts-on-it is considered."""
+    if state.primary in _ERROR_STATES:
+        return Severity.ERROR
+    if state.primary in _WARNING_STATES:
+        return Severity.WARNING
+    return Severity.SYNCED
+
+
+def _row_severity(row: BranchRow) -> Severity:
+    # An outcome (apply mode) reflects what actually happened, so it wins over the pre-execute state.
+    if row.outcome is not None:
+        # A protection refusal is the guard working as configured, not something that went
+        # wrong — still worth seeing (there is unpushed work on a shared branch), but it would
+        # be red at the bottom of every run forever if it counted as an error.
+        if row.outcome.status == 'refused' and row.blocked:
+            return Severity.WARNING
+        if row.outcome.status in ('failed', 'refused'):
+            return Severity.ERROR
+        if row.outcome.status == 'done':
+            return Severity.OPERATION
+    if row.state.primary in _ERROR_STATES:
+        return Severity.ERROR
+    # Before the action band, and regardless of the branch state: a dirty tree is the one thing
+    # syncer will never resolve for you, and it refuses every mutator that touches the tree. A
+    # `behind` branch you cannot fast-forward because of uncommitted work is your problem, not
+    # queued work.
+    if row.state.dirty or row.state.stashed:
+        return Severity.WARNING
+    # An action syncer will actually perform, with nothing standing in its way: `apply` clears
+    # this without you. It sorts above synced so you can see it, and below the rows needing hands.
+    if row.action in MUTATING_ACTIONS and not row.blocked:
+        return Severity.OPERATION
+    return _state_severity(row.state)
+
+
+def _row_style(row: BranchRow) -> tuple[str, str]:
+    """Icon and colour for a row: icon from the branch state, colour from who has to act."""
+    severity = _row_severity(row)
+    icon = _STATE_ICON.get(row.state.primary, ICON_WARN)
+    return _SEVERITY_ICON.get(severity, icon) if icon == ICON_OK else icon, _SEVERITY_COLOR[severity]
+
+
+def _branch_prefix(row: BranchRow, uncommitted: int = 0, stashes: int = 0) -> str:
+    """The coloured state part of a line (icon, branch, flags, detail), without the action arrow."""
+    state = row.state
+    icon, color = _row_style(row)
 
     # For ahead/behind/diverged the commit counts carry the meaning; elsewhere use a label.
     counts = []
@@ -165,10 +237,12 @@ def _branch_prefix(state: BranchState) -> str:
     if state.behind:
         counts.append(f'{state.behind} behind')
     detail_parts = counts or [_STATE_LABEL.get(state.primary, state.primary.value)]
+    # Named with its count rather than the bare word 'dirty': the count is the difference between
+    # a stray generated file and a day's work, and it is already read for the event snapshot.
     if state.dirty:
-        detail_parts.append('dirty')
+        detail_parts.append(f'{uncommitted} uncommitted' if uncommitted else 'uncommitted changes')
     if state.stashed:
-        detail_parts.append('stashed')
+        detail_parts.append(f'{stashes} stashed' if stashes else 'stashed')
     detail = ', '.join(detail_parts)
 
     # Parens, not brackets: Rich console markup treats [..] as style tags and would
@@ -183,9 +257,17 @@ def _branch_prefix(state: BranchState) -> str:
     return f'  [{color}]{icon}  {state.branch}{flag_str} — {detail}[/{color}]'
 
 
-def _branch_line(state: BranchState, action: Action, blocked: str | None = None) -> str:
-    line = f'{_branch_prefix(state)} [blue]→ {action.value}[/blue]'
-    return f'{line} [yellow](would refuse: {blocked})[/yellow]' if blocked else line
+def _branch_line(row: BranchRow, uncommitted: int = 0, stashes: int = 0) -> str:
+    """A report-only row. The arrow appears only when syncer will actually do something.
+
+    `skip`, `report` and `prompt` all mean "syncer changes nothing here", which the line already
+    conveys by existing — printing `→ skip` after every clean repo spent a column on the least
+    informative word in the vocabulary and made the arrow meaningless where it mattered.
+    """
+    line = _branch_prefix(row, uncommitted, stashes)
+    if row.action in MUTATING_ACTIONS:
+        line = f'{line} [blue]→ {row.action.value}[/blue]'
+    return f'{line} [yellow](would refuse: {row.blocked})[/yellow]' if row.blocked else line
 
 
 _OUTCOME_COLOR = {
@@ -203,25 +285,6 @@ def _outcome_suffix(outcome: Outcome) -> str:
     if outcome.message:
         text += f' ({outcome.message})'
     return f'[{color}]→ {text}[/{color}]'
-
-
-def _row_severity(row: BranchRow) -> Severity:
-    # An outcome (apply mode) reflects what actually happened, so it wins over the pre-execute state.
-    if row.outcome is not None:
-        # A protection refusal is the guard working as configured, not something that went
-        # wrong — still worth seeing (there is unpushed work on a shared branch), but it would
-        # be red at the bottom of every run forever if it counted as an error.
-        if row.outcome.status == 'refused' and row.blocked:
-            return Severity.WARNING
-        if row.outcome.status in ('failed', 'refused'):
-            return Severity.ERROR
-        if row.outcome.status == 'done':
-            return Severity.OPERATION
-    if row.state.primary in _ERROR_STATES:
-        return Severity.ERROR
-    if row.state.primary in _WARNING_STATES or row.state.dirty or row.state.stashed:
-        return Severity.WARNING
-    return Severity.SYNCED
 
 
 def report_severity(report: RepoBranchReport) -> Severity:
@@ -248,11 +311,15 @@ def _watched_remote_branches(repo: Repo, policy: Policy) -> list[tuple[str, str]
 
 def build_branch_rows(repo: Repo, policy: Policy, apply: bool, *, fetched: bool = False) -> list[BranchRow]:
     """Classify → decide → (execute if apply) for every in-scope branch. Shared by both surfaces."""
+    # Read once, not per row: is_dirty shells out to `git status` every call, and it is the same
+    # tree for every branch. Repo-wide, matching what the execute-time guards actually consult —
+    # state.dirty is scoped to the current branch, so it would under-report the refusal.
+    dirty = repo.is_dirty
     rows = []
     for state in classify_repo(repo, policy, fetched=fetched):
         action = decide(state, policy)
         outcome = execute(action, state, repo, policy) if apply else None
-        blocked = protection_refusal(action, state, policy)
+        blocked = protection_refusal(action, state, policy) or dirty_refusal(action, state, dirty)
         rows.append(BranchRow(state=state, action=action, outcome=outcome, blocked=blocked))
     return rows
 
@@ -360,9 +427,6 @@ def _build_repo_report(
             label=label, path=repo_config.path, name=repo_config.name, policy_name=policy_name, error=f'unknown policy {policy_name!r}'
         )
 
-    # Before classifying, not after: every branch state is measured against remote-tracking
-    # refs, so a dead fetch invalidates the whole report rather than degrading it. Returning
-    # here is also what refuses execution for this repo — no execute() call is constructed.
     # Before classifying, not after: every branch state is measured against remote-tracking
     # refs, so a dead fetch invalidates the whole report rather than degrading it. Returning
     # here is also what refuses execution for this repo — no execute() call is constructed.
@@ -523,9 +587,9 @@ def render_report(report: RepoBranchReport, apply: bool) -> None:
         )
     for row in report.rows:
         if apply and row.outcome is not None:
-            console.print(f'{_branch_prefix(row.state)} {_outcome_suffix(row.outcome)}')
+            console.print(f'{_branch_prefix(row, report.uncommitted, report.stashes)} {_outcome_suffix(row.outcome)}')
         else:
-            console.print(_branch_line(row.state, row.action, row.blocked))
+            console.print(_branch_line(row, report.uncommitted, report.stashes))
     for branch, age in report.remote_only:
         # No local copy, so nothing to sync — browse it with `git log origin/<branch>`.
         console.print(f'  [blue]{ICON_DOT}  origin/{branch} — remote only, last commit {age}[/blue]')
