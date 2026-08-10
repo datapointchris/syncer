@@ -30,8 +30,8 @@ def events_file_for(repos_file: Path) -> Path:
 
 # MIGRATION (v5.0.0): run history moved from ~/.local/share/syncer (XDG data) to
 # $XDG_STATE_HOME/syncer, and from a single global events.jsonl to one stream per registry.
-# Retire when every machine — macmini, mbp, archlinux, work — has run syncer >= 5.0.0, observable
-# as ~/.local/share/syncer being absent on all of them. Tracked in the syncer icb project.
+# Retire once every machine you run syncer on has run >= 5.0.0, observable as
+# ~/.local/share/syncer being absent on all of them.
 def migrate_legacy_events(events_file: Path, adopt_global: bool = False) -> None:
     """Move any run history left in the old data dir into the state dir.
 

@@ -104,9 +104,9 @@ def _paths(tool_config: ToolConfig, override: Path | None) -> Check:
     """Always OK — this is context, not a verdict.
 
     It is also the single most valuable line on a broken machine: a `repos_file` inherited from
-    a shared dotfiles bucket pointed the work box at a directory it could never have, and
-    nothing in syncer's output named what had chosen the path, so the tool looked like it had
-    someone else's layout hard-coded.
+    a shared config pointed one machine at a directory that only existed on another, and nothing
+    in syncer's output named what had chosen the path, so the tool looked like it had someone
+    else's layout hard-coded.
     """
     location = registry_location(tool_config, override)
     config_note = '' if TOOL_CONFIG_PATH.exists() else '  (absent — built-in defaults)'

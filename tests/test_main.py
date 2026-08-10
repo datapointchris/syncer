@@ -89,7 +89,7 @@ class TestIssuesMasterCheck:
         result = self._run_issues(registry, monkeypatch, tmp_path)
         assert result.exit_code == 0
         # The all-clear names the one thing this command measures. It used to read 'All repos
-        # healthy', a verdict on sync state it never looks at — and printed it for a fleet that
+        # healthy', a verdict on sync state it never looks at — and printed it for repos that
         # `check` was simultaneously calling untidy.
         assert 'Registry matches the filesystem' in result.stdout
         assert 'healthy' not in result.stdout

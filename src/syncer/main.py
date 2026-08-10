@@ -247,7 +247,7 @@ def issues(
     if issues_found == 0:
         # Names what was actually checked. 'All repos healthy.' claimed a verdict this command
         # never measures — it reads the registry against the filesystem and never looks at sync
-        # state, so it printed a clean bill of health for a fleet `check` was calling untidy.
+        # state, so it printed a clean bill of health for repos `check` was calling untidy.
         console.print('[blue] Registry matches the filesystem. Run [cyan]syncer check[/cyan] for sync state.[/blue]')
         return
     console.print(f'[yellow] {issues_found} issue(s) found.[/yellow]')

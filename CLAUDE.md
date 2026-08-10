@@ -157,39 +157,39 @@ current/non-current split needs the same treatment.
 - **`repos.json`** (default `$XDG_CONFIG_HOME/syncer/repos.json`, repointed by `repos_file` in
   `config.toml`) — the repo **identity registry**: `owner`, `host`, `search_paths`,
   `exclude_paths`, and per-repo `{name, path, status, description, owner?, sync_policy?,
-  toolchain?}`. Portable across machines. **syncer never modifies one that holds repos** — it's
-  shared infrastructure (also read by `forge` and `indy`). `issues` reports drift but tells you to
+  toolchain?}`. Portable across machines. **syncer never modifies one that holds repos** — it is
+  shared infrastructure that other tools may read too. `issues` reports drift but tells you to
   fix paths by hand. Exactly two commands write, and both only *create*: `config init` scaffolds
   one that is absent, and `config scan --write` fills one that is absent or still empty. Both
   refuse the moment the file lists repos, and `scan` treats an unparsable file as content too —
   the last one to clobber silently. A tool that can only tell you to hand-write a file whose shape
   it already knows, from data already on disk, has pushed its own job onto the reader.
 
-  The fleet keeps its registry at `~/dev/repos.json` and points `repos_file` there, because forge
-  and indy read the same file. That sharing is a **fleet fact, not a syncer fact** — the default
-  must stay a syncer-owned XDG path so a machine that has never heard of `~/dev` still works.
-  Nothing shipped in this repo may *recommend* it either: the tool-config template used to say the
-  registry "lives at ~/dev/repos.json and every machine names it here", which reads as an
-  instruction, and a fleet that then deployed exactly that `config.toml` from a shared dotfiles
-  bucket pointed the work box — a git-only WSL node with no Syncthing, so no `~/dev` — at a
-  registry it could never have. `config.toml` is machine-local in the operational sense, not just
-  by convention: `repos_file` is the one setting whose correct value differs per machine and whose
-  wrong value fails every run outright rather than degrading, so that file must never be synced.
+  A registry can be shared with other tools by pointing `repos_file` at a common location. That
+  sharing is an arrangement between those tools, **never a syncer fact** — the default must stay a
+  syncer-owned XDG path, so a machine that has never heard of that location still works. Nothing
+  shipped in this repo may *recommend* a specific shared path either: the tool-config template used
+  to name one and say every machine points here, which reads as an instruction rather than an
+  example, and a `config.toml` deployed from a shared source then pointed a machine at a registry
+  that only ever existed on another. `config.toml` is machine-local in the operational sense, not
+  just by convention: `repos_file` is the one setting whose correct value differs per machine and
+  whose wrong value fails every run outright rather than degrading, so that file must never be
+  distributed from a shared source.
 
   Every resolved registry path therefore carries its provenance (`RegistryLocation.source`), and
   every message about a missing registry prints it plus both exits (create one there, or drop the
   pointer). That failure was undiagnosable from syncer's own output, which named the path but never
-  what chose it — so the tool looked like it had `~/dev` hard-coded. A resolution chain owes the
-  reader which tier won.
+  what chose it — so the tool looked like it had someone else's layout hard-coded. A resolution
+  chain owes the reader which tier won.
 
   **It is no longer purely identity.** `toolchain` declares a repo's build surface — `components`
-  (a `stack` and the `dir` it lives in) and `sql_dialect` — and is owned entirely by forge, which
-  generates pre-commit configs and CI workflows from it. syncer models it as an opaque dict and
-  never reads it. It lives here rather than in a forge-local file because a separate file would have
-  to be keyed by repo name, and repo names are not unique across registries — that exact join
-  already misattributed one repo's planning docs to another. Attaching the data to the entry avoids
-  the join. Anything added here must be a **portable fact about the repo itself**, never
-  machine-local state; that still belongs in `config.toml`.
+  (a `stack` and the `dir` it lives in) and `sql_dialect` — and is owned entirely by a separate
+  tool that generates pre-commit configs and CI workflows from it. syncer models it as an opaque
+  dict and never reads it. It lives here rather than in that tool's own file, because a separate
+  file would have to be keyed by repo name, and repo names are not unique across registries — that
+  exact join already misattributed one repo's planning docs to another. Attaching the data to the
+  entry avoids the join. Anything added here must be a **portable fact about the repo itself**,
+  never machine-local state; that still belongs in `config.toml`.
 
   Clone URLs resolve as per-repo `clone_url` → registry `url_template` (`{host}`/`{owner}`/`{name}`)
   → the default `{host}/{owner}/{name}`. The template exists because that default path cannot
@@ -199,8 +199,8 @@ current/non-current split needs the same treatment.
 
   **A registry is a self-contained set.** `--repos-file/-c` swaps the entire working set; it never
   merges with the default. `owner` and `host` are optional so an all-third-party registry works —
-  `~/dev/exemplar-repos.json` holds twenty upstream clones that each name their own owner. Repos
-  whose owner isn't the registry owner are treated as not ours: the `using master` check is skipped
+  a registry of upstream clones has entries that each name their own owner. Repos whose owner
+  isn't the registry owner are treated as not ours: the `using master` check is skipped
   for them, because upstream's default branch is not something we can act on. `owns_branch_naming`
   (default `true`) turns that check off for a whole registry — at a company the default branch is
   the org's decision, so the check would fire on every repo forever with nothing to do about any of
@@ -247,7 +247,7 @@ and host from its **real origin** — so a directory holding both your repos and
 scans correctly, which is exactly the shape of `exemplar-repos.json`. The commonest host/owner
 become the registry defaults and every entry that disagrees keeps its own. It **prints** by
 default and writes only under `--write`, and only when no registry exists: the same narrow reading
-of the sanctioned single write, because this file is shared with forge and indy.
+of the sanctioned single write, because this file may be shared with other tools.
 
 Every load path raises `ConfigError` carrying one readable line per problem, rather than letting a
 pydantic `ValidationError` escape as a traceback. Policies are constructed one at a time in
@@ -309,9 +309,9 @@ Three diagnostics, three questions, and every help text says which:
 | `syncer issues` | is **reality** right — do the registry's paths exist, has anything moved |
 | `syncer doctor` | is this **machine** able to run syncer at all |
 
-Each one's all-clear must name what it *measured*, not pronounce on the fleet. `issues` printed
-"All repos healthy." for a fleet `check` was simultaneously calling untidy — a verdict on sync
-state, from a command that never looks at sync state.
+Each one's all-clear must name what it *measured*, not pronounce on the whole set. `issues`
+printed "All repos healthy." for repos `check` was simultaneously calling untidy — a verdict on
+sync state, from a command that never looks at sync state.
 
 Blurring them means none of them gets trusted. `doctor` (`doctor.py`) exists because the first
 two could both pass on a box where nothing worked: a first run that failed could not distinguish
@@ -382,7 +382,7 @@ never contributed to that history.
 the global stream and already-split per-registry ones — since a machine may have skipped the
 release that split them. It renames rather than copies, so it runs once and an existing target
 always wins, and it rmdir's the emptied directory so the migration's retirement condition is
-observable. Carries the `# MIGRATION (v5.0.0)` marker per `~/dev/standards/data.md`.
+observable. Carries a `# MIGRATION (v5.0.0)` marker naming the release that introduced it.
 
 The schema (`tracking.py`) evolves **additively** —
 `RepoSnapshot` gained `policy` + `branches: list[BranchSnapshot]` and `RunSummary` gained
@@ -412,6 +412,6 @@ only shows up on the machine running the older version.
 
 ## Planning
 
-`.planning/` (symlinked to `~/dev/repos/syncer/planning/`) holds `status.md` (current state +
-decisions) and `sync-policy-design.md` (the design doc — a historical artifact; drift from the
-implementation is recorded in `status.md`, the design doc itself is left as-written).
+`.planning/` (gitignored) holds `status.md` (current state + decisions) and
+`sync-policy-design.md` (the design doc — a historical artifact; drift from the implementation is
+recorded in `status.md`, the design doc itself is left as-written).

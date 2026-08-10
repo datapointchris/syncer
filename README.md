@@ -45,7 +45,7 @@ and registry paths *and what chose each of them*, whether the remotes can actual
 order, so the first failure is the one to act on. It exits 1 on a real problem, so
 `syncer doctor && syncer apply` stops on a box that was never going to work.
 
-`config init` creates whichever of the two files is missing and **never rewrites one that exists** — the registry is shared infrastructure that `forge` and `indy` also read, so syncer scaffolds one that is absent and modifies no existing one. `syncer config init registry` does just that file; `syncer config path` says where both landed.
+`config init` creates whichever of the two files is missing and **never rewrites one that exists** — the registry is shared infrastructure other tools may also read, so syncer scaffolds one that is absent and modifies no existing one. `syncer config init registry` does just that file; `syncer config path` says where both landed.
 
 ## Usage
 

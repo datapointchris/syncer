@@ -183,8 +183,8 @@ class TestPerRegistryEventStreams:
 
     def test_stream_is_keyed_on_the_registry_file(self, tmp_path, monkeypatch):
         monkeypatch.setattr('syncer.tracking.STATE_DIR', tmp_path)
-        personal = events_file_for(Path('~/dev/repos.json'))
-        work = events_file_for(Path('~/dev/work-repos.json'))
+        personal = events_file_for(Path('~/registries/repos.json'))
+        work = events_file_for(Path('~/registries/work-repos.json'))
         assert personal != work
         assert personal.name == 'repos-events.jsonl'
         assert work.name == 'work-repos-events.jsonl'

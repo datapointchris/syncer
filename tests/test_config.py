@@ -91,9 +91,9 @@ class TestLoadToolConfig:
         assert loaded.policies == {}
 
     def test_parses_repos_file_and_default_policy(self, tool_config):
-        tool_config.write_text('repos_file = "~/dev/repos.json"\ndefault_policy = "observe"\n')
+        tool_config.write_text('repos_file = "~/registries/repos.json"\ndefault_policy = "observe"\n')
         loaded = load_tool_config()
-        assert loaded.repos_file == '~/dev/repos.json'
+        assert loaded.repos_file == '~/registries/repos.json'
         assert loaded.default_policy == 'observe'
 
     def test_parses_custom_policy_with_injected_name(self, tool_config):
@@ -287,7 +287,7 @@ class TestGetReposFilePath:
         assert get_repos_file_path(other) == other
 
     def test_defaults_into_the_xdg_config_dir(self, tool_config, tmp_path, monkeypatch):
-        """A fresh machine gets a working default rather than an error naming one fleet's
+        """A fresh machine gets a working default rather than an error naming someone else's
         directory layout. The old behaviour globbed ~/.config/syncer/*.json — picking up any
         stray JSON — and otherwise hard-exited."""
         monkeypatch.setattr('syncer.config.DEFAULT_REPOS_FILE', tmp_path / 'syncer' / 'repos.json')

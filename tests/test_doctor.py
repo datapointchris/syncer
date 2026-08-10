@@ -141,7 +141,7 @@ class TestReachability:
         assert len(_named(run_doctor(), 'reach')) == 1
 
     def test_gh_is_never_invoked(self, isolated, tmp_path, monkeypatch):
-        """The work box may be Bitbucket or internal; doctor must not assume GitHub."""
+        """A remote may be Bitbucket or internal; doctor must not assume GitHub."""
         calls = []
         real = subprocess.run
 

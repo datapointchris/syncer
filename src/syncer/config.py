@@ -35,8 +35,8 @@ CONFIG_DIR = xdg_config_home() / 'syncer'
 TOOL_CONFIG_PATH = CONFIG_DIR / 'config.toml'
 
 # Registry location when config.toml names none. Deliberately a syncer-owned path: sharing one
-# registry with forge and indy (the fleet keeps it at ~/dev/repos.json) is an arrangement between
-# those tools, so it belongs in repos_file on the machines that want it — never in the default.
+# registry with other tools is an arrangement between them, so it belongs in repos_file on the
+# machines that want it — never in the default.
 DEFAULT_REPOS_FILE = CONFIG_DIR / 'repos.json'
 
 # Run history is state, not data: it persists across runs, nobody authors it, and deleting it
@@ -69,8 +69,8 @@ default_policy = "standard"
 
 # No `repos_file` line, not even commented out. It is the one setting whose correct value differs
 # per machine and whose wrong value fails every run outright rather than degrading — a config
-# deployed from a shared dotfiles bucket pointed a git-only box at a Syncthing path it could never
-# have. A scaffold should not put the idea in front of someone unprompted.
+# deployed from a shared source pointed one machine at a directory that only existed on another.
+# A scaffold should not put the idea in front of someone unprompted.
 
 STARTER_REGISTRY = """\
 {
@@ -211,10 +211,10 @@ class RepoConfig(BaseModel):
     # Explicit clone URL, bypassing both url_template and the default three-part path. For the
     # one repo in a registry that does not follow the host's own convention.
     clone_url: str | None = None
-    # Declared build surface (components, sql_dialect), owned and consumed by forge.
+    # Declared build surface (components, sql_dialect), owned and consumed by a separate tool.
     # syncer neither reads nor validates the shape; it is modelled only so the
     # registry schema documents what is actually in the file. Kept as a dict so
-    # forge can extend it without touching syncer.
+    # that tool can extend it without touching syncer.
     toolchain: dict[str, Any] | None = None
 
 
@@ -422,7 +422,7 @@ def init_tool_config() -> Path:
 def init_registry(path: Path) -> Path:
     """Write an empty starter registry to the path syncer reads. Callers check for an existing
     file first: creating a registry that is absent is scaffolding, but rewriting one that exists
-    would clobber shared infrastructure that forge and indy also read.
+    would clobber shared infrastructure other tools may also read.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(STARTER_REGISTRY)

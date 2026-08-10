@@ -100,7 +100,7 @@ class TestConfigInit:
         assert runner.invoke(app, ['config', 'init', 'nope']).exit_code == 2
 
     def test_never_overwrites_an_existing_file(self, config_home):
-        """Idempotent by design: the registry is shared with forge and indy, so syncer creates one
+        """Idempotent by design: the registry may be shared with other tools, so syncer creates one
         that is absent and modifies no existing one."""
         _write(config_home / 'config.toml', 'default_policy = "observe"\n')
         _write(config_home / 'repos.json', '{"owner": "me", "repos": []}')
@@ -188,7 +188,7 @@ class TestConfigScan:
         assert runner.invoke(app, ['config', 'validate']).exit_code == 0
 
     def test_it_prints_rather_than_writes_by_default(self, config_home, tmp_path):
-        """A review step, because the registry is shared with forge and indy."""
+        """A review step, because the registry may be shared with other tools."""
         code = tmp_path / 'code'
         self._repo(code / 'api', 'https://github.com/me/api')
         runner.invoke(app, ['config', 'scan', str(code)])

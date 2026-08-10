@@ -81,7 +81,7 @@ def config_init(
     reference material: `syncer config example config` and `syncer config example registry`.
 
     Idempotent: a file that already exists is reported and left exactly as it was, never
-    rewritten — the registry is shared infrastructure that forge and indy also read, and syncer
+    rewritten — the registry is shared infrastructure other tools may also read, and syncer
     creates one that is absent but modifies no existing one.
     """
     files = _requested_files(which)
@@ -108,7 +108,7 @@ def config_init(
 def _registry_has_repos(path: Path) -> bool:
     """Whether a registry holds anything worth protecting.
 
-    The no-clobber rule guards *content* — a registry forge and indy also read — not the empty
+    The no-clobber rule guards *content* — a registry other tools may also read — not the empty
     scaffold `config init` writes. Refusing to fill that one made the documented flow
     (`config init` then `config scan --write`) contradict itself. Unreadable counts as content:
     a file syncer cannot parse is the last one to overwrite silently.
@@ -155,7 +155,7 @@ def config_scan(
 
     Prints to stdout by default so you can review it — `syncer config scan ~/code > repos.json`
     works, and so does piping it through jq. `--write` puts it at the path syncer reads, and
-    only when no registry is there: this file is shared with forge and indy, so syncer creates
+    only when no registry is there: this file may be shared with other tools, so syncer creates
     one that is absent and never rewrites one that exists.
     """
     found: list[Path] = []

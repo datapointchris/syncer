@@ -94,7 +94,7 @@ class TestClassifyFailure:
 
 class TestHints:
     def test_gh_is_only_suggested_for_github(self):
-        """The work box may be Bitbucket or an internal GitLab; telling it to run `gh auth
+        """A remote may be Bitbucket or an internal GitLab; telling it to run `gh auth
         login` is noise that teaches you to skip the hint."""
         github = ' '.join(hint_lines(Cause.AUTH, 'https://github.com/o/r'))
         corporate = ' '.join(hint_lines(Cause.AUTH, 'https://bitbucket.corp/scm/p/r.git'))

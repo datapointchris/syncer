@@ -208,7 +208,8 @@ class TestPolicyValidation:
 class TestProtectedBranches:
     """`protected` is machine-local, like every other policy setting: it lives on a Policy, and
     policies only ever come from config.toml. The registry carries no policy fields at all
-    beyond the portable `sync_policy` name hint, so protection cannot be set fleet-wide."""
+    beyond the portable `sync_policy` name hint, so protection cannot be set for every machine
+    at once."""
 
     def test_no_builtin_protects_anything(self):
         """A built-in with a protected list would be a global default that every machine
