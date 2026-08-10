@@ -255,6 +255,29 @@ pydantic `ValidationError` escape as a traceback. Policies are constructed one a
 own error says only `rules`, which is no help in a file holding several. `config validate` prints
 the same lines it collects; it does not have its own error rendering.
 
+**A `[policies.X]` table is merged onto whatever `X` already is** — the built-in of that name if
+one ships, nothing if it does not. So patching a built-in and defining a policy are one syntax
+with no mode switch, and changing one decision is a two-line block that names the policy it
+changes rather than inventing a name:
+
+```toml
+[policies.standard.rules]
+"*:gone" = "delete_local"
+```
+
+`rules` merges cell by cell rather than replacing the table. The merge is at the **raw-dict**
+level in `_build_policies`, and that is load-bearing: constructing a `Policy` from the table first
+fills every absent field with a model default and clobbers the base with it, so patching
+`[policies.mirror.rules]` would silently reset mirror's `scope` from `all` to `tracked`. `extend`
+names a base only when the table's name is not already a built-in's. Unknown keys are rejected
+explicitly — pydantic ignores extras, so `extends = "standard"` would otherwise be dropped in
+silence, and a policy that quietly did not inherit reads as syncer ignoring the whole block.
+
+Merging is why nothing needs a name it did not already have. A name exists so several repos can
+share one rule set and `repos.json` can point at it — not as a wrapper you must invent to change
+a cell. `ToolConfig.policy_bases` records what each entry merged onto, purely so `policy show`
+can mark which rules a patch actually changed; it is config metadata and never reaches `decide()`.
+
 Policies are machine-local **on purpose**: the same repo can sync aggressively on an always-on
 box and report-only on a laptop. That's why they live in `config.toml`, never in `repos.json`.
 The one exception is `sync_policy` in `repos.json` — a weak, portable hint that must name a
@@ -294,6 +317,35 @@ Sub-apps live in `src/syncer/commands/`, mounted in `main.py`. `output.py` holds
 console pair: **stdout is data, stderr is everything else** — `emit_json` writes to stdout and
 bypasses Rich markup; `error`/`hint`/`success` write to stderr with `soft_wrap` so a path stays on
 one line and survives a copy-paste.
+
+`policy rules [policy]` is the browse-and-pick view and the one to live in: every settable rule
+key, grouped by state, with that state's meaning, the actions it will accept, the action this
+policy currently decides, and where that decision came from. It exists because the rule *space*
+is enumerable — three role selectors × the state enum — so it prints as one flat greppable table
+instead of a grammar you assemble in your head from two other commands. Alternatives per group
+rather than per row, since they depend only on the state.
+
+`policy actions list` / `policy actions show <action>` are the vocabulary and the drill-down.
+`show` renders one action's record from `ACTION_DOCS` (`execute.py`, beside the guards): what it
+runs, every precondition that refuses it, what it will never do, and whether protection admits it.
+The protection line and `decided_by` are computed, not declared.
+
+**`applies_to` is declared, not derived, and cannot be.** Only `_delete_local` tests
+`state.primary`; every other mutator checks live facts — `_push` wants `ahead > 0 ∧ behind == 0`,
+`_rebase_push` wants both non-zero, the fast-forward pair wants the inverse of push. Those *are*
+the definitions of AHEAD/DIVERGED/BEHIND, so the mapping is real but unreadable from the source,
+and adding a `primary` check to make it derivable would break invariant 6 — a guard consulting
+classify-time state is trusting a value that may already be stale. So it is declared and *proven*:
+`TestActionDocs` drives every mutator against a repo genuinely in each state and asserts
+`applies_to` is exactly the set where the action can act. Both directions, because the outside
+direction alone would let a doc widen to "any state" and still pass.
+
+**Refusals are keyed, never matched by text.** `Refusal` is a `StrEnum`, `REFUSAL_TEXT` holds the
+wording once, and `Outcome.reason` carries the key alongside the display-only `message`. This is
+what lets the mirror tests compare key sets — a test joining two tables on an English sentence
+fails whenever someone rewrites it, with nothing wrong, and the churn teaches you to loosen the
+assertion instead of trusting it. `describe_refusal` fills generic stand-ins for runtime values
+when a reason is being documented rather than reported.
 
 `policy show` renders a **computed** decision matrix: every `PrimaryState` × three synthetic
 `BranchState`s (default / current / neither), each cell produced by calling `decide()`. That is

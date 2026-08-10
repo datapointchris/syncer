@@ -27,6 +27,20 @@ class PrimaryState(StrEnum):
     DETACHED = 'detached'
 
 
+# What each state means, for `syncer policy rules`, which groups its table by state. Here rather
+# than in the CLI because the taxonomy is this module's: a state added to the enum without a line
+# here fails a test, which is the only thing that keeps the two in step.
+STATE_DOCS: dict[PrimaryState, str] = {
+    PrimaryState.SYNCED: 'the branch and its upstream point at the same commit',
+    PrimaryState.AHEAD: 'the branch has commits the upstream does not',
+    PrimaryState.BEHIND: 'the upstream has commits the branch does not',
+    PrimaryState.DIVERGED: 'both sides have commits the other does not',
+    PrimaryState.NO_UPSTREAM: 'the branch tracks nothing — it has never been pushed',
+    PrimaryState.GONE: 'the upstream existed and no longer does, after fetch --prune',
+    PrimaryState.DETACHED: 'HEAD is not on a branch',
+}
+
+
 class Action(StrEnum):
     """The safe menu. Every action here is pre-vetted safe; a policy can never opt into
     an unsafe primitive (force-push, dirty-tree mutation, history rewrite).
@@ -184,6 +198,19 @@ def _selector_precedence(state: BranchState, policy: Policy):
     yield '*'
 
 
+def deciding_selector(state: BranchState, policy: Policy) -> str | None:
+    """Which selector's rule decides `state`, or None when nothing matches and the fallback applies.
+
+    Split out of decide() rather than reimplemented beside it: `policy rules` reports where each
+    decision came from, and a second copy of the precedence walk is a second thing to keep in step
+    with the first.
+    """
+    for selector in _selector_precedence(state, policy):
+        if f'{selector}:{state.primary.value}' in policy.rules:
+            return selector
+    return None
+
+
 def decide(state: BranchState, policy: Policy) -> Action:
     """Pure: map a classified branch state to an action under the given policy.
 
@@ -192,11 +219,10 @@ def decide(state: BranchState, policy: Policy) -> Action:
     state plus the branch's role/name — the dirty/stashed modifiers are execute-time
     gates, never decision inputs, so decide() is invariant to them.
     """
-    for selector in _selector_precedence(state, policy):
-        action = policy.rules.get(f'{selector}:{state.primary.value}')
-        if action is not None:
-            return Action(action)
-    return policy.fallback
+    selector = deciding_selector(state, policy)
+    if selector is None:
+        return policy.fallback
+    return Action(policy.rules[f'{selector}:{state.primary.value}'])
 
 
 # ---------- Built-in policies ---------- #

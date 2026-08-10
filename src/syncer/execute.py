@@ -23,7 +23,9 @@ independent of any policy:
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Literal
+from typing import NamedTuple
 
 from pydantic import BaseModel
 
@@ -31,10 +33,73 @@ from syncer.policy import PROTECTED_ALLOWED
 from syncer.policy import Action
 from syncer.policy import BranchState
 from syncer.policy import Policy
+from syncer.policy import PrimaryState
 from syncer.policy import matching_protection
 from syncer.repos import Repo
 
 OutcomeStatus = Literal['skipped', 'reported', 'done', 'refused', 'failed']
+
+
+class Refusal(StrEnum):
+    """Why an action was refused, as a stable key rather than a sentence.
+
+    The key is what everything else joins on — ACTION_DOCS lists these, the tests compare these,
+    and `policy actions show` renders them through REFUSAL_TEXT. Wording therefore lives in
+    exactly one place and can be rewritten without touching a test, which is the point: a test
+    pinned to prose fails when nothing is wrong, and that churn teaches you to loosen the
+    assertion rather than to trust it.
+    """
+
+    NOT_CURRENT = 'not_current'
+    IS_CURRENT = 'is_current'
+    NO_UPSTREAM = 'no_upstream'
+    HAS_UPSTREAM = 'has_upstream'
+    DIRTY_TREE = 'dirty_tree'
+    NOT_STRICTLY_BEHIND = 'not_strictly_behind'
+    COUNTS_UNREADABLE = 'counts_unreadable'
+    NOTHING_TO_PUSH = 'nothing_to_push'
+    DIVERGED = 'diverged'
+    NOT_DIVERGED = 'not_diverged'
+    REBASE_CONFLICT = 'rebase_conflict'
+    NOT_GONE = 'not_gone'
+    DELETE_CURRENT = 'delete_current'
+    DELETE_DEFAULT = 'delete_default'
+    NO_MERGE_TARGET = 'no_merge_target'
+    DELETE_MERGE_TARGET = 'delete_merge_target'
+    NOT_INTEGRATED = 'not_integrated'
+    PROTECTED = 'protected'
+
+
+# The single source of refusal wording. Fields come from _refused's keyword arguments.
+REFUSAL_TEXT: dict[Refusal, str] = {
+    Refusal.NOT_CURRENT: '{verb} requires the branch to be current',
+    Refusal.IS_CURRENT: 'ff_ref is for non-current branches; use pull_ff',
+    Refusal.NO_UPSTREAM: 'branch has no upstream',
+    Refusal.HAS_UPSTREAM: 'branch already has an upstream',
+    Refusal.DIRTY_TREE: 'working tree is dirty',
+    Refusal.NOT_STRICTLY_BEHIND: 'upstream is not strictly ahead',
+    Refusal.COUNTS_UNREADABLE: 'cannot read ahead/behind counts',
+    Refusal.NOTHING_TO_PUSH: 'nothing to push',
+    Refusal.DIVERGED: 'branch is diverged; refusing to push',
+    Refusal.NOT_DIVERGED: 'branch is not diverged',
+    Refusal.REBASE_CONFLICT: 'rebase conflict; aborted (resolve manually)',
+    Refusal.NOT_GONE: 'branch is not gone',
+    Refusal.DELETE_CURRENT: 'refusing to delete the current branch',
+    Refusal.DELETE_DEFAULT: 'refusing to delete the default branch',
+    Refusal.NO_MERGE_TARGET: 'no merge target to verify integration against',
+    Refusal.DELETE_MERGE_TARGET: 'refusing to delete the merge target ({target})',
+    Refusal.NOT_INTEGRATED: 'branch is not integrated into {target}',
+    Refusal.PROTECTED: 'protected by {pattern!r}',
+}
+
+# Stand-ins for the runtime values a refusal template interpolates, used when a reason is being
+# *documented* rather than reported and there is no actual value to show.
+_DOC_FIELDS = {'target': '<target>', 'verb': 'this action', 'pattern': '<glob>'}
+
+
+def describe_refusal(reason: Refusal) -> str:
+    """A refusal's wording for reference output, with generic stand-ins for runtime values."""
+    return REFUSAL_TEXT[reason].format_map(_DOC_FIELDS)
 
 
 class Outcome(BaseModel):
@@ -51,10 +116,19 @@ class Outcome(BaseModel):
     action: Action
     status: OutcomeStatus
     message: str = ''
+    # The refusal's stable key. Anything that needs to *identify* a refusal reads this; message
+    # is for display only, and nothing joins on its text.
+    reason: Refusal | None = None
 
 
-def _refused(state: BranchState, action: Action, reason: str) -> Outcome:
-    return Outcome(branch=state.branch, action=action, status='refused', message=reason)
+def _refused(state: BranchState, action: Action, reason: Refusal, **fields: object) -> Outcome:
+    return Outcome(
+        branch=state.branch,
+        action=action,
+        status='refused',
+        reason=reason,
+        message=REFUSAL_TEXT[reason].format(**fields),
+    )
 
 
 def _is_strictly_behind(repo: Repo, branch: str, upstream: str) -> bool:
@@ -68,13 +142,13 @@ def _is_strictly_behind(repo: Repo, branch: str, upstream: str) -> bool:
 
 def _pull_ff(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     if not state.is_current:
-        return _refused(state, Action.PULL_FF, 'pull_ff requires the branch to be current')
+        return _refused(state, Action.PULL_FF, Refusal.NOT_CURRENT, verb='pull_ff')
     if not state.upstream:
-        return _refused(state, Action.PULL_FF, 'no upstream to fast-forward from')
+        return _refused(state, Action.PULL_FF, Refusal.NO_UPSTREAM)
     if repo.is_dirty:  # invariant 2, re-checked live
-        return _refused(state, Action.PULL_FF, 'working tree is dirty')
+        return _refused(state, Action.PULL_FF, Refusal.DIRTY_TREE)
     if not _is_strictly_behind(repo, state.branch, state.upstream):  # invariant 3
-        return _refused(state, Action.PULL_FF, 'upstream is not strictly ahead')
+        return _refused(state, Action.PULL_FF, Refusal.NOT_STRICTLY_BEHIND)
     ok, err = repo.merge_ff_only(state.upstream)
     if ok:
         return Outcome(branch=state.branch, action=Action.PULL_FF, status='done', message='fast-forwarded')
@@ -83,11 +157,11 @@ def _pull_ff(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
 
 def _ff_ref(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     if state.is_current:
-        return _refused(state, Action.FF_REF, 'ff_ref is for non-current branches; use pull_ff')
+        return _refused(state, Action.FF_REF, Refusal.IS_CURRENT)
     if not state.upstream:
-        return _refused(state, Action.FF_REF, 'no upstream to advance to')
+        return _refused(state, Action.FF_REF, Refusal.NO_UPSTREAM)
     if not _is_strictly_behind(repo, state.branch, state.upstream):  # invariant 3
-        return _refused(state, Action.FF_REF, 'upstream is not strictly ahead')
+        return _refused(state, Action.FF_REF, Refusal.NOT_STRICTLY_BEHIND)
     ok, err = repo.update_ref(state.branch, state.upstream)
     if ok:
         return Outcome(branch=state.branch, action=Action.FF_REF, status='done', message=f'advanced to {state.upstream}')
@@ -108,17 +182,17 @@ def _fast_forward(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
 
 def _push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     if repo.is_dirty:
-        return _refused(state, Action.PUSH, 'working tree is dirty')
+        return _refused(state, Action.PUSH, Refusal.DIRTY_TREE)
     if not state.upstream:
-        return _refused(state, Action.PUSH, 'no upstream; use set_upstream_push')
+        return _refused(state, Action.PUSH, Refusal.NO_UPSTREAM)
     counts = repo.ahead_behind(state.branch, state.upstream)
     if counts is None:
-        return _refused(state, Action.PUSH, 'cannot read ahead/behind counts')
+        return _refused(state, Action.PUSH, Refusal.COUNTS_UNREADABLE)
     ahead, behind = counts
     if ahead == 0:
-        return _refused(state, Action.PUSH, 'nothing to push')
+        return _refused(state, Action.PUSH, Refusal.NOTHING_TO_PUSH)
     if behind > 0:
-        return _refused(state, Action.PUSH, 'branch is diverged; refusing to push')
+        return _refused(state, Action.PUSH, Refusal.DIVERGED)
     ok, err = repo.push_branch(state.branch)
     if ok:
         return Outcome(branch=state.branch, action=Action.PUSH, status='done', message=f'pushed {ahead} commit(s)')
@@ -127,20 +201,20 @@ def _push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
 
 def _rebase_push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     if not state.is_current:
-        return _refused(state, Action.REBASE_PUSH, 'rebase_push requires the branch to be current')
+        return _refused(state, Action.REBASE_PUSH, Refusal.NOT_CURRENT, verb='rebase_push')
     if repo.is_dirty:  # invariant 2
-        return _refused(state, Action.REBASE_PUSH, 'working tree is dirty')
+        return _refused(state, Action.REBASE_PUSH, Refusal.DIRTY_TREE)
     if not state.upstream:
-        return _refused(state, Action.REBASE_PUSH, 'no upstream to rebase onto')
+        return _refused(state, Action.REBASE_PUSH, Refusal.NO_UPSTREAM)
     counts = repo.ahead_behind(state.branch, state.upstream)
     if counts is None:
-        return _refused(state, Action.REBASE_PUSH, 'cannot read ahead/behind counts')
+        return _refused(state, Action.REBASE_PUSH, Refusal.COUNTS_UNREADABLE)
     ahead, behind = counts
     if not (ahead > 0 and behind > 0):
-        return _refused(state, Action.REBASE_PUSH, 'branch is not diverged')
+        return _refused(state, Action.REBASE_PUSH, Refusal.NOT_DIVERGED)
     if not repo.pull_rebase():  # invariant 4: conflict → abort → refuse, never half-rebase
         repo.rebase_abort()
-        return _refused(state, Action.REBASE_PUSH, 'rebase conflict; aborted (resolve manually)')
+        return _refused(state, Action.REBASE_PUSH, Refusal.REBASE_CONFLICT)
     ok, err = repo.push_branch(state.branch)
     if ok:
         return Outcome(branch=state.branch, action=Action.REBASE_PUSH, status='done', message='rebased and pushed')
@@ -149,9 +223,9 @@ def _rebase_push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
 
 def _set_upstream_push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     if state.upstream:
-        return _refused(state, Action.SET_UPSTREAM_PUSH, 'branch already has an upstream')
+        return _refused(state, Action.SET_UPSTREAM_PUSH, Refusal.HAS_UPSTREAM)
     if repo.is_dirty:
-        return _refused(state, Action.SET_UPSTREAM_PUSH, 'working tree is dirty')
+        return _refused(state, Action.SET_UPSTREAM_PUSH, Refusal.DIRTY_TREE)
     ok, err = repo.push_branch(state.branch, set_upstream=True)
     if ok:
         return Outcome(branch=state.branch, action=Action.SET_UPSTREAM_PUSH, status='done', message='pushed and set upstream')
@@ -161,20 +235,20 @@ def _set_upstream_push(state: BranchState, repo: Repo, policy: Policy) -> Outcom
 def _delete_local(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     # Full guard (invariant 5), every clause re-verified live.
     if state.primary != 'gone':
-        return _refused(state, Action.DELETE_LOCAL, 'branch is not gone')
+        return _refused(state, Action.DELETE_LOCAL, Refusal.NOT_GONE)
     if state.is_current:
-        return _refused(state, Action.DELETE_LOCAL, 'refusing to delete the current branch')
+        return _refused(state, Action.DELETE_LOCAL, Refusal.DELETE_CURRENT)
     if state.is_default:
-        return _refused(state, Action.DELETE_LOCAL, 'refusing to delete the default branch')
+        return _refused(state, Action.DELETE_LOCAL, Refusal.DELETE_DEFAULT)
     if repo.is_dirty:
-        return _refused(state, Action.DELETE_LOCAL, 'working tree is dirty')
+        return _refused(state, Action.DELETE_LOCAL, Refusal.DIRTY_TREE)
     target = policy.merge_target or repo.default_branch
     if not target:
-        return _refused(state, Action.DELETE_LOCAL, 'no merge target to verify integration against')
+        return _refused(state, Action.DELETE_LOCAL, Refusal.NO_MERGE_TARGET)
     if state.branch == target:
-        return _refused(state, Action.DELETE_LOCAL, f'refusing to delete the merge target ({target})')
+        return _refused(state, Action.DELETE_LOCAL, Refusal.DELETE_MERGE_TARGET, target=target)
     if not repo.contains_branch(state.branch, target):
-        return _refused(state, Action.DELETE_LOCAL, f'branch is not integrated into {target}')
+        return _refused(state, Action.DELETE_LOCAL, Refusal.NOT_INTEGRATED, target=target)
     ok, err = repo.delete_local_branch(state.branch)
     if ok:
         return Outcome(branch=state.branch, action=Action.DELETE_LOCAL, status='done', message=f'deleted; integrated into {target}')
@@ -201,6 +275,128 @@ MUTATING_ACTIONS = frozenset(_MUTATORS)
 _WORKTREE_SAFE = frozenset({Action.FF_REF})
 
 
+class ActionDoc(NamedTuple):
+    """What `syncer policy actions show` renders for one action.
+
+    `applies_to` is declared rather than derived, and that is deliberate. Only _delete_local tests
+    `state.primary`; every other mutator checks the live facts instead — _push wants ahead > 0 and
+    behind == 0, _rebase_push wants both non-zero, the fast-forward pair wants behind > 0 and
+    ahead == 0. Those *are* the definitions of AHEAD / DIVERGED / BEHIND, so the mapping is real,
+    but there is no primary check to read it off. Adding one would break invariant 6's whole
+    point: a guard consulting the classify-time state instead of git is trusting a value that may
+    already be stale. So it is declared here and *proven* in test_execute.py, which drives each
+    mutator against a repo in every primary state and asserts it refuses exactly outside this set.
+    """
+
+    summary: str
+    runs: str | None
+    refuses: tuple[Refusal, ...]
+    never: str | None
+    applies_to: frozenset[PrimaryState]
+
+
+# Every Action, with the record `policy actions show` prints. The refusal strings are the ones the
+# guards actually return, so the two cannot drift silently — see TestActionDocs. A new Action
+# without an entry fails a test rather than rendering blank, which is the same direction
+# PROTECTED_ALLOWED takes: forget it and something complains.
+ACTION_DOCS: dict[Action, ActionDoc] = {
+    Action.SKIP: ActionDoc(
+        summary='do nothing, silently',
+        runs=None,
+        refuses=(),
+        never=None,
+        applies_to=frozenset(PrimaryState),
+    ),
+    Action.REPORT: ActionDoc(
+        summary='surface the branch and change nothing',
+        runs=None,
+        refuses=(),
+        never=None,
+        applies_to=frozenset(PrimaryState),
+    ),
+    Action.PROMPT: ActionDoc(
+        summary='ask before acting (not implemented; reports)',
+        runs=None,
+        refuses=(),
+        never=None,
+        applies_to=frozenset(PrimaryState),
+    ),
+    Action.FAST_FORWARD: ActionDoc(
+        summary='advance a branch to its upstream',
+        runs='git merge --ff-only <upstream>  (current)  ·  git update-ref (not current)',
+        refuses=(Refusal.NO_UPSTREAM, Refusal.DIRTY_TREE, Refusal.NOT_STRICTLY_BEHIND),
+        never='creates a merge commit, or moves a branch the upstream is not strictly ahead of',
+        applies_to=frozenset({PrimaryState.BEHIND}),
+    ),
+    Action.PULL_FF: ActionDoc(
+        summary='fast-forward the checked-out branch (mechanism)',
+        runs='git merge --ff-only <upstream>',
+        refuses=(Refusal.NOT_CURRENT, Refusal.NO_UPSTREAM, Refusal.DIRTY_TREE, Refusal.NOT_STRICTLY_BEHIND),
+        never='creates a merge commit — --ff-only means git refuses rather than merging',
+        applies_to=frozenset({PrimaryState.BEHIND}),
+    ),
+    Action.FF_REF: ActionDoc(
+        summary='fast-forward a branch that is not checked out (mechanism)',
+        runs='git update-ref refs/heads/<branch> <upstream>',
+        refuses=(Refusal.IS_CURRENT, Refusal.NO_UPSTREAM, Refusal.NOT_STRICTLY_BEHIND),
+        never='touches the working tree — it moves a ref that is not checked out, which is why it has no dirty guard',
+        applies_to=frozenset({PrimaryState.BEHIND}),
+    ),
+    Action.PUSH: ActionDoc(
+        summary='publish local commits to the existing upstream',
+        runs='git push origin <branch>:<branch>',
+        refuses=(
+            Refusal.DIRTY_TREE,
+            Refusal.NO_UPSTREAM,
+            Refusal.COUNTS_UNREADABLE,
+            Refusal.NOTHING_TO_PUSH,
+            Refusal.DIVERGED,
+        ),
+        never='force-pushes, or pushes a branch that is behind — no --force argv is ever constructed',
+        applies_to=frozenset({PrimaryState.AHEAD}),
+    ),
+    Action.REBASE_PUSH: ActionDoc(
+        summary='rebase onto the upstream, then publish',
+        runs='git pull --rebase  →  git push origin <branch>:<branch>',
+        refuses=(
+            Refusal.NOT_CURRENT,
+            Refusal.DIRTY_TREE,
+            Refusal.NO_UPSTREAM,
+            Refusal.COUNTS_UNREADABLE,
+            Refusal.NOT_DIVERGED,
+            Refusal.REBASE_CONFLICT,
+        ),
+        never='leaves a half-finished rebase — a conflict is aborted and downgraded to a refusal',
+        applies_to=frozenset({PrimaryState.DIVERGED}),
+    ),
+    Action.SET_UPSTREAM_PUSH: ActionDoc(
+        summary='publish a branch with no upstream, and set one',
+        runs='git push -u origin <branch>',
+        refuses=(Refusal.HAS_UPSTREAM, Refusal.DIRTY_TREE),
+        never='retargets an upstream that already exists',
+        applies_to=frozenset({PrimaryState.NO_UPSTREAM}),
+    ),
+    Action.DELETE_LOCAL: ActionDoc(
+        summary='remove a local branch whose upstream is gone',
+        runs='git branch -D <branch>',
+        refuses=(
+            Refusal.NOT_GONE,
+            Refusal.DELETE_CURRENT,
+            Refusal.DELETE_DEFAULT,
+            Refusal.DIRTY_TREE,
+            Refusal.NO_MERGE_TARGET,
+            Refusal.DELETE_MERGE_TARGET,
+            Refusal.NOT_INTEGRATED,
+        ),
+        never=(
+            'deletes work the merge target does not provably hold — proven by ancestry or patch '
+            'equivalence, never inferred from the remote branch having been deleted'
+        ),
+        applies_to=frozenset({PrimaryState.GONE}),
+    ),
+}
+
+
 def dirty_refusal(action: Action, state: BranchState, dirty: bool) -> str | None:
     """Why a dirty working tree refuses `action`, or None if it admits it.
 
@@ -216,7 +412,7 @@ def dirty_refusal(action: Action, state: BranchState, dirty: bool) -> str | None
     # tree whenever the branch is not the current one.
     if action in _WORKTREE_SAFE or (action == Action.FAST_FORWARD and not state.is_current):
         return None
-    return 'working tree is dirty'
+    return REFUSAL_TEXT[Refusal.DIRTY_TREE]
 
 
 def protection_refusal(action: Action, state: BranchState, policy: Policy) -> str | None:
@@ -229,7 +425,7 @@ def protection_refusal(action: Action, state: BranchState, policy: Policy) -> st
     if action in PROTECTED_ALLOWED:
         return None
     pattern = matching_protection(state.branch, policy)
-    return None if pattern is None else f'protected by {pattern!r}'
+    return None if pattern is None else REFUSAL_TEXT[Refusal.PROTECTED].format(pattern=pattern)
 
 
 def execute(action: Action, state: BranchState, repo: Repo, policy: Policy) -> Outcome:
@@ -240,9 +436,8 @@ def execute(action: Action, state: BranchState, repo: Repo, policy: Policy) -> O
     whatever it says.
     """
     # Invariant 8, before dispatch so it covers every action, including any added later.
-    refusal = protection_refusal(action, state, policy)
-    if refusal is not None:
-        return _refused(state, action, refusal)
+    if protection_refusal(action, state, policy) is not None:
+        return _refused(state, action, Refusal.PROTECTED, pattern=matching_protection(state.branch, policy))
 
     if action == Action.SKIP:
         return Outcome(branch=state.branch, action=action, status='skipped')

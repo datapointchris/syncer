@@ -5,11 +5,16 @@ from pathlib import Path
 import pytest
 
 from syncer.classify import classify_branch
+from syncer.execute import ACTION_DOCS
 from syncer.execute import MUTATING_ACTIONS
+from syncer.execute import REFUSAL_TEXT
 from syncer.execute import Outcome
+from syncer.execute import Refusal
+from syncer.execute import describe_refusal
 from syncer.execute import dirty_refusal
 from syncer.execute import execute
 from syncer.policy import PROTECTED_ALLOWED
+from syncer.policy import STATE_DOCS
 from syncer.policy import Action
 from syncer.policy import BranchState
 from syncer.policy import Policy
@@ -225,7 +230,7 @@ class TestFastForwardDispatchesOnCheckoutState:
         before = _head(repo)
         outcome = execute(Action.FAST_FORWARD, _state_for(repo, 'main'), repo, POLICY)
         assert outcome.status == 'refused'
-        assert 'dirty' in outcome.message
+        assert outcome.reason is Refusal.DIRTY_TREE
         assert _head(repo) == before
 
     def test_refuses_when_not_strictly_behind(self, cloned_repo, tmp_path):
@@ -290,7 +295,7 @@ class TestDeleteLocalIntegrationProof:
         state = _state_for(repo, 'feature/x')
         outcome = execute(Action.DELETE_LOCAL, state, repo, Policy(name='work', merge_target='develop'))
         assert outcome.status == 'refused'
-        assert 'not integrated into develop' in outcome.message
+        assert outcome.reason is Refusal.NOT_INTEGRATED and 'develop' in outcome.message
         assert 'feature/x' in repo.local_branches()
 
     def test_refused_for_the_merge_target_itself(self, cloned_repo):
@@ -305,7 +310,7 @@ class TestDeleteLocalIntegrationProof:
         assert state.primary == PrimaryState.GONE
         outcome = execute(Action.DELETE_LOCAL, state, repo, Policy(name='work', merge_target='develop'))
         assert outcome.status == 'refused'
-        assert 'merge target' in outcome.message
+        assert outcome.reason is Refusal.DELETE_MERGE_TARGET
         assert 'develop' in repo.local_branches()
 
 
@@ -322,7 +327,7 @@ class TestExecuteRefusals:
         state = _state_for(repo, 'main')
         outcome = execute(Action.PULL_FF, state, repo, POLICY)
         assert outcome.status == 'refused'
-        assert 'dirty' in outcome.message
+        assert outcome.reason is Refusal.DIRTY_TREE
         assert _head(repo) == before  # invariant 2: tree/HEAD untouched
 
     def test_pull_ff_refused_when_diverged(self, cloned_repo, tmp_path):
@@ -361,7 +366,7 @@ class TestExecuteRefusals:
         state = _state_for(repo, 'main')
         outcome = execute(Action.PUSH, state, repo, POLICY)
         assert outcome.status == 'refused'
-        assert 'dirty' in outcome.message
+        assert outcome.reason is Refusal.DIRTY_TREE
 
     def test_delete_local_refused_when_not_merged(self, cloned_repo):
         _git(cloned_repo, 'checkout', '-b', 'feature/unmerged')
@@ -400,7 +405,7 @@ class TestInvariants:
         assert state.primary == PrimaryState.DIVERGED
         outcome = execute(Action.REBASE_PUSH, state, repo, POLICY)
         assert outcome.status == 'refused'
-        assert 'conflict' in outcome.message
+        assert outcome.reason is Refusal.REBASE_CONFLICT
         # invariant 4: no half-rebase, tree left clean
         assert repo.uncommitted_changes == []
         assert not (cloned_repo / '.git' / 'rebase-merge').exists()
@@ -483,7 +488,7 @@ class TestDirtyRefusalMatchesExecute:
         state = _state_for(repo, 'main')
         for action in MUTATING_ACTIONS:
             outcome = execute(action, state, repo, POLICY)
-            if outcome.status == 'refused' and 'dirty' in outcome.message:
+            if outcome.reason is Refusal.DIRTY_TREE:
                 assert dirty_refusal(action, state, dirty=True) is not None, (
                     f'{action.value} refuses on a dirty tree but the report shows it unblocked'
                 )
@@ -548,7 +553,7 @@ class TestProtectedBranches:
 
         outcome = execute(Action.PUSH, state, repo, Policy(name='p', protected=['develop']))
         assert outcome.status == 'refused'
-        assert "protected by 'develop'" in outcome.message
+        assert outcome.reason is Refusal.PROTECTED and 'develop' in outcome.message
         assert _git(tmp_path / 'remote.git', 'rev-parse', 'develop').stdout.strip() == remote_head_before
 
     def test_fast_forward_still_runs(self, cloned_repo, tmp_path):
@@ -577,15 +582,15 @@ class TestProtectedBranches:
 
         outcome = execute(Action.DELETE_LOCAL, state, repo, Policy(name='p', protected=['release/*']))
         assert outcome.status == 'refused'
-        assert 'release/*' in outcome.message
+        assert outcome.reason is Refusal.PROTECTED and 'release/*' in outcome.message
         assert 'release/1.0' in repo.local_branches()
 
     def test_glob_patterns_match_like_rule_selectors(self, cloned_repo):
         repo = _make_repo(cloned_repo)
         state = _state_for(repo, 'main')
-        assert 'protected' in execute(Action.PUSH, state, repo, Policy(name='p', protected=['ma*'])).message
+        assert execute(Action.PUSH, state, repo, Policy(name='p', protected=['ma*'])).reason is Refusal.PROTECTED
         # A non-matching pattern leaves the action to its own preconditions, whatever they say.
-        assert 'protected' not in execute(Action.PUSH, state, repo, Policy(name='p', protected=['release/*'])).message
+        assert execute(Action.PUSH, state, repo, Policy(name='p', protected=['release/*'])).reason is not Refusal.PROTECTED
 
     def test_every_publishing_action_is_refused(self, cloned_repo, tmp_path):
         """Iterate Action rather than listing the mutators: PROTECTED_ALLOWED is an allowlist, so
@@ -602,10 +607,10 @@ class TestProtectedBranches:
         for action in Action:
             outcome = execute(action, state, repo, policy)
             if action in PROTECTED_ALLOWED:
-                assert outcome.status != 'refused' or 'protected' not in outcome.message
+                assert outcome.reason is not Refusal.PROTECTED
             else:
                 assert outcome.status == 'refused', action
-                assert 'protected' in outcome.message, action
+                assert outcome.reason is Refusal.PROTECTED, action
 
         assert _head(repo) == head_before
         # A refusal is decided before dispatch, so no mutating git command is even attempted.
@@ -617,3 +622,130 @@ class TestProtectedBranches:
         repo.fetch_prune()
         state = _state_for(repo, 'main')
         assert execute(Action.FAST_FORWARD, state, repo, POLICY).status == 'done'
+
+
+class TestActionDocs:
+    """ACTION_DOCS is user-facing reference material for a tool whose product is trust, so every
+    claim in it is checked against the guards rather than maintained alongside them."""
+
+    def test_every_action_is_documented(self):
+        """A new Action fails here rather than rendering a blank record in `policy actions show`."""
+        assert set(ACTION_DOCS) == set(Action)
+
+    def test_every_state_is_documented(self):
+        """Same, for the state meanings `policy rules` groups its table by."""
+        assert set(STATE_DOCS) == set(PrimaryState)
+
+    def test_only_mutators_declare_what_they_run(self):
+        for action, doc in ACTION_DOCS.items():
+            assert (doc.runs is not None) == (action in MUTATING_ACTIONS), action
+
+    def _clone(self, tmp_path: Path, tag: str) -> Path:
+        path = tmp_path / f'c-{tag}'
+        subprocess.run(['git', 'clone', str(tmp_path / 'remote.git'), str(path)], capture_output=True)
+        _git(path, 'config', 'user.email', 'test@test.com')
+        _git(path, 'config', 'user.name', 'Test')
+        return path
+
+    def _advance_origin(self, path: Path, tag: str) -> str:
+        """Push one commit to origin/main from this clone; return the sha main sat at before.
+
+        Self-contained rather than using the shared second-clone helper: as soon as any case
+        pushes main from a different clone, that helper is behind and its push is rejected — with
+        output captured, so it fails silently and the next fixture is quietly the wrong state.
+        """
+        _git(path, 'fetch', 'origin')
+        _git(path, 'checkout', '-B', 'main', 'origin/main')
+        before = _git(path, 'rev-parse', 'HEAD').stdout.strip()
+        _commit(path, f'adv-{tag}.txt', 'advance')
+        _git(path, 'push', 'origin', 'main')
+        return before
+
+    def _case(self, state: PrimaryState, tmp_path: Path, tag: str) -> tuple[Repo, str]:
+        """A repo genuinely in `state`, freshly built. The guards read live git, so a BranchState
+        merely asserting a state would prove nothing — and a successful action mutates the repo,
+        so every (state, action) pair needs its own."""
+        path = self._clone(tmp_path, tag)
+        if state is PrimaryState.NO_UPSTREAM:
+            _git(path, 'checkout', '-b', 'orphan')
+            _commit(path, 'orphan.txt', 'orphan')
+            return _make_repo(path), 'orphan'
+        if state is PrimaryState.GONE:
+            _git(path, 'checkout', '-b', 'feature')
+            _commit(path, 'feature.txt', 'feature')
+            _git(path, 'push', '-u', 'origin', 'feature')
+            _git(path, 'checkout', 'main')
+            _git(path, 'merge', 'feature')
+            _git(path, 'push', 'origin', 'main')
+            _git(path, 'push', 'origin', '--delete', 'feature')
+            _git(path, 'fetch', '--prune', 'origin')
+            return _make_repo(path), 'feature'
+        if state in (PrimaryState.BEHIND, PrimaryState.DIVERGED):
+            before = self._advance_origin(path, tag)
+            _git(path, 'checkout', '-B', 'main', before)
+        if state in (PrimaryState.AHEAD, PrimaryState.DIVERGED):
+            _commit(path, f'local-{tag}.txt', 'local')
+        return _make_repo(path), 'main'
+
+    def _behind_noncurrent(self, tmp_path: Path, tag: str) -> tuple[Repo, str]:
+        """A behind branch that is *not* checked out — the only shape ff_ref can act on, and
+        without it applies_to={behind} would look unreachable for it."""
+        path = self._clone(tmp_path, tag)
+        before = self._advance_origin(path, tag)
+        _git(path, 'branch', 'stale', before)
+        _git(path, 'branch', '--set-upstream-to=origin/main', 'stale')
+        return _make_repo(path), 'stale'
+
+    # Every state, plus the one checkout variant that changes which mechanism can act.
+    CASES = (*(state for state in PrimaryState if state is not PrimaryState.DETACHED), 'behind-noncurrent')
+
+    def _build(self, case, tmp_path: Path, tag: str) -> tuple[Repo, str, PrimaryState]:
+        if case == 'behind-noncurrent':
+            repo, branch = self._behind_noncurrent(tmp_path, tag)
+            return repo, branch, PrimaryState.BEHIND
+        repo, branch = self._case(case, tmp_path, tag)
+        return repo, branch, case
+
+    def test_applies_to_is_exactly_where_an_action_can_act(self, cloned_repo, tmp_path):
+        """Both directions. Outside applies_to nothing ever mutates — the safety claim, and the
+        reason the set can be declared rather than derived. Inside it, every state is genuinely
+        reachable, so a doc widened to states the guard rejects fails here instead of sending
+        someone to set a rule that would refuse forever."""
+        reachable: dict[Action, set[PrimaryState]] = {action: set() for action in MUTATING_ACTIONS}
+        for case in self.CASES:
+            for action in MUTATING_ACTIONS:
+                repo, branch, state = self._build(case, tmp_path, f'{case}-{action.value}')
+                classified = _state_for(repo, branch)
+                assert classified.primary == state, f'fixture {case} classified as {classified.primary}'
+                outcome = execute(action, classified, repo, POLICY)
+                if outcome.status != 'refused':
+                    reachable[action].add(state)
+                    assert state in ACTION_DOCS[action].applies_to, f'{action} acted on undocumented state {state}'
+        for action in MUTATING_ACTIONS:
+            assert reachable[action] == set(ACTION_DOCS[action].applies_to), (
+                f'{action}: reachable {sorted(s.value for s in reachable[action])} '
+                f'!= documented {sorted(s.value for s in ACTION_DOCS[action].applies_to)}'
+            )
+
+    def test_every_refusal_is_documented(self, cloned_repo, tmp_path):
+        """Whatever a guard refuses on, `policy actions show` already lists it.
+
+        Compared by Refusal key, never by message text: the wording lives once in REFUSAL_TEXT,
+        so rewriting a sentence is not supposed to fail anything, and a test that pinned the
+        prose would fail with nothing wrong.
+        """
+        for case in self.CASES:
+            for action in MUTATING_ACTIONS:
+                repo, branch, _ = self._build(case, tmp_path, f'r-{case}-{action.value}')
+                outcome = execute(action, _state_for(repo, branch), repo, POLICY)
+                if outcome.status != 'refused':
+                    continue
+                assert outcome.reason in ACTION_DOCS[action].refuses, f'{action} on {case}: undocumented refusal {outcome.reason}'
+
+    def test_every_refusal_key_renders(self):
+        """Every key has wording, and no template is missing a field it needs at render time."""
+        assert set(REFUSAL_TEXT) == set(Refusal)
+        # describe_refusal fills every template field from _DOC_FIELDS, so a template growing a
+        # new placeholder without a stand-in raises KeyError here rather than in the CLI.
+        for reason in Refusal:
+            assert describe_refusal(reason)

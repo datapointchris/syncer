@@ -5,8 +5,10 @@ from typer.testing import CliRunner
 
 from syncer.commands.policy_cmd import ROLES
 from syncer.commands.policy_cmd import decision_matrix
+from syncer.execute import Refusal
 from syncer.main import app
 from syncer.policy import BUILTIN_POLICIES
+from syncer.policy import Action
 from syncer.policy import BranchState
 from syncer.policy import PrimaryState
 from syncer.policy import decide
@@ -139,3 +141,60 @@ class TestProtectedBranchesInShow:
         listed = {policy['name']: policy for policy in json.loads(runner.invoke(app, ['policy', 'list', '--json']).output)}
         assert listed['work']['protected'] == ['develop', 'release/*']
         assert listed['standard']['protected'] == []
+
+
+class TestPolicyRules:
+    def test_lists_every_settable_key(self, config_home):
+        result = runner.invoke(app, ['policy', 'rules', 'standard', '--json'])
+        assert result.exit_code == 0
+        payload = json.loads(result.stdout)
+        assert {row['rule'] for row in payload['rules']} == {
+            f'{selector}:{state.value}' for state in PrimaryState for selector in ('default', 'current', '*')
+        }
+
+    def test_the_action_column_agrees_with_decide(self, config_home):
+        """The browse view is what someone edits their config from, so a row claiming an action
+        apply would not take is worse than no row."""
+        result = runner.invoke(app, ['policy', 'rules', 'standard', '--json'])
+        policy = BUILTIN_POLICIES['standard']
+        roles = {'default': (True, False), 'current': (False, True), '*': (False, False)}
+        for row in json.loads(result.stdout)['rules']:
+            selector, _, state = row['rule'].rpartition(':')
+            is_default, is_current = roles[selector]
+            expected = decide(BranchState(branch='main', primary=PrimaryState(state), is_default=is_default, is_current=is_current), policy)
+            assert row['action'] == expected.value, row
+
+    def test_offered_actions_come_from_the_guards_own_applies_to(self, config_home):
+        payload = json.loads(runner.invoke(app, ['policy', 'rules', 'standard', '--json']).stdout)
+        offered = {entry['state']: entry['actions'] for entry in payload['states']}
+        assert 'delete_local' in offered['gone']
+        assert 'delete_local' not in offered['synced']
+        assert 'push' in offered['ahead']
+        assert 'push' not in offered['behind']
+
+    def test_unknown_policy_is_a_usage_error(self, config_home):
+        assert runner.invoke(app, ['policy', 'rules', 'nope']).exit_code == 2
+
+
+class TestPolicyActions:
+    def test_list_covers_the_whole_menu(self, config_home):
+        payload = json.loads(runner.invoke(app, ['policy', 'actions', 'list', '--json']).stdout)
+        assert {entry['action'] for entry in payload} == {action.value for action in Action}
+
+    def test_show_reports_what_the_guard_refuses_on(self, config_home):
+        payload = json.loads(runner.invoke(app, ['policy', 'actions', 'show', 'delete_local', '--json']).stdout)
+        assert payload['applies_to'] == ['gone']
+        assert payload['mutates'] is True
+        assert payload['protected_allows'] is False
+        # Compared by key: the sentence lives once in REFUSAL_TEXT and is free to be rewritten.
+        assert Refusal.NOT_INTEGRATED.value in {entry['reason'] for entry in payload['refuses']}
+
+    def test_unknown_action_is_a_usage_error(self, config_home):
+        assert runner.invoke(app, ['policy', 'actions', 'show', 'nope']).exit_code == 2
+
+    def test_bare_group_shows_help_rather_than_acting(self, config_home):
+        # Exit 2, as every other group in this tool does for no-args: click classifies it as a
+        # usage error. Asserted so the behaviour is consistent, not accidental.
+        result = runner.invoke(app, ['policy', 'actions'])
+        assert result.exit_code == 2
+        assert 'show' in result.output and 'list' in result.output

@@ -104,8 +104,19 @@ git_timeout = 120
 [repo_overrides]
 "some-shared-repo" = "observe"
 
-# A custom policy. Its name is the table key, so this one is `--policy laptop`.
+# Changing one decision does not need a policy of your own. A [policies.*] table is merged onto
+# whatever that name already is, so naming a built-in patches it cell by cell and leaves the rest
+# of its table alone. Here: prune a feature branch whose remote is gone. standard's own
+# "default:gone" = "report" still wins on the default branch, because a role selector beats "*".
+[policies.standard.rules]
+"*:gone" = "delete_local"
+
+# A policy of your own. Its name is the table key, so this one is `--policy laptop`. Every field
+# below is optional; a table naming no built-in and no `extend` starts from the model defaults.
 [policies.laptop]
+# Start from an existing policy instead of restating its table. Only needed when the name is not
+# already a built-in's — `[policies.standard]` patches standard without this.
+extend = "standard"
 # Which branches are evaluated: default | current | tracked | all
 scope = "all"
 # Prune remote-tracking refs on fetch, so a deleted upstream branch classifies as gone rather
@@ -286,6 +297,9 @@ class ToolConfig(BaseModel):
     repos_file: str | None = None
     default_policy: str = 'standard'
     policies: dict[str, Policy] = {}
+    # policy name -> the policy it was merged onto, for `policy show` to mark which rules a patch
+    # changed. Empty for a policy defined from nothing.
+    policy_bases: dict[str, str] = {}
     repo_overrides: dict[str, str] = {}
     # Ceiling on a single git call. Machine-local because it is a property of this box's network
     # — a corporate VPN fetching a large monorepo needs more headroom than a home connection.
@@ -357,6 +371,89 @@ def parse_registry(raw: dict[str, Any]) -> SyncerConfig:
         raise ConfigError(_validation_problems(exc)) from exc
 
 
+# Keys a [policies.*] table may hold: every Policy field except the name (which is the table key)
+# plus `extend`, which is config syntax rather than a property of a resolved policy. Checked
+# explicitly because pydantic ignores unknown fields by default, so `extends = "standard"` would
+# otherwise be dropped in silence — and a policy that silently did not inherit reads as syncer
+# ignoring the whole block.
+_POLICY_BODY_KEYS = (set(Policy.model_fields) - {'name'}) | {'extend'}
+
+
+def _merged_policy_body(base: Policy | None, body: dict[str, Any]) -> dict[str, Any]:
+    """A [policies.X] table applied over its base: only the keys actually present override.
+
+    `rules` merges cell by cell rather than replacing the table, which is what makes patching one
+    decision a one-line block. Merging at the raw-dict level is load-bearing: constructing a
+    Policy from the body first would fill every absent field with a model default and clobber the
+    base with it — patching `[policies.mirror.rules]` would silently reset mirror's scope from
+    `all` to `tracked`.
+    """
+    if base is None:
+        return {key: value for key, value in body.items() if key != 'extend'}
+    merged = base.model_dump(exclude={'name'})
+    merged['rules'] = {**base.rules, **body.get('rules', {})}
+    merged.update({key: value for key, value in body.items() if key not in ('extend', 'rules')})
+    return merged
+
+
+def _build_policies(raw_policies: dict[str, Any], bases: dict[str, str] | None = None) -> dict[str, Policy]:
+    """Resolve every [policies.*] table against the policy it patches or extends.
+
+    A table named for a built-in patches that built-in; `extend` names a base for a table that
+    is not. Resolution is recursive so a policy may extend one the same file defines, with the
+    in-progress set turning a cycle into a readable error rather than a RecursionError.
+    """
+    resolved: dict[str, Policy] = {}
+    in_progress: list[str] = []
+    # Which policy each entry was merged onto. Config metadata rather than policy semantics, so
+    # it stays off Policy and out of decide()'s reach — `policy show` needs it to say which rules
+    # a patch actually changed, and the merge is what discards it.
+    bases = bases if bases is not None else {}
+
+    def build(name: str) -> Policy:
+        if name in resolved:
+            return resolved[name]
+        body = raw_policies.get(name)
+        if body is None:
+            builtin = BUILTIN_POLICIES.get(name)
+            if builtin is None:
+                raise ConfigError([f'unknown policy {name!r}; known: {", ".join(sorted(BUILTIN_POLICIES))}'])
+            return builtin
+        if name in in_progress:
+            raise ConfigError([f'policies.{name}: extend cycle ({" -> ".join([*in_progress, name])})'])
+
+        unknown = sorted(set(body) - _POLICY_BODY_KEYS)
+        if unknown:
+            raise ConfigError([f'policies.{name}: unknown key {key!r}' for key in unknown])
+
+        in_progress.append(name)
+        try:
+            base_name = body.get('extend')
+            if base_name is None:
+                # No `extend`: the base is the built-in of the same name, if there is one. This is
+                # what makes patching a built-in and defining a new policy the same syntax.
+                base = BUILTIN_POLICIES.get(name)
+                if base is not None:
+                    bases[name] = name
+            else:
+                try:
+                    base = build(base_name)
+                except ConfigError as exc:
+                    raise ConfigError([f'policies.{name}: extend — {line}' for line in exc.problems]) from exc
+                bases[name] = base_name
+            try:
+                resolved[name] = Policy(name=name, **_merged_policy_body(base, body))
+            except ValidationError as exc:
+                raise ConfigError(_validation_problems(exc, prefix=f'policies.{name}')) from exc
+        finally:
+            in_progress.pop()
+        return resolved[name]
+
+    for name in raw_policies:
+        build(name)
+    return resolved
+
+
 def parse_tool_config(raw: dict[str, Any]) -> ToolConfig:
     """Build a ToolConfig from parsed TOML, injecting each policy's name from its table key.
 
@@ -365,18 +462,15 @@ def parse_tool_config(raw: dict[str, Any]) -> ToolConfig:
     Policies are built one at a time so a bad rule reports which policy it is in — pydantic's
     own error names only `rules`, which is no help in a file holding several.
     """
-    policies = {}
-    for name, body in raw.get('policies', {}).items():
-        try:
-            policies[name] = Policy(name=name, **body)
-        except ValidationError as exc:
-            raise ConfigError(_validation_problems(exc, prefix=f'policies.{name}')) from exc
+    bases: dict[str, str] = {}
+    policies = _build_policies(raw.get('policies', {}), bases)
 
     try:
         return ToolConfig(
             repos_file=raw.get('repos_file'),
             default_policy=raw.get('default_policy', 'standard'),
             policies=policies,
+            policy_bases=bases,
             repo_overrides=raw.get('repo_overrides', {}),
             git_timeout=raw.get('git_timeout', GIT_TIMEOUT_SECONDS),
         )
@@ -441,7 +535,11 @@ def resolve_clone_url(repo_config: RepoConfig, config: SyncerConfig) -> str:
 
 
 def resolve_policies(tool_config: ToolConfig) -> dict[str, Policy]:
-    """Built-in policies overlaid with any user-defined policies of the same name."""
+    """Built-in policies overlaid with the config's own, which are already merged onto their base.
+
+    The merge happened in _build_policies, so a `[policies.standard]` entry here is the built-in
+    with the file's cells applied — not a replacement for it.
+    """
     merged = dict(BUILTIN_POLICIES)
     merged.update(tool_config.policies)
     return merged

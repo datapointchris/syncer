@@ -1,14 +1,17 @@
 import json
+import tomllib
 from pathlib import Path
 
 import pytest
 
+from syncer.config import ConfigError
 from syncer.config import RepoConfig
 from syncer.config import SyncerConfig
 from syncer.config import ToolConfig
 from syncer.config import _load_repos_file
 from syncer.config import get_repos_file_path
 from syncer.config import load_tool_config
+from syncer.config import parse_tool_config
 from syncer.config import registry_location
 from syncer.config import resolve_clone_url
 from syncer.config import resolve_config
@@ -16,6 +19,7 @@ from syncer.config import resolve_policies
 from syncer.config import resolve_policy_name
 from syncer.config import xdg_config_home
 from syncer.config import xdg_state_home
+from syncer.policy import BUILTIN_POLICIES
 from syncer.policy import Action
 from syncer.policy import Scope
 from syncer.repos import GIT_TIMEOUT_SECONDS
@@ -420,3 +424,50 @@ class TestBrokenConfigIsExplained:
         with pytest.raises(SystemExit):
             _load_repos_file(repos_file)
         assert 'not valid JSON' in capsys.readouterr().err
+
+
+class TestPolicyPatching:
+    """A [policies.*] table is merged onto whatever that name already is, so patching a built-in
+    and defining a new policy are one syntax with no mode switch."""
+
+    def test_naming_a_builtin_patches_its_rules(self, tool_config):
+        tool_config.write_text('[policies.standard.rules]\n"*:gone" = "delete_local"\n')
+        standard = load_tool_config().policies['standard']
+        assert standard.rules['*:gone'] == 'delete_local'
+        assert standard.rules == BUILTIN_POLICIES['standard'].rules | {'*:gone': 'delete_local'}
+
+    def test_a_patch_does_not_reset_the_bases_other_fields(self, tool_config):
+        """The merge is at the raw-dict level for this reason: building a Policy from the table
+        first would fill every absent field with a model default and clobber the base with it."""
+        tool_config.write_text('[policies.mirror.rules]\n"*:gone" = "report"\n')
+        mirror = load_tool_config().policies['mirror']
+        assert mirror.scope is BUILTIN_POLICIES['mirror'].scope
+        assert mirror.fallback is BUILTIN_POLICIES['mirror'].fallback
+
+    def test_extend_names_a_base_for_a_new_name(self, tool_config):
+        tool_config.write_text('[policies.tidy]\nextend = "standard"\n[policies.tidy.rules]\n"*:gone" = "delete_local"\n')
+        config = load_tool_config()
+        assert config.policies['tidy'].rules == BUILTIN_POLICIES['standard'].rules | {'*:gone': 'delete_local'}
+        assert config.policy_bases['tidy'] == 'standard'
+
+    def test_a_policy_with_no_base_starts_empty(self, tool_config):
+        tool_config.write_text('[policies.solo]\nscope = "all"\n[policies.solo.rules]\n"*:ahead" = "push"\n')
+        assert load_tool_config().policies['solo'].rules == {'*:ahead': 'push'}
+
+    def test_a_misspelled_key_is_an_error_not_a_silent_drop(self, tool_config):
+        """pydantic ignores unknown fields, so `extends` would otherwise be dropped in silence —
+        and a policy that quietly did not inherit reads as syncer ignoring the whole block."""
+        tool_config.write_text('[policies.tidy]\nextends = "standard"\n')
+        with pytest.raises(ConfigError) as exc:
+            parse_tool_config(tomllib.loads(tool_config.read_text()))
+        assert any('extends' in line for line in exc.value.problems)
+
+    def test_extending_an_unknown_policy_names_both(self, tool_config):
+        with pytest.raises(ConfigError) as exc:
+            parse_tool_config(tomllib.loads('[policies.tidy]\nextend = "nope"\n'))
+        assert any('tidy' in line and 'nope' in line for line in exc.value.problems)
+
+    def test_an_extend_cycle_is_reported_not_a_recursion_error(self):
+        with pytest.raises(ConfigError) as exc:
+            parse_tool_config(tomllib.loads('[policies.a]\nextend = "b"\n[policies.b]\nextend = "a"\n'))
+        assert any('cycle' in line for line in exc.value.problems)
