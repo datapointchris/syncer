@@ -104,13 +104,12 @@ def _noninteractive_env() -> dict[str, str]:
     ssh's password *and* host-key confirmation prompts, and is appended to any GIT_SSH_COMMAND the
     user already configured rather than replacing it.
 
-    GIT_TERMINAL_PROMPT alone was never enough, and the gap is the worst failure this tool has:
-    it disables git's *own* terminal prompt and nothing else. An askpass program and a credential
-    helper are separate mechanisms that git prefers over the terminal, and neither reads that
-    variable — so on a machine with a GUI credential manager an expired token spawned one helper
-    process per repo, all of them at once, each waiting on a window nobody asked for. The machine
-    slowed to a crawl and syncer printed nothing, because every worker was still blocked. Each
-    line below closes one of those paths:
+    GIT_TERMINAL_PROMPT does not cover this on its own: it disables git's *own* terminal prompt
+    and nothing else. An askpass program and a credential helper are separate mechanisms that git
+    prefers over the terminal, and neither reads that variable — so on a machine with a GUI
+    credential manager an expired token spawns one helper process per repo, all of them at once,
+    each waiting on a window nobody asked for. The machine slows to a crawl and syncer prints
+    nothing, because every worker is still blocked. Each line below closes one of those paths:
 
     - `GIT_ASKPASS` empty stops git consulting an askpass at all. Git reads GIT_ASKPASS, then
       `core.askpass`, then SSH_ASKPASS, and takes the first that is *set* — so an empty value
@@ -145,9 +144,9 @@ _aborted = threading.Event()
 def abort_running_commands() -> None:
     """End every in-flight git call and make every later one return without running.
 
-    What this fixes is a Ctrl-C that appeared to do nothing: ThreadPoolExecutor's shutdown waits
-    for running tasks, so an interrupt during a fetch storm sat there for the remainder of
-    git_timeout — two minutes of a terminal that had already been told to stop.
+    Without it a Ctrl-C does nothing visible: ThreadPoolExecutor's shutdown waits for running
+    tasks, so an interrupt during a fetch storm sits there for the remainder of git_timeout — two
+    minutes of a terminal that has already been told to stop.
     """
     _aborted.set()
     with _active_lock:
@@ -252,7 +251,7 @@ class Repo:
     def origin_url(self) -> str | None:
         """Where this clone actually points, as opposed to where the registry says it should.
 
-        Cached because it is read twice per repo now — once to pick the host the failure breaker
+        Cached because it is read twice per repo — once to pick the host the failure breaker
         keys on, once for the origin-mismatch check — and a remote does not move mid-run. Safe
         because a Repo is confined to the worker thread that built it.
         """
