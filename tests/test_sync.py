@@ -1,9 +1,11 @@
 import subprocess
 from pathlib import Path
 
+from syncer.breaker import Trip
 from syncer.config import RepoConfig
 from syncer.config import SyncerConfig
 from syncer.config import ToolConfig
+from syncer.diagnose import Cause
 from syncer.report import LIFECYCLE_STYLE
 from syncer.report import RepoBranchReport
 from syncer.repos import GitFailure
@@ -164,3 +166,66 @@ class TestRunSync:
         out = capsys.readouterr().out
         # The no-remote error repo sorts below the synced one (nearest the prompt).
         assert out.index('aaa-good') < out.index('zzz-noremote')
+
+
+def _config_matching_origin(paths: list[Path]) -> SyncerConfig:
+    """A registry whose clone URL is each clone's real origin, so a synced repo is severity SYNCED
+    rather than a WARNING for pointing somewhere the registry never named."""
+    return SyncerConfig(
+        owner='demo',
+        host='https://github.com',
+        search_paths=[],
+        repos=[RepoConfig(name=p.name, path=str(p), clone_url=str(p.parent / f'{p.name}.git')) for p in paths],
+    )
+
+
+class TestASkippedRepoIsUnverifiedNotUntidy:
+    """A skipped repo has no failures of its own — that is the point of skipping it — so the
+    error branch would file it under `issues`, i.e. as a repo somebody looked at and found
+    wanting. Nobody looked at it."""
+
+    def _skipped(self) -> RepoBranchReport:
+        return RepoBranchReport(label='r', path='~/r', name='r', error='not checked', skipped=Trip(host='h', cause=Cause.AUTH))
+
+    def test_status_is_unverified(self):
+        assert _repo_status(self._skipped()) == 'unverified'
+
+    def test_the_snapshot_carries_it_into_the_run_history(self):
+        """`N need you` reads as 'there is work to do'. The truth is syncer could not find out,
+        and the summary counts that separately in red."""
+        assert _snapshot(self._skipped()).status == 'unverified'
+
+
+class TestTheDefaultRunShowsOnlyWhatNeedsSomething:
+    def test_synced_repos_are_counted_but_not_listed(self, tmp_path, capsys):
+        paths = [_make_cloned_repo(tmp_path, name) for name in ('alpha', 'bravo')]
+        run_sync(_config_matching_origin(paths), ToolConfig(default_policy='observe'), tmp_path / 'events.jsonl', jitter=0.0)
+        out = capsys.readouterr().out
+        assert '2 synced' in out
+        assert 'alpha' not in out
+        assert '2 repos not shown' in out
+
+    def test_verbose_lists_them(self, tmp_path, capsys):
+        paths = [_make_cloned_repo(tmp_path, name) for name in ('alpha', 'bravo')]
+        run_sync(_config_matching_origin(paths), ToolConfig(default_policy='observe'), tmp_path / 'events.jsonl', jitter=0.0, verbose=True)
+        out = capsys.readouterr().out
+        assert 'alpha' in out
+        assert 'repos not shown' not in out
+
+    def test_a_repo_needing_something_is_never_hidden(self, tmp_path, capsys):
+        paths = [_make_cloned_repo(tmp_path, name) for name in ('alpha', 'bravo')]
+        _git(paths[1], 'commit', '--allow-empty', '-m', 'unpushed')
+        run_sync(_config_matching_origin(paths), ToolConfig(default_policy='observe'), tmp_path / 'events.jsonl', jitter=0.0)
+        out = capsys.readouterr().out
+        assert 'bravo' in out
+        assert 'alpha' not in out
+
+    def test_the_event_stream_still_records_every_repo(self, tmp_path):
+        """Hiding is a rendering decision. History that only held the repos worth printing would
+        make `stats` a report on the bad days."""
+        paths = [_make_cloned_repo(tmp_path, name) for name in ('alpha', 'bravo')]
+        events_file = tmp_path / 'events.jsonl'
+        run_sync(_config_matching_origin(paths), ToolConfig(default_policy='observe'), events_file, jitter=0.0)
+        event = read_events(events_file)[-1]
+        assert {repo.name for repo in event.repos} == {'alpha', 'bravo'}
+        assert event.summary.total == 2

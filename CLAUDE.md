@@ -18,6 +18,11 @@ therefore exhaustively testable without touching git:
 | Execute | `execute.py` | impure (git writes) | The only place that mutates. Enforces the hard invariants (below) and refuses rather than forces. |
 | Report | `report.py` | impure (concurrency + render) | Runs classify→decide→(execute) per repo on a thread pool, sorts by attention, renders. |
 
+Two modules sit beside the pipeline rather than in it, both about surviving a bad machine rather
+than about deciding anything: `breaker.py` (**pure**) answers whether a host is still worth
+asking, and `progress.py` draws the live display over the pool. Neither is consulted by
+`decide()`, and neither can change what an action does.
+
 `decide()` being pure is why `tests/test_policy.py` can enumerate the full cartesian product
 of primary-states × policies as a no-git truth table. Keep git and FS I/O out of `policy.py`
 — that boundary is load-bearing, not incidental.
@@ -91,6 +96,16 @@ state alone. Two notions of "needs attention" in one report means neither gets t
 The summary line splits the same way (`N to sync` in cyan vs `N need you` in yellow), and
 `RepoStatus` gained `pending` for it, because a `check` run recording `pulled` would write a
 mutation that never happened into the history `stats` reads back as fact.
+
+**Severity is also what the default view renders.** `needs_attention` is one expression —
+`report_severity(...) > SYNCED` — so the filter, the sort and the summary counts cannot disagree
+about what matters. On the fleet that is 256 lines of report down to 34: a registry is mostly
+synced on any ordinary day, and which repos are synced is not information, whereas *how many* are
+is. `-v` shows every repo, `render_hidden_note` states the count that was left out so a short
+report is never mistaken for a short registry, and `--json` is unaffected — hiding is a rendering
+decision, and the event stream still records every repo or `stats` would report on the bad days
+only. The single exception is a `watch_remote` branch, which deliberately never affects severity:
+it is opt-in, and a branch someone asked to be told about should not then need a flag to appear.
 
 ## Two surfaces, one core
 
@@ -406,22 +421,92 @@ console-mode abstraction: an `as_json` flag skips the renderers, and that is all
 
 Repos are processed on a `ThreadPoolExecutor` (default `DEFAULT_JOBS = 16`, `-j` to tune). Git
 calls are I/O-bound and release the GIL, so wall-clock ≈ slowest single repo. All git work runs
-in worker threads; results are collected then sorted and rendered on the main thread via
-`pool.map` (order-preserving), so output never interleaves. A bounded per-task random jitter
+in worker threads; results are collected as each finishes (`submit` + `as_completed`) and sorted
+and rendered on the main thread, so output never interleaves. A bounded per-task random jitter
 (≤0.3s) staggers the initial fetch burst so N fetches don't hit the remote at once — bounded per
 task, so no cumulative N×delay floor on large repo sets.
+
+`as_completed` rather than `pool.map` only so the progress display can count results as they
+land; the final sort is total on path, so the rendered order never depends on which repo won a
+race. Streaming each result as it arrived was the alternative and it loses the sort, which is the
+only reason the rows that matter are the ones nearest the prompt.
 
 Output is sorted by attention ascending (`synced → operation → warning → error`, path-sorted
 within each group) so the repos needing action land at the bottom nearest the prompt.
 
+**A worker's exception is that repo's report, never the run's.** Every future is collected before
+anything renders, so an exception escaping one worker discarded all the others too — the whole
+registry measured, a traceback printed, and not one line about the repos that were fine. Caught
+in `run_one`, it becomes an ordinary error report. This is the same failure as a dead fetch
+reporting `synced`, in the other direction: one repo's unknown must never be stated as everyone's.
+
+### The wait is legible, and it ends when you say so
+
+`progress.py` draws a live two-line display on **stderr** while the pool runs: how far in, the
+tally so far in the summary line's own words, and the in-flight repos with each one's elapsed
+seconds, longest-running first. The names are what the line is *for* — a bare bar answers "is it
+moving" and the actual question on a slow machine is which repo is slow. It is deliberately not a
+`rich.progress.Progress`: those columns are per-task, and a renderable that rebuilds on each
+refresh is both smaller and the only way elapsed times advance while nothing is completing. Off
+whenever `console.is_terminal` is false or `--json` is set, since Rich repaints in place and into
+a pipe that is one line per refresh.
+
+Ctrl-C ends the run, not the current call. `abort_running_commands()` terminates every live git
+process and short-circuits every later one; without it, `ThreadPoolExecutor.shutdown` waits for
+running tasks and an interrupt during a fetch storm sits there for the remainder of `git_timeout`.
+Cancelling the queue alone is not enough — both halves are needed. Nothing is rendered and **no
+run event is written**, because a sweep covering some unknown fraction of the registry is not a
+measurement and `stats` would read one back as if it were. Exit code 130.
+
+An aborted call *is* recorded as a `GitFailure`, which reads backwards until you take the caller's
+view: a fetch that did not happen leaves every branch below it measured against refs nobody
+refreshed, so `fetch()` returning None would be the `(0, 0)` reads as SYNCED bug wearing a
+different hat. Its stderr matches no pattern in `diagnose`, so it can never be mistaken for a fact
+about the remote.
+
+### Nothing may open a window, and a dead host is asked once
+
 Every subprocess goes through `run_command` (`repos.py`), which is what makes that concurrency
-safe: git prompts for credentials on `/dev/tty`, which `capture_output` does **not** redirect, so
-an expired credential or an unknown SSH host key would leave N worker threads blocked on the same
-terminal with nothing on screen. `GIT_TERMINAL_PROMPT=0` plus `-o BatchMode=yes` makes those fail
-instead of ask, and a timeout (`git_timeout` in `config.toml`, default 120s; 600s for clones)
-backstops anything that still blocks. A timeout is returned as an ordinary non-zero result, never
-raised — raising out of a worker would lose the whole repo's report instead of the one wedged call.
-Never call `subprocess.run` directly for a git or `gh` invocation.
+safe. It uses `Popen` rather than `subprocess.run` because the abort above needs the handle —
+`run()` owns its child privately, which is exactly what left a Ctrl-C with nothing to signal. A
+timeout (`git_timeout` in `config.toml`, default 120s; 600s for clones) is returned as an ordinary
+non-zero result, never raised — raising out of a worker would lose the whole repo's report instead
+of the one wedged call. Never call `subprocess.run` directly for a git or `gh` invocation.
+
+**`GIT_TERMINAL_PROMPT=0` disables git's own terminal prompt and nothing else**, and that gap was
+the worst failure this tool had. An askpass program and a credential helper are separate
+mechanisms git *prefers* over the terminal, and neither reads that variable — so on a machine with
+a GUI credential manager an expired token spawned one helper process per repo, all at once, each
+waiting on a window nobody asked for. The machine slowed to a crawl and syncer printed nothing,
+because every worker was still blocked. `_noninteractive_env` closes each path: empty `GIT_ASKPASS`
+(git takes the first of GIT_ASKPASS / `core.askpass` / SSH_ASKPASS that is *set*, so an empty value
+short-circuits the chain rather than falling through it), `SSH_ASKPASS_REQUIRE=never`, and Git
+Credential Manager's two spellings of one switch — `GCM_INTERACTIVE=never` and
+`credential.interactive=false`. The helper is left **configured**: resetting it with
+`credential.helper=` would break every https remote whose stored credential is fine. A stored
+credential still answers; only the window is refused.
+
+Config is injected through `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n` rather than `-c` in argv, and
+appended to whatever the user already set. Only some git calls are built in `Repo._git` — a clone
+has no repo to run inside and `doctor`'s `ls-remote` probe is assembled in another module — so a
+setting threaded through argv reaches whichever call sites remembered it, while one in the
+environment reaches all of them, including the ones added later.
+
+**`breaker.py` stops asking a host that has already said no.** A registry is mostly one host, so a
+dead credential is one machine problem discovered N times, and attempting every repo is what made
+the storm above proportional to the registry. The first *host-wide* cause (`AUTH`, `HOST_KEY`,
+`DNS`) closes that host; `NETWORK` and `TIMEOUT` need `FLAKY_THRESHOLD` of them, because a refused
+connection can be one bad moment and a timeout is routinely one legitimately enormous repo.
+`NOT_FOUND` never trips — it is exactly what a private repo you cannot see reports, and it says
+nothing about the machine. The key is `(host, ssh-or-https)`, never the host alone: a loaded ssh
+key and an expired https token live on one host every day. A host that has answered successfully
+can never be closed afterwards. The window it cannot close is the one already in flight — bounding
+the damage at `jobs` instead of at the size of the registry is the whole win.
+
+Skipped repos are `RepoBranchReport.skipped` (a `Trip`), carry **zero rows** for the same reason
+an unmeasurable repo does, count as `unverified` rather than `issues` in the run history — nobody
+looked at them — and are **never rendered one per repo**. They are folded into the failure summary
+block for the cause that closed their host, since that is the whole of their explanation.
 
 ## Run history
 

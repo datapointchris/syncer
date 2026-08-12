@@ -33,8 +33,10 @@ from syncer.report import Severity
 from syncer.report import collect_failures
 from syncer.report import gather_reports
 from syncer.report import render_failure_summary
+from syncer.report import render_hidden_note
 from syncer.report import render_report
 from syncer.report import report_severity
+from syncer.report import visible_reports
 from syncer.tracking import BranchSnapshot
 from syncer.tracking import RepoSnapshot
 from syncer.tracking import RepoStatus
@@ -78,6 +80,11 @@ def _operation_status(report: RepoBranchReport) -> RepoStatus:
 def _repo_status(report: RepoBranchReport) -> RepoStatus:
     if report.lifecycle:
         return _LIFECYCLE_TO_STATUS[report.lifecycle]
+    # Before the error branch, which keys on git having failed: a skipped repo has no failures of
+    # its own — that is the point of skipping it — and would otherwise be recorded as `issues`,
+    # i.e. as a repo somebody looked at and found wanting.
+    if report.skipped:
+        return 'unverified'
     if report.error:
         # Keyed on git having failed, not on the report being empty: an unknown policy also
         # produces no rows, but that is a config problem, not a repo syncer could not read.
@@ -171,19 +178,24 @@ def run_sync(
     jobs: int = DEFAULT_JOBS,
     jitter: float = DEFAULT_JITTER_SECONDS,
     as_json: bool = False,
+    verbose: bool = False,
 ) -> list[RepoBranchReport]:
     """Run the full sync and render it. Returns the reports so the caller can set an exit code."""
     start = time.monotonic()
-    reports = gather_reports(config, tool_config, cli_policy, apply, jobs, jitter, include_lifecycle=True)
+    reports = gather_reports(config, tool_config, cli_policy, apply, jobs, jitter, include_lifecycle=True, show_progress=not as_json)
     snapshots = [_snapshot(report) for report in reports]
     summary = _summary(snapshots)
 
     if not as_json:
         console.print()
         _print_summary_line(summary)
+        # The summary line is the count of everything; the rows below it are only the repos with
+        # something to say. Which repos are synced is not information — how many are, is.
+        visible = visible_reports(reports, verbose)
+        render_hidden_note(len(visible), len(reports))
         console.print()
         # Reports are sorted synced → errors, so repos needing action land nearest the prompt.
-        for report in reports:
+        for report in visible:
             render_report(report, apply)
         render_failure_summary(reports)
 

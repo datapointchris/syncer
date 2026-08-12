@@ -2,7 +2,7 @@
 
 Check if local git repos are fully synced before switching machines.
 
-Syncer fetches every configured repo concurrently, classifies each branch (ahead/behind/gone/…), and shows what a per-machine [sync policy](#sync-policies) would do. `syncer check` reports and never writes; `syncer apply` executes the safe actions (fast-forward, push, clone, prune). Output is ordered so anything needing attention lands at the bottom, nearest the prompt.
+Syncer fetches every configured repo concurrently, classifies each branch (ahead/behind/gone/…), and shows what a per-machine [sync policy](#sync-policies) would do. `syncer check` reports and never writes; `syncer apply` executes the safe actions (fast-forward, push, clone, prune). Only the repos with something to report are listed — the summary line counts the rest and `-v` lists them — and they are ordered so anything needing attention lands at the bottom, nearest the prompt.
 
 ## Installing
 
@@ -52,6 +52,7 @@ order, so the first failure is the one to act on. It exits 1 on a real problem, 
 ```bash
 syncer check              # classify every repo/branch and show what would happen; never writes
 syncer apply              # execute each policy's safe actions (pull/push/ff/clone)
+syncer check -v           # list every repo, including the ones with nothing to report
 syncer check --per-branch # per-branch view: no lifecycle, cloning, or run history
 syncer check --json       # emit the run as JSON on stdout instead of a report
 syncer apply -p observe   # override the resolved policy for this run
@@ -76,6 +77,7 @@ The repo-level view and `--per-branch` share the same policy engine and concurre
 | `0` | nothing reached an error — including repos that merely need a push |
 | `1` | at least one repo reached an error state (`check`, `apply`, `doctor`), or at least one issue was found (`issues`) |
 | `2` | usage error — an unknown flag or argument |
+| `130` | interrupted with Ctrl-C — nothing was reported and no run was recorded |
 
 **A repo that is `ahead` exits 0.** That is the normal state of a machine somebody works on, and an exit code that is non-zero every day is one nobody can automate against. `1` means something is genuinely wrong: a clone that failed, a repo whose state could not be verified, an action that was refused at write time.
 
@@ -143,6 +145,10 @@ Both views classify every branch (per-branch `ahead`/`behind`/`gone`/`no_upstrea
 `apply` is safe by construction: it enforces hard invariants no policy can override — never `--force`, never mutate a dirty working tree, fast-forward only under strict ancestry, `rebase_push` aborts cleanly on conflict, and any precondition that fails at write time is refused (never forced) rather than mutated.
 
 Repos are fetched and processed **concurrently** (default 16 at a time, `-j` to tune), so a single run over many repos takes roughly as long as the slowest repo rather than the sum. A small random jitter staggers the initial fetches so they don't hit the remote all at once. Output is sorted by attention, so anything needing action lands nearest the prompt.
+
+While it runs, a live line on stderr shows how far in it is, which repos are being fetched right now, and how long each has been going — so a slow host is visible as it happens rather than after the fact. It is a terminal affordance: nothing is drawn into a pipe, a log, or `--json`. Ctrl-C ends the git calls immediately and exits 130 without writing a run to the history, because a sweep that covered some unknown fraction of the registry is not a measurement.
+
+Git is run with prompting, askpass, and credential-manager windows all disabled, so an expired credential fails instead of asking. Stored credentials still answer — only the window is refused. And the first proof that a host is unreachable (rejected credential, unverified host key, unresolvable name) closes it for the rest of the run: the remaining repos on that host are reported as not contacted rather than each waking a credential helper of their own. A host that has already answered successfully can never be closed, and ssh and https count as separate credentials on the same host.
 
 Three policies are built in: `standard` (default-branch auto-sync, feature branches report-only), `observe` (report everything, mutate nothing), and `mirror` (auto everything safe, opt-in). Define your own under `[policies.<name>]` with a `scope` (`default`/`current`/`tracked`/`all`) and a rule table keyed by `<selector>:<state>`:
 

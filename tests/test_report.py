@@ -1,11 +1,17 @@
 import shutil
 import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
+import pytest
+
+from syncer.breaker import HostBreaker
+from syncer.breaker import Trip
 from syncer.config import RepoConfig
 from syncer.config import SyncerConfig
 from syncer.config import ToolConfig
 from syncer.config import resolve_policies
+from syncer.diagnose import Cause
 from syncer.execute import MUTATING_ACTIONS
 from syncer.execute import Outcome
 from syncer.execute import protection_refusal
@@ -21,26 +27,53 @@ from syncer.report import _branch_line
 from syncer.report import _branch_prefix
 from syncer.report import _build_repo_report
 from syncer.report import _row_severity
+from syncer.report import build_branch_rows
 from syncer.report import gather_reports
 from syncer.report import render_failure_summary
+from syncer.report import render_hidden_note
 from syncer.report import report_branches
 from syncer.report import report_severity
+from syncer.report import visible_reports
+from syncer.repos import ABORTED_RETURNCODE
 from syncer.repos import GitFailure
+from syncer.repos import abort_running_commands
+from syncer.repos import reset_abort
+from syncer.repos import run_command
 
 
-def _build(repo_config, config, *, cli_policy=None, apply=False, include_lifecycle=True):
+class _RecordingBreaker(HostBreaker):
+    """A real breaker that also remembers what the worker told it, so the wiring is provable
+    without a network: the fixtures all clone from a local path, which has no host to close."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.successes: list[str] = []
+        self.failures: list[tuple[str, GitFailure]] = []
+
+    def record_success(self, url: str) -> None:
+        self.successes.append(url)
+        super().record_success(url)
+
+    def record_failure(self, url: str, failure: GitFailure) -> None:
+        self.failures.append((url, failure))
+        super().record_failure(url, failure)
+
+
+def _build(repo_config, config, *, cli_policy=None, apply=False, include_lifecycle=True, breaker=None, tool_config=None):
     """Call the worker with sensible test defaults for its many keyword args."""
+    tool_config = tool_config or ToolConfig()
     return _build_repo_report(
         repo_config,
         config=config,
-        tool_config=ToolConfig(),
-        policies=resolve_policies(ToolConfig()),
+        tool_config=tool_config,
+        policies=resolve_policies(tool_config),
         cli_policy=cli_policy,
         apply=apply,
         jitter=0.0,
         include_lifecycle=include_lifecycle,
         search_paths=[],
         claimed_paths=set(),
+        breaker=breaker,
     )
 
 
@@ -519,3 +552,205 @@ class TestWatchedRemoteBranches:
         deliberately do not keep."""
         report = self._watched(tmp_path, ['develop'], 'develop')
         assert report_severity(report) == Severity.SYNCED
+
+
+def _config_matching_origin(paths: list[Path]) -> SyncerConfig:
+    """A registry whose clone URL is the bare repo each clone really came from.
+
+    Without it every fixture repo carries an origin mismatch — the registry resolves a github.com
+    URL while origin is a tmp path — which is a WARNING, so nothing is ever severity SYNCED and
+    the default view has nothing to hide.
+    """
+    return SyncerConfig(
+        owner='demo',
+        host='https://github.com',
+        search_paths=[],
+        repos=[RepoConfig(name=p.name, path=str(p), clone_url=str(p.parent / f'{p.name}.git')) for p in paths],
+    )
+
+
+def _synced_report(name: str = 'alpha') -> RepoBranchReport:
+    state = BranchState(branch='main', primary=PrimaryState.SYNCED, is_default=True, is_current=True)
+    return RepoBranchReport(label=name, path=f'~/code/{name}', name=name, rows=[BranchRow(state=state, action=Action.SKIP)])
+
+
+class TestOnlyRepoWithSomethingToSayAreShown:
+    """A registry is mostly synced on any ordinary day. A report you have to scroll to read is one
+    where the four rows that mattered were indistinguishable from the seventy that did not."""
+
+    def test_a_synced_repo_is_hidden_by_default(self):
+        assert visible_reports([_synced_report()], verbose=False) == []
+
+    def test_verbose_shows_it(self):
+        reports = [_synced_report()]
+        assert visible_reports(reports, verbose=True) == reports
+
+    def test_a_repo_syncer_will_act_on_is_shown(self):
+        """`behind → fast_forward` is queued work rather than damage, but it is still the answer
+        to what this run is going to do."""
+        state = BranchState(branch='main', primary=PrimaryState.BEHIND, behind=2, is_default=True, is_current=True)
+        report = RepoBranchReport(label='a', path='~/code/a', name='a', rows=[BranchRow(state=state, action=Action.FAST_FORWARD)])
+        assert report_severity(report) == Severity.OPERATION
+        assert visible_reports([report], verbose=False) == [report]
+
+    def test_a_dirty_repo_is_shown(self):
+        state = BranchState(branch='main', primary=PrimaryState.SYNCED, is_default=True, is_current=True, dirty=True)
+        report = RepoBranchReport(label='a', path='~/code/a', name='a', rows=[BranchRow(state=state, action=Action.SKIP)])
+        assert visible_reports([report], verbose=False) == [report]
+
+    def test_a_watched_remote_branch_keeps_a_synced_repo_visible(self):
+        """watch_remote is opt-in and deliberately never affects severity. A branch someone asked
+        to be told about should not then need a flag to appear."""
+        report = _synced_report()
+        report.remote_only = [('develop', '3 days ago')]
+        assert visible_reports([report], verbose=False) == [report]
+
+    def test_the_hidden_count_is_stated(self, capsys):
+        render_hidden_note(shown=2, total=9)
+        assert '7 repos not shown' in capsys.readouterr().out
+
+    def test_nothing_is_said_when_nothing_is_hidden(self, capsys):
+        render_hidden_note(shown=9, total=9)
+        assert capsys.readouterr().out == ''
+
+    def test_end_to_end_a_synced_registry_prints_no_repo_rows(self, tmp_path, capsys):
+        paths = [_make_cloned_repo(tmp_path, name) for name in ('alpha', 'bravo')]
+        report_branches(_config_matching_origin(paths), ToolConfig(default_policy='observe'), jitter=0.0)
+        out = capsys.readouterr().out
+        assert 'alpha' not in out
+        assert 'bravo' not in out
+        assert '2 repos not shown' in out
+
+    def test_end_to_end_verbose_prints_them(self, tmp_path, capsys):
+        paths = [_make_cloned_repo(tmp_path, name) for name in ('alpha', 'bravo')]
+        report_branches(_config_matching_origin(paths), ToolConfig(default_policy='observe'), jitter=0.0, verbose=True)
+        out = capsys.readouterr().out
+        assert 'alpha' in out
+        assert 'bravo' in out
+
+
+class TestAHostThatFailedIsNotAskedAgain:
+    """One dead credential is one machine problem discovered N times. Attempting every repo is
+    what woke a GUI credential helper per repo and spent minutes producing nothing."""
+
+    AUTH = GitFailure(argv=('fetch',), returncode=128, stderr='fatal: Authentication failed for https://git.example.com/')
+
+    def _repo_on_a_named_host(self, tmp_path, name='alpha'):
+        repo_path = _make_cloned_repo(tmp_path, name)
+        _git(repo_path, 'remote', 'set-url', 'origin', f'https://git.example.com/o/{name}.git')
+        return repo_path
+
+    def test_a_closed_host_skips_the_repo(self, tmp_path):
+        repo_path = self._repo_on_a_named_host(tmp_path)
+        breaker = HostBreaker()
+        breaker.record_failure('https://git.example.com/o/alpha.git', self.AUTH)
+        config = _config_for([repo_path])
+        report = _build(config.repos[0], config, breaker=breaker, tool_config=ToolConfig(git_timeout=5))
+        assert report is not None
+        assert report.skipped is not None
+        assert report.skipped.host == 'git.example.com'
+        assert 'not checked' in (report.error or '')
+
+    def test_a_skipped_repo_claims_nothing_about_its_branches(self, tmp_path):
+        """A row is a claim about a branch, and the whole point is that no such claim can be
+        made — the same reason an unmeasurable repo carries zero rows."""
+        repo_path = self._repo_on_a_named_host(tmp_path, 'bravo')
+        breaker = HostBreaker()
+        breaker.record_failure('https://git.example.com/o/bravo.git', self.AUTH)
+        config = _config_for([repo_path])
+        report = _build(config.repos[0], config, breaker=breaker, tool_config=ToolConfig(git_timeout=5))
+        assert report is not None
+        assert report.rows == []
+
+    def test_a_successful_fetch_is_reported_to_the_breaker(self, tmp_path):
+        """Which is what stops one odd failure later in the run closing a host that answered."""
+        recorder = _RecordingBreaker()
+        paths = [_make_cloned_repo(tmp_path, 'alpha')]
+        config = _config_matching_origin(paths)
+        _build(config.repos[0], config, breaker=recorder)
+        assert recorder.successes == [str(tmp_path / 'alpha.git')]
+
+    def test_a_failed_fetch_is_reported_to_the_breaker(self, tmp_path):
+        paths = [_make_cloned_repo(tmp_path, 'alpha')]
+        shutil.rmtree(tmp_path / 'alpha.git')  # the remote it was cloned from is gone
+        recorder = _RecordingBreaker()
+        config = _config_matching_origin(paths)
+        _build(config.repos[0], config, breaker=recorder)
+        assert [url for url, _ in recorder.failures] == [str(tmp_path / 'alpha.git')]
+
+    def test_skipped_repos_are_summarised_under_the_failure_that_closed_the_host(self, capsys):
+        trip = Trip(host='git.example.com', cause=Cause.AUTH)
+        failed = RepoBranchReport(
+            label='alpha',
+            path='~/code/alpha',
+            name='alpha',
+            error='fetch failed',
+            expected_url='https://git.example.com/o/alpha.git',
+            failures=[self.AUTH],
+        )
+        skipped = [RepoBranchReport(label=f'r{i}', path=f'~/code/r{i}', name=f'r{i}', error='not checked', skipped=trip) for i in range(3)]
+        render_failure_summary([failed, *skipped])
+        err = capsys.readouterr().err
+        assert '3 more repos on git.example.com not contacted' in err
+
+    def test_skipped_repos_are_never_rendered_one_by_one(self):
+        trip = Trip(host='git.example.com', cause=Cause.AUTH)
+        report = RepoBranchReport(label='r1', path='~/code/r1', name='r1', error='not checked', skipped=trip)
+        assert report_severity(report) == Severity.ERROR  # it counts, for the exit code
+        assert visible_reports([report], verbose=False) == []  # but it is not sixty lines
+
+
+class TestOneRepoCannotTakeTheRunDown:
+    """Every future is collected before anything is rendered, so an exception escaping a worker
+    discarded every other repo's report as well: the whole registry measured, a traceback
+    printed, and not one line about the repos that were fine."""
+
+    def test_a_raising_repo_becomes_an_error_report(self, tmp_path):
+        paths = [_make_cloned_repo(tmp_path, 'alpha')]
+        with patch('syncer.report.build_branch_rows', side_effect=RuntimeError('boom')):
+            reports = gather_reports(_config_for(paths), ToolConfig(default_policy='observe'), jitter=0.0)
+        assert len(reports) == 1
+        assert reports[0].error == 'syncer failed on this repo'
+        assert 'RuntimeError: boom' in (reports[0].error_detail or '')
+
+    def test_the_other_repos_still_report(self, tmp_path):
+        paths = [_make_cloned_repo(tmp_path, name) for name in ('alpha', 'bravo')]
+        real = build_branch_rows
+
+        def explode_on_alpha(repo, *args, **kwargs):
+            if repo.name == 'alpha':
+                raise RuntimeError('boom')
+            return real(repo, *args, **kwargs)
+
+        with patch('syncer.report.build_branch_rows', side_effect=explode_on_alpha):
+            reports = gather_reports(_config_for(paths), ToolConfig(default_policy='observe'), jobs=1, jitter=0.0)
+        by_name = {report.name: report for report in reports}
+        assert by_name['alpha'].error == 'syncer failed on this repo'
+        assert by_name['bravo'].error is None
+        assert by_name['bravo'].rows
+
+
+class TestAnInterruptEndsTheGitCalls:
+    """Cancelling the queue is only half of it: without ending the calls already running, the
+    pool's shutdown waits out every in-flight fetch and the Ctrl-C looks ignored for the length
+    of git_timeout."""
+
+    def test_the_abort_reaches_run_command(self, tmp_path):
+        paths = [_make_cloned_repo(tmp_path, 'alpha')]
+        try:
+            with (
+                patch('syncer.report.build_branch_rows', side_effect=KeyboardInterrupt),
+                pytest.raises(KeyboardInterrupt),
+            ):
+                gather_reports(_config_for(paths), ToolConfig(default_policy='observe'), jitter=0.0)
+            assert run_command(['echo', 'hi'], timeout=10).returncode == ABORTED_RETURNCODE
+        finally:
+            reset_abort()
+
+    def test_the_next_run_is_re_armed(self, tmp_path):
+        """The abort flag is module-level, so a run that does not clear it would be the last one
+        this process could do — which the test suite proves by running two."""
+        paths = [_make_cloned_repo(tmp_path, 'alpha')]
+        abort_running_commands()
+        reports = gather_reports(_config_for(paths), ToolConfig(default_policy='observe'), jitter=0.0)
+        assert reports[0].rows
