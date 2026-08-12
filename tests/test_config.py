@@ -319,6 +319,20 @@ class TestRegistryLocation:
         assert location.path == tmp_path / 'work.json'
         assert '--repos-file' in location.source
 
+    def test_the_declared_variable_answers_when_the_config_does_not(self, tool_config, tmp_path, monkeypatch):
+        """One machine declares the registry once; every tool that reads it consults the same name."""
+        monkeypatch.setenv('REPOS_JSON', str(tmp_path / 'declared.json'))
+        location = registry_location(ToolConfig())
+        assert location.path == tmp_path / 'declared.json'
+        assert location.source == '$REPOS_JSON'
+
+    def test_the_config_beats_the_declared_variable(self, tool_config, repos_file, tmp_path, monkeypatch):
+        """Naming a different registry for syncer alone has to keep working."""
+        monkeypatch.setenv('REPOS_JSON', str(tmp_path / 'declared.json'))
+        location = registry_location(ToolConfig(repos_file=str(repos_file)))
+        assert location.path == repos_file
+        assert 'repos_file' in location.source
+
 
 class TestResolveConfig:
     def test_resolve_via_tool_config(self, tool_config, repos_file, sample_config):

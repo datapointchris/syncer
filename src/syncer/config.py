@@ -603,15 +603,25 @@ def registry_source_note(source: str | None) -> str:
 
 
 def registry_location(tool_config: ToolConfig, override: Path | None = None) -> RegistryLocation:
-    """Resolve the registry path: --repos-file, then config.toml's repos_file, then the default.
+    """Resolve the registry path: --repos-file, then config.toml's repos_file, then $REPOS_JSON,
+    then the default.
 
     Takes an already-loaded ToolConfig so `config validate` can resolve the registry from the
     config it just parsed and diagnosed, instead of loading the same broken file a second time.
+
+    $REPOS_JSON is the machine-wide answer every reader of the registry consults, so a machine
+    declares the path once rather than repeating it in each tool's config. It sits below the
+    config, so naming a different registry for syncer alone still works, and above the default,
+    so an unset value is the only route to syncer's own directory. Only a declared variable
+    belongs at this layer — an undeclared one resolves to nothing and silently sends the tool to
+    its default, which is the failure the config key exists to prevent.
     """
     if override is not None:
         return RegistryLocation(override.expanduser(), 'the --repos-file flag')
     if tool_config.repos_file:
         return RegistryLocation(Path(tool_config.repos_file).expanduser(), f'repos_file in {TOOL_CONFIG_PATH}')
+    if declared := os.environ.get('REPOS_JSON'):
+        return RegistryLocation(Path(declared).expanduser(), '$REPOS_JSON')
     return RegistryLocation(DEFAULT_REPOS_FILE)
 
 
