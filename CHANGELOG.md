@@ -1,6 +1,49 @@
 # CHANGELOG
 
 
+## v10.1.3 (2026-08-12)
+
+### Bug Fixes
+
+- **report**: Stop printing an outcome for an action that did nothing
+  ([`ce26708`](https://github.com/datapointchris/syncer/commit/ce26708bf275bbb5764302bd555964e6f66480a8))
+
+The arrow-suppression rule lived in _branch_line and never reached the apply path, which restated it
+  as an outcome: `synced -> skip: skipped` on 79 of 80 rows of a synced run, burying the one row
+  that acted.
+
+_apply_line defers to _branch_line whenever the action does not mutate. Nothing is hidden by that:
+  SKIP/REPORT/PROMPT are all in PROTECTED_ALLOWED and dirty_refusal ignores them, so a non-mutating
+  action can only ever reach skipped/reported and its blocked is always None. A message is kept,
+  since only an executed run can learn one.
+
+- **repos**: Keep the stderr that explains a failed fetch
+  ([`4cd0e13`](https://github.com/datapointchris/syncer/commit/4cd0e13d09b1232b3beabd45e456637f69c6e58e))
+
+git fetch --quiet exits 1 with zero bytes on stderr when it rejects a tag, so a repo whose tags
+  diverged from origin reported "fetch failed - sync state not verified" with no detail line and
+  nothing to act on. That is the undiagnosable failure GitFailure exists to prevent, and it hid a
+  real finding: only the tag refs were rejected.
+
+--quiet bought nothing. Output is captured, and git already suppresses progress when stderr is not a
+  tty.
+
+### Testing
+
+- Build the tag divergence instead of inheriting it
+  ([`fbcc03b`](https://github.com/datapointchris/syncer/commit/fbcc03bda11355a0e3b24400d30cd1e97090e49c))
+
+The fetch test passed locally and failed on CI because it leaned on three ambient settings.
+  push.autoSetupRemote made a bare `git push` work onto an empty remote; init.defaultBranch made the
+  bare's HEAD agree with the branch being pushed; fetch.pruneTags made tags an explicit refspec,
+  which is the only thing that rejects a changed tag rather than skipping it. All three are set on
+  the machine the bug was found on and none are set on CI.
+
+Each is now declared in the fixture, and a guard asserts both sides resolve the tag to different
+  objects — _git swallows a non-zero exit, so the unbuilt setup reached the assertions as a clean
+  fetch, which is indistinguishable from the bug being fixed.
+
+
 ## v10.1.2 (2026-08-12)
 
 ### Bug Fixes
