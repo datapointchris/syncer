@@ -513,14 +513,27 @@ def init_tool_config() -> Path:
     return TOOL_CONFIG_PATH
 
 
+def write_registry(path: Path, text: str) -> Path:
+    """Write the registry, following the path rather than landing on top of it.
+
+    Every write of this file goes through here, because the path is commonly a symlink to
+    wherever the registry is really kept and a write has to follow it. A temp file renamed into
+    place does not: it replaces the link, and the registry forks into two copies that are both
+    valid JSON, so readers resolving the link get one and the original keeps looking
+    authoritative while receiving nothing. Making this atomic means resolving the link before the
+    rename, never dropping the follow — pinned by TestARegistryThatIsASymlink.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
+
+
 def init_registry(path: Path) -> Path:
     """Write an empty starter registry to the path syncer reads. Callers check for an existing
     file first: creating a registry that is absent is scaffolding, but rewriting one that exists
     would clobber shared infrastructure other tools may also read.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(STARTER_REGISTRY)
-    return path
+    return write_registry(path, STARTER_REGISTRY)
 
 
 def resolve_clone_url(repo_config: RepoConfig, config: SyncerConfig) -> str:

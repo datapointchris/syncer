@@ -32,6 +32,13 @@ def _write(path, text):
     path.write_text(text)
 
 
+def _git_repo(path, origin):
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(['git', 'init', '-q', str(path)], capture_output=True)
+    subprocess.run(['git', 'remote', 'add', 'origin', origin], cwd=path, capture_output=True)
+    return path
+
+
 class TestTemplateRoundTrip:
     """Four templates now — the STARTER_* pair `init` writes and the annotated TEMPLATE_* pair
     `example` prints — and every one has to stay parseable by the model it claims to describe.
@@ -152,16 +159,10 @@ class TestConfigScan:
     """Naming thirty repos by hand is the step that makes setting this up feel like work, and
     the answer is already sitting in the filesystem."""
 
-    def _repo(self, path, origin):
-        path.mkdir(parents=True, exist_ok=True)
-        subprocess.run(['git', 'init', '-q', str(path)], capture_output=True)
-        subprocess.run(['git', 'remote', 'add', 'origin', origin], cwd=path, capture_output=True)
-        return path
-
     def test_it_finds_repos_and_derives_the_registry_identity(self, config_home, tmp_path):
         code = tmp_path / 'code'
-        self._repo(code / 'api', 'https://github.com/me/api')
-        self._repo(code / 'web', 'https://github.com/me/web')
+        _git_repo(code / 'api', 'https://github.com/me/api')
+        _git_repo(code / 'web', 'https://github.com/me/web')
         result = runner.invoke(app, ['config', 'scan', str(code)])
         registry = json.loads(result.stdout)
         assert registry['owner'] == 'me'
@@ -172,9 +173,9 @@ class TestConfigScan:
         """A directory holding both your repos and third-party clones has to scan correctly —
         that is exactly the shape of the exemplar registry."""
         code = tmp_path / 'code'
-        self._repo(code / 'mine', 'https://github.com/me/mine')
-        self._repo(code / 'also-mine', 'https://github.com/me/also-mine')
-        self._repo(code / 'vuetify', 'https://github.com/vuetifyjs/vuetify')
+        _git_repo(code / 'mine', 'https://github.com/me/mine')
+        _git_repo(code / 'also-mine', 'https://github.com/me/also-mine')
+        _git_repo(code / 'vuetify', 'https://github.com/vuetifyjs/vuetify')
         registry = json.loads(runner.invoke(app, ['config', 'scan', str(code)]).stdout)
         by_name = {repo['name']: repo for repo in registry['repos']}
         assert registry['owner'] == 'me'
@@ -183,20 +184,20 @@ class TestConfigScan:
 
     def test_the_scan_it_prints_is_a_valid_registry(self, config_home, tmp_path):
         code = tmp_path / 'code'
-        self._repo(code / 'api', 'git@github.com:me/api.git')
+        _git_repo(code / 'api', 'git@github.com:me/api.git')
         _write(config_home / 'repos.json', runner.invoke(app, ['config', 'scan', str(code)]).stdout)
         assert runner.invoke(app, ['config', 'validate']).exit_code == 0
 
     def test_it_prints_rather_than_writes_by_default(self, config_home, tmp_path):
         """A review step, because the registry may be shared with other tools."""
         code = tmp_path / 'code'
-        self._repo(code / 'api', 'https://github.com/me/api')
+        _git_repo(code / 'api', 'https://github.com/me/api')
         runner.invoke(app, ['config', 'scan', str(code)])
         assert not (config_home / 'repos.json').exists()
 
     def test_write_refuses_to_clobber_a_registry_with_repos_in_it(self, config_home, tmp_path):
         code = tmp_path / 'code'
-        self._repo(code / 'api', 'https://github.com/me/api')
+        _git_repo(code / 'api', 'https://github.com/me/api')
         existing = '{"owner": "me", "repos": [{"name": "kept", "path": "~/kept"}]}'
         _write(config_home / 'repos.json', existing)
         result = runner.invoke(app, ['config', 'scan', str(code), '--write'])
@@ -206,13 +207,13 @@ class TestConfigScan:
     def test_a_url_the_default_shape_cannot_express_is_recorded_verbatim(self, config_home, tmp_path):
         """Better an entry carrying its real origin than one whose URL cannot be rebuilt."""
         code = tmp_path / 'code'
-        self._repo(code / 'odd', 'ssh://git@host:7999/odd.git')
+        _git_repo(code / 'odd', 'ssh://git@host:7999/odd.git')
         registry = json.loads(runner.invoke(app, ['config', 'scan', str(code)]).stdout)
         assert registry['repos'][0]['clone_url'] == 'ssh://git@host:7999/odd.git'
 
     def test_write_creates_one_that_is_absent(self, config_home, tmp_path):
         code = tmp_path / 'code'
-        self._repo(code / 'api', 'https://github.com/me/api')
+        _git_repo(code / 'api', 'https://github.com/me/api')
         assert runner.invoke(app, ['config', 'scan', str(code), '--write']).exit_code == 0
         assert json.loads((config_home / 'repos.json').read_text())['repos'][0]['name'] == 'api'
 
@@ -221,7 +222,7 @@ class TestConfigScan:
         those two steps contradict each other — the no-clobber rule guards content, not the
         empty scaffold syncer wrote seconds earlier."""
         code = tmp_path / 'code'
-        self._repo(code / 'api', 'https://github.com/me/api')
+        _git_repo(code / 'api', 'https://github.com/me/api')
         assert runner.invoke(app, ['config', 'init']).exit_code == 0
         assert runner.invoke(app, ['config', 'scan', str(code), '--write']).exit_code == 0
         assert json.loads((config_home / 'repos.json').read_text())['repos'][0]['name'] == 'api'
@@ -229,13 +230,73 @@ class TestConfigScan:
     def test_an_unreadable_registry_is_never_overwritten(self, config_home, tmp_path):
         """A file syncer cannot parse is the last one to clobber silently."""
         code = tmp_path / 'code'
-        self._repo(code / 'api', 'https://github.com/me/api')
+        _git_repo(code / 'api', 'https://github.com/me/api')
         _write(config_home / 'repos.json', 'not json at all')
         assert runner.invoke(app, ['config', 'scan', str(code), '--write']).exit_code == 1
         assert (config_home / 'repos.json').read_text() == 'not json at all'
 
     def test_a_path_that_is_not_a_directory_is_a_usage_error(self, config_home, tmp_path):
         assert runner.invoke(app, ['config', 'scan', str(tmp_path / 'nope')]).exit_code == 2
+
+
+class TestARegistryThatIsASymlink:
+    """A shared registry is commonly a symlink to wherever it is really kept, and every write has
+    to follow it rather than land on top of it.
+
+    Replacing the link with a regular file forks the registry silently. Both files are then valid
+    JSON, readers that resolve the link get the copy, and the original stops receiving writes
+    while still looking authoritative — measured 2026-08-12, when one clobbered registry carried
+    an entry no other copy had. Nothing errors at any point.
+
+    A temp-file-and-rename write does exactly that, so these tests assert the invariant and not
+    the implementation: after any write the path is still a symlink, and the content is in the
+    file it points at. Hardening these writes to be atomic is allowed to change how they get
+    there and is not allowed to change either of those.
+    """
+
+    def test_scan_writes_through_the_symlink_rather_than_over_it(self, config_home, tmp_path):
+        real = tmp_path / 'shared' / 'repos.json'
+        _write(real, STARTER_REGISTRY)
+        link = config_home / 'repos.json'
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(real)
+        code = tmp_path / 'code'
+        _git_repo(code / 'api', 'https://github.com/me/api')
+
+        assert runner.invoke(app, ['config', 'scan', str(code), '--write']).exit_code == 0
+
+        assert link.is_symlink()
+        assert json.loads(real.read_text())['repos'][0]['name'] == 'api'
+
+    def test_init_writes_through_a_symlink_whose_target_is_not_there_yet(self, config_home, tmp_path):
+        """The fresh-machine order: the link is made when the registry is deployed, and the file
+        it points at arrives when something first writes one."""
+        real = tmp_path / 'shared' / 'repos.json'
+        real.parent.mkdir(parents=True, exist_ok=True)
+        link = config_home / 'repos.json'
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(real)
+
+        assert runner.invoke(app, ['config', 'init', 'registry']).exit_code == 0
+
+        assert link.is_symlink()
+        assert real.read_text() == STARTER_REGISTRY
+
+    def test_edit_seeds_through_the_symlink(self, config_home, tmp_path, monkeypatch):
+        """`edit` seeds an absent registry before opening it, which is a third writer of the same
+        file and gets the same guarantee."""
+        monkeypatch.setenv('VISUAL', 'true')
+        monkeypatch.delenv('EDITOR', raising=False)
+        real = tmp_path / 'shared' / 'repos.json'
+        real.parent.mkdir(parents=True, exist_ok=True)
+        link = config_home / 'repos.json'
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(real)
+
+        assert runner.invoke(app, ['config', 'edit', 'registry']).exit_code == 0
+
+        assert link.is_symlink()
+        assert real.read_text() == STARTER_REGISTRY
 
 
 class TestConfigEdit:

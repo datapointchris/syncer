@@ -39,6 +39,7 @@ from syncer.config import registry_location
 from syncer.config import registry_source_note
 from syncer.config import resolve_policies
 from syncer.config import resolve_policy_name
+from syncer.config import write_registry
 from syncer.output import console
 from syncer.output import emit_json
 from syncer.output import error
@@ -200,8 +201,7 @@ def config_scan(
         error(f'registry already lists repos at {location.path}{registry_source_note(location.source)} — not overwriting')
         hint('review the scan and merge it by hand: syncer config scan <paths>')
         raise typer.Exit(1)
-    location.path.parent.mkdir(parents=True, exist_ok=True)
-    location.path.write_text(rendered)
+    write_registry(location.path, rendered)
     success(f'wrote {len(entries)} repos to {location.path}')
 
 
