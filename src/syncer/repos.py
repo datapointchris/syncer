@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import subprocess
+import threading
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 
 # Ceiling on a single git invocation. Generous enough for a fetch over a VPN; the point is that
@@ -15,6 +18,11 @@ GIT_TIMEOUT_SECONDS = 120
 CLONE_TIMEOUT_MULTIPLIER = 5
 # Exit code for a timeout, matching the shell's convention for a command killed by `timeout`.
 TIMEOUT_RETURNCODE = 124
+# Exit code for a call syncer itself killed, matching the shell's convention for SIGINT. Recorded
+# like any other failure, because to the caller that is what it is: a fetch that did not happen
+# leaves every branch state below it measured against refs nobody refreshed. Its stderr matches no
+# diagnosis, so it can never be mistaken for a fact about the remote.
+ABORTED_RETURNCODE = 130
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,39 +78,127 @@ def origin_mismatch(repo: Repo) -> str | None:
     return actual
 
 
+def _add_git_config(env: dict[str, str], key: str, value: str) -> None:
+    """Append the environment form of `git -c key=value`, keeping any the caller already set.
+
+    The env form rather than argv because every git call in the tool goes through run_command and
+    only some of them are built here — a clone has no repo to run inside, and doctor's ls-remote
+    probe is assembled elsewhere. A setting threaded through argv reaches whichever call sites
+    remembered it; one in the environment reaches all of them, including the ones added later.
+    """
+    try:
+        index = int(env.get('GIT_CONFIG_COUNT', '0'))
+    except ValueError:
+        index = 0
+    env[f'GIT_CONFIG_KEY_{index}'] = key
+    env[f'GIT_CONFIG_VALUE_{index}'] = value
+    env['GIT_CONFIG_COUNT'] = str(index + 1)
+
+
 def _noninteractive_env() -> dict[str, str]:
-    """Git environment that fails fast rather than blocking on a prompt.
+    """Git environment that fails fast rather than blocking on a prompt or opening a window.
 
     Prompting is what concurrency turns into a hang: git asks for credentials on /dev/tty, which
     capture_output does not redirect, so an expired credential or an unknown host key would leave
     every worker thread blocked on the same terminal with nothing explaining why. BatchMode covers
     ssh's password *and* host-key confirmation prompts, and is appended to any GIT_SSH_COMMAND the
     user already configured rather than replacing it.
+
+    GIT_TERMINAL_PROMPT alone was never enough, and the gap is the worst failure this tool has:
+    it disables git's *own* terminal prompt and nothing else. An askpass program and a credential
+    helper are separate mechanisms that git prefers over the terminal, and neither reads that
+    variable — so on a machine with a GUI credential manager an expired token spawned one helper
+    process per repo, all of them at once, each waiting on a window nobody asked for. The machine
+    slowed to a crawl and syncer printed nothing, because every worker was still blocked. Each
+    line below closes one of those paths:
+
+    - `GIT_ASKPASS` empty stops git consulting an askpass at all. Git reads GIT_ASKPASS, then
+      `core.askpass`, then SSH_ASKPASS, and takes the first that is *set* — so an empty value
+      short-circuits the whole chain rather than falling through it.
+    - `SSH_ASKPASS_REQUIRE=never` stops ssh reaching for a GUI on its own, which it will do with
+      no terminal attached even though BatchMode has already ruled out asking.
+    - `credential.interactive=false` and `GCM_INTERACTIVE=never` are Git Credential Manager's two
+      spellings of the same switch, config and environment. A stored credential still answers;
+      only the window is refused. This is why the helper is left configured rather than reset
+      with `credential.helper=` — that would break every https remote whose credential is fine.
     """
     env = os.environ.copy()
     env['GIT_TERMINAL_PROMPT'] = '0'
+    env['GIT_ASKPASS'] = ''
+    env['SSH_ASKPASS'] = ''
+    env['SSH_ASKPASS_REQUIRE'] = 'never'
     ssh_command = env.get('GIT_SSH_COMMAND', 'ssh')
     env['GIT_SSH_COMMAND'] = f'{ssh_command} -o BatchMode=yes'
+    env['GCM_INTERACTIVE'] = 'never'
+    _add_git_config(env, 'credential.interactive', 'false')
     return env
 
 
-def run_command(args: list[str], *, cwd: Path | None = None, timeout: int) -> subprocess.CompletedProcess[str]:
-    """Run a command non-interactively, turning a timeout into an ordinary non-zero result.
+# Every git process syncer currently has running, so a Ctrl-C can end them instead of waiting out
+# each one's timeout. Module-level because run_command is reached from every layer and threading a
+# handle down to it would put cancellation plumbing in signatures that are about repos.
+_active_lock = threading.Lock()
+_active_processes: set[subprocess.Popen[str]] = set()
+_aborted = threading.Event()
 
-    Every caller branches on returncode, so a timeout has to look like a failure — raising out of
-    a worker thread would lose the whole repo's report instead of the one call that hung.
+
+def abort_running_commands() -> None:
+    """End every in-flight git call and make every later one return without running.
+
+    What this fixes is a Ctrl-C that appeared to do nothing: ThreadPoolExecutor's shutdown waits
+    for running tasks, so an interrupt during a fetch storm sat there for the remainder of
+    git_timeout — two minutes of a terminal that had already been told to stop.
     """
+    _aborted.set()
+    with _active_lock:
+        processes = list(_active_processes)
+    for process in processes:
+        # The process can exit between the snapshot and the signal, and a race there is not worth
+        # reporting: it is already gone, which is what was being asked for.
+        with contextlib.suppress(OSError):
+            process.terminate()
+
+
+def reset_abort() -> None:
+    """Re-arm for a fresh run. A long-lived process (the test suite) reuses the module."""
+    _aborted.clear()
+
+
+def run_command(args: list[str], *, cwd: Path | None = None, timeout: int) -> subprocess.CompletedProcess[str]:
+    """Run a command non-interactively, turning a timeout or an abort into a non-zero result.
+
+    Every caller branches on returncode, so neither can raise — an exception out of a worker
+    thread would lose the whole repo's report instead of the one call that hung.
+
+    Popen rather than subprocess.run so the handle is visible to abort_running_commands; run()
+    owns its child privately, which is precisely what left a Ctrl-C with nothing to signal.
+    """
+    if _aborted.is_set():
+        return subprocess.CompletedProcess(args, returncode=ABORTED_RETURNCODE, stdout='', stderr='aborted')
+    process = subprocess.Popen(  # nosec B603 B607
+        args,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=_noninteractive_env(),
+    )
+    with _active_lock:
+        _active_processes.add(process)
     try:
-        return subprocess.run(  # nosec B607
-            args,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            env=_noninteractive_env(),
-            timeout=timeout,
-        )
+        stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
+        process.kill()
+        process.communicate()
         return subprocess.CompletedProcess(args, returncode=TIMEOUT_RETURNCODE, stdout='', stderr=f'timed out after {timeout}s')
+    finally:
+        with _active_lock:
+            _active_processes.discard(process)
+    if _aborted.is_set() and process.returncode != 0:
+        # A killed git exits non-zero with whatever it had managed to say. Reporting that as a
+        # repo problem would fill the run's failure summary with the consequences of the Ctrl-C.
+        return subprocess.CompletedProcess(args, returncode=ABORTED_RETURNCODE, stdout=stdout, stderr='aborted')
+    return subprocess.CompletedProcess(args, returncode=process.returncode, stdout=stdout, stderr=stderr)
 
 
 class Repo:
@@ -152,11 +248,29 @@ class Repo:
     def has_remote(self) -> bool:
         return bool(self.remotes())
 
-    @property
+    @cached_property
     def origin_url(self) -> str | None:
-        """Where this clone actually points, as opposed to where the registry says it should."""
-        result = self._git('remote', 'get-url', 'origin')
+        """Where this clone actually points, as opposed to where the registry says it should.
+
+        Cached because it is read twice per repo now — once to pick the host the failure breaker
+        keys on, once for the origin-mismatch check — and a remote does not move mid-run. Safe
+        because a Repo is confined to the worker thread that built it.
+        """
+        # probe: a repo with no remote named `origin` is an ordinary answer, and this is asked of
+        # every repo. Recording it would bury the failures that mean something.
+        result = self._git('remote', 'get-url', 'origin', probe=True)
         return result.stdout.strip() or None if result.returncode == 0 else None
+
+    @property
+    def contacted_url(self) -> str:
+        """The URL git actually talks to: the clone's real origin, else what the registry resolved.
+
+        The distinction matters wherever a *host* is the subject — grouping failures, and deciding
+        that a host is not answering — because a clone whose origin drifted reaches a different
+        host than the registry names, and filing its outage under the registry's host would blame
+        a machine that is fine.
+        """
+        return self.origin_url or self.url
 
     @property
     def current_branch(self) -> str:
