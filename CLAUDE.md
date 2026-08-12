@@ -79,9 +79,14 @@ state alone. Two notions of "needs attention" in one report means neither gets t
   from `_MUTATORS`, never listed twice) is what defines "syncer will handle this".
 - **Icon from the state, colour from the severity.** Only the benign tick can understate a
   severity, so it is the only icon `_SEVERITY_ICON` substitutes.
-- **The action arrow renders only for a mutating action.** `skip`/`report`/`prompt` all mean
-  "syncer changes nothing", which the row conveys by existing — `→ skip` after every clean repo
-  spent a column on the least informative word in the vocabulary.
+- **The action arrow renders only for a mutating action, on both surfaces.** `skip`/`report`/`prompt`
+  all mean "syncer changes nothing", which the row conveys by existing — `→ skip` after every clean
+  repo spent a column on the least informative word in the vocabulary. The rule was implemented in
+  `_branch_line` and lost in the apply path, which restated it as an outcome (`→ skip: skipped`, on
+  79 of 80 rows), so `_apply_line` now defers to `_branch_line` whenever the action does not mutate.
+  A non-mutating action cannot reach any other status — all three are in `PROTECTED_ALLOWED` and
+  `dirty_refusal` ignores them — so nothing is hidden. Its `message` is the one exception and is
+  kept, because only an executed run can know one.
 
 The summary line splits the same way (`N to sync` in cyan vs `N need you` in yellow), and
 `RepoStatus` gained `pending` for it, because a `check` run recording `pulled` would write a

@@ -16,6 +16,7 @@ from syncer.policy import PrimaryState
 from syncer.report import BranchRow
 from syncer.report import RepoBranchReport
 from syncer.report import Severity
+from syncer.report import _apply_line
 from syncer.report import _branch_line
 from syncer.report import _branch_prefix
 from syncer.report import _build_repo_report
@@ -317,6 +318,50 @@ class TestSeverityIsOwnershipNotGitState:
     def test_every_non_mutating_action_suppresses_the_arrow(self):
         for action in set(Action) - MUTATING_ACTIONS:
             assert '→' not in _branch_line(self._row(PrimaryState.SYNCED, action=action)), action
+
+
+class TestApplyRowsFollowTheSameArrowRule:
+    """The suppression rule held on the report path and was lost on the apply path, so `apply`
+    reprinted it as an outcome: `synced → skip: skipped` on 79 of 80 rows of a synced run.
+
+    An outcome is worth a column when something happened. `skipped` is the word for nothing
+    happening, and a run that says it eighty times has buried the one row that did something.
+    """
+
+    def _row(self, action, status, *, primary=PrimaryState.SYNCED, message='', **kwargs):
+        state = BranchState(branch='main', primary=primary, is_default=True, is_current=True, **kwargs)
+        outcome = Outcome(branch='main', action=action, status=status, message=message)
+        return BranchRow(state=state, action=action, outcome=outcome)
+
+    def test_a_skipped_row_renders_exactly_as_its_report_row(self):
+        row = self._row(Action.SKIP, 'skipped')
+        assert '→' not in _apply_line(row)
+        assert _apply_line(row) == _branch_line(row)
+
+    def test_every_non_mutating_action_suppresses_the_outcome(self):
+        """SKIP/REPORT/PROMPT are all in PROTECTED_ALLOWED and dirty_refusal ignores them, so a
+        non-mutating action can only ever reach `skipped`/`reported` — there is no status it could
+        carry that the row does not already say."""
+        for action in set(Action) - MUTATING_ACTIONS:
+            row = self._row(action, 'reported')
+            assert '→' not in _apply_line(row), action
+            assert _apply_line(row) == _branch_line(row), action
+
+    def test_a_mutating_action_still_reports_what_it_did(self):
+        row = self._row(Action.PUSH, 'done', primary=PrimaryState.AHEAD, ahead=1)
+        assert '→ push: done' in _apply_line(row)
+
+    def test_a_refusal_is_never_suppressed(self):
+        row = self._row(Action.PUSH, 'refused', primary=PrimaryState.AHEAD, ahead=1, message='dirty tree')
+        line = _apply_line(row)
+        assert '→ push: refused' in line
+        assert 'dirty tree' in line
+
+    def test_a_message_survives_on_a_non_mutating_action(self):
+        """Only an executed run learns one — it is the thing apply legitimately adds over check,
+        so suppressing the noise must not take it. `prompt` degrades to a report and says so."""
+        row = self._row(Action.PROMPT, 'reported', message='interactive prompt not implemented (v1)')
+        assert 'interactive prompt not implemented (v1)' in _apply_line(row)
 
 
 class TestProtectedBranchReporting:

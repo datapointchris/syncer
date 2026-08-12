@@ -287,6 +287,24 @@ def _outcome_suffix(outcome: Outcome) -> str:
     return f'[{color}]→ {text}[/{color}]'
 
 
+def _apply_line(row: BranchRow, uncommitted: int = 0, stashes: int = 0) -> str:
+    """An executed row, under the same rule `_branch_line` follows: say nothing when nothing happened.
+
+    A non-mutating action can only produce `skipped` or `reported` — SKIP/REPORT/PROMPT are all in
+    PROTECTED_ALLOWED, so none of them can be refused, and `blocked` is None for all three. So
+    `→ skip: skipped` after every clean repo was the same empty column the report path already
+    dropped, restated as an outcome: 79 of 80 rows on a synced run, which is what cost the arrow
+    its meaning on the row that had one.
+
+    A message is the sole exception, because only an executed run can know it — that is what apply
+    legitimately adds over check, so it is kept even for an action that changed nothing.
+    """
+    outcome = row.outcome
+    if outcome is None or (outcome.action not in MUTATING_ACTIONS and not outcome.message):
+        return _branch_line(row, uncommitted, stashes)
+    return f'{_branch_prefix(row, uncommitted, stashes)} {_outcome_suffix(outcome)}'
+
+
 def report_severity(report: RepoBranchReport) -> Severity:
     if report.error:
         return Severity.ERROR
@@ -585,11 +603,9 @@ def render_report(report: RepoBranchReport, apply: bool) -> None:
             f'    [yellow]registry expects {escape(report.expected_url)} (fix the remote or repos.json by hand)[/yellow]',
             soft_wrap=True,
         )
+    render_row = _apply_line if apply else _branch_line
     for row in report.rows:
-        if apply and row.outcome is not None:
-            console.print(f'{_branch_prefix(row, report.uncommitted, report.stashes)} {_outcome_suffix(row.outcome)}')
-        else:
-            console.print(_branch_line(row, report.uncommitted, report.stashes))
+        console.print(render_row(row, report.uncommitted, report.stashes))
     for branch, age in report.remote_only:
         # No local copy, so nothing to sync — browse it with `git log origin/<branch>`.
         console.print(f'  [blue]{ICON_DOT}  origin/{branch} — remote only, last commit {age}[/blue]')
