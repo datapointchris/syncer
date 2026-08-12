@@ -1,6 +1,171 @@
 # CHANGELOG
 
 
+## v10.3.0 (2026-08-12)
+
+### Bug Fixes
+
+- **cli**: Show every repo with -v, not --all
+  ([`c19cd46`](https://github.com/datapointchris/syncer/commit/c19cd46ee3bec40254a03ae72c32eda61d872fc0))
+
+Reverts the rename taken on a standards review. The review was wrong, and wrong in the worst
+  available place for this tool.
+
+The flag changes what is printed, never what is done. Every repo is fetched, classified and decided
+  either way, and the set the run operates on is identical with and without it. That is the line
+  between the two spellings: -a widens the operated-on set, as in ls -a, git branch -a and docker ps
+  -a, while -v expands a deliberately summarized default, as in pytest -v printing a line per test
+  instead of a dot.
+
+So --all here claimed the plain check had operated on a subset of the registry. Whether syncer
+  looked at everything is the one question it exists to answer, which makes that the single worst
+  thing for a flag name to be misleading about.
+
+The collision the review rested on also dissolves. dotfiles check -v and syncer check -v both mean
+  print more of what the run produced; counted versus boolean is a difference in granularity, not
+  meaning.
+
+The rule is now in cli-design.md so it is not re-litigated per tool.
+
+- **diagnose**: Name the auth refusal syncer's own environment produces
+  ([`5f36397`](https://github.com/datapointchris/syncer/commit/5f36397d370ce3337ea6daf51ec4990fe6f7e172))
+
+Closing the askpass chain changes what git prints. With only the terminal prompt disabled it said
+  'could not read Username ... terminal prompts disabled'; with askpass closed too it says 'unable
+  to get password from user', which matched no pattern here.
+
+So the commonest auth failure this tool produces carried no cause, no hint, and could never trip the
+  host breaker — the diagnosis went quiet exactly where it was needed. Found by a test that asserted
+  the phrase rather than the table.
+
+The askpass regression tests arrive with it. They serve a real 401 from a local handler rather than
+  pointing at an unreachable host: a refused connection never reaches the credential step, so
+  asserting the askpass did not run passed for the wrong reason. A control proves the fixture
+  triggers the path it claims to.
+
+- **report**: Count each repo once, in one band
+  ([`fc65aa0`](https://github.com/datapointchris/syncer/commit/fc65aa08b8bb954dae36313e760e9413d3ebda42))
+
+Three counting bugs, one cause: the words and the counts were written twice and nothing joined them.
+
+The live display printed 'failed' where the summary line printed 'unverified' seconds later. The
+  comment above the table asserted the two agreed, and the test named for that invariant asserted
+  the display's own copy of the words — so the divergence was green on the commit that introduced
+  it. Tally and TALLY_TEXT hold the words once, the same shape Refusal and REFUSAL_TEXT already use
+  here. Which counter a repo belongs to cannot be severity alone: ERROR spans a branch that is
+  genuinely wrong and a repo git could not be asked about, and the summary has always separated
+  those. is_unverified decides it, and _repo_status reads the same predicate rather than a second
+  copy.
+
+Skipped repos were counted among 'not shown' as well as in the failure summary, so a closed host
+  stated the same repos twice under two framings — and the flag offered would then render them one
+  per repo, which is the noise the skip exists to prevent. They are excluded from both now.
+
+The flag is --all, not -v. It widens the set of repos shown, which is not what -v means anywhere
+  else: spending it here would block a real verbosity flag and give one meaning in this tool and
+  another in its neighbours.
+
+Also: the breaker is a required parameter, since a per-repo fallback instance is the credential
+  storm restored with nothing on screen to say so. The orphaned-skip branch carries hints and has a
+  test. Four comments now describe the code rather than the edit that produced it.
+
+- **repos**: Describe the code rather than the edit that produced it
+  ([`20777b6`](https://github.com/datapointchris/syncer/commit/20777b64e4ae95f9de30feb09436e11484ddae73))
+
+Three comments dated themselves against a change instead of explaining what is there: a cached
+  property read twice per repo now, an environment that was never enough, and an abort framed as
+  what this fixes. Each survives the rewrite with its reasoning intact, which is the test.
+
+- **repos**: Stop git prompting for credentials out of band
+  ([`563a1f7`](https://github.com/datapointchris/syncer/commit/563a1f78a3a3fc7641998dc865c51a1f43c56fc7))
+
+GIT_TERMINAL_PROMPT disables git's own terminal prompt and nothing else. An askpass program and a
+  credential helper are separate mechanisms git prefers over the terminal, and neither reads that
+  variable, so on a box with a GUI credential manager an expired token spawned one helper per repo,
+  all at once, each waiting on a window nobody asked for. The machine crawled and syncer printed
+  nothing, because every worker was still blocked.
+
+Close each path: empty GIT_ASKPASS short-circuits the askpass chain, SSH_ASKPASS_REQUIRE stops ssh
+  reaching for a GUI of its own, and Git Credential Manager gets both spellings of its
+  non-interactive switch. The helper stays configured — resetting it would break every https remote
+  whose stored credential is fine. A stored credential still answers; only the window is refused.
+
+Config goes in through GIT_CONFIG_COUNT rather than -c, because only some git calls are assembled in
+  Repo._git: a clone has no repo to run inside and doctor's probe is built elsewhere.
+
+Ctrl-C now ends the run rather than the current call. ThreadPoolExecutor waits for running tasks on
+  shutdown, so an interrupt during a fetch storm sat there for the rest of git_timeout looking
+  ignored. run_command drives Popen so the handles can be terminated; subprocess.run owns its child
+  privately, which is what left the interrupt with nothing to signal.
+
+### Features
+
+- **breaker**: Stop asking a host that already refused
+  ([`c9774b8`](https://github.com/datapointchris/syncer/commit/c9774b8825dcdb38ccae185003c6ebcf8aa88076))
+
+A registry is mostly one host, so a dead credential is not N repo problems — it is one machine
+  problem discovered N times. Every repo attempted its own fetch, every fetch woke the credential
+  helper, and the run spent minutes on work that could not succeed before printing anything.
+
+The first proof that a host is unreachable now closes it for the rest of the run. Two tiers, because
+  the causes differ in what they prove: a rejected key, an unverified host key and a name that does
+  not resolve are facts about the host, so they trip on the first failure; a refused connection can
+  be one bad moment and a timeout is routinely one legitimately enormous repo, so those need three.
+  A missing repo never trips, since that is exactly what a private repo you cannot see reports.
+
+Keyed on (host, ssh-or-https) rather than the host alone: a loaded ssh key and an expired https
+  token live on one host every day, so closing github.com over one of them would skip every repo
+  using the other. A host that has answered successfully can never be closed afterwards.
+
+The window it cannot close is the one already in flight. Bounding the damage at the job count
+  instead of at the size of the registry is the whole win.
+
+- **progress**: Show what the run is doing while it does it
+  ([`4c9f40d`](https://github.com/datapointchris/syncer/commit/4c9f40dfd3abde59c7a6f8f73e8fa7518dae4152))
+
+Every repo's git work happens in a worker thread and nothing rendered until all of them were
+  collected, so a run against a slow host showed an empty terminal for minutes and then everything
+  at once. Nothing distinguished working from wedged, which is the state a progress display exists
+  to name.
+
+Two lines on stderr: how far in, the tally in the summary line's own words, and the repos in flight
+  with each one's elapsed seconds, longest first. The names are what the line is for — a bare bar
+  answers whether it is moving, and the question on a slow machine is which repo is slow.
+
+Not a rich.progress.Progress: its columns are per-task and the second line is about the run rather
+  than any one repo. A renderable that rebuilds on each refresh is smaller and is the only way the
+  elapsed times advance while nothing is completing.
+
+Off whenever the console is not a terminal, since Rich repaints in place and into a pipe that is one
+  line per refresh.
+
+- **report**: Show only the repos that need something
+  ([`6bb9b37`](https://github.com/datapointchris/syncer/commit/6bb9b37e629a7e4e49badf9905bc06cf1f7ccc5e))
+
+A 75-repo run printed 256 lines and every one of them had to be read before the four that mattered
+  turned up. Which repos are synced is not information; how many are, is. The default view now
+  renders only what needs attention, the summary line carries the rest, and -v shows every repo. On
+  the fleet that is 256 lines down to 34.
+
+needs_attention is one expression over report_severity, so the filter, the sort and the summary
+  counts cannot disagree about what matters. A watched remote-only branch is the single exception:
+  it deliberately never reaches severity, and a branch someone asked to be told about should not
+  then need a flag to appear. Hiding is a rendering decision, so --json and the event stream are
+  untouched — a history holding only the repos worth printing would make stats a report on the bad
+  days.
+
+Wires up the breaker and the progress display. Results are collected as each repo finishes so the
+  display can count them; the sort is total on path, so the rendered order never depends on which
+  repo won a race.
+
+A worker's exception is now that repo's report rather than the run's. Futures are collected before
+  anything renders, so one escaping exception discarded every other repo's report too: the whole
+  registry measured, a traceback printed, and not one line about the repos that were fine.
+
+An interrupt writes no run event and renders nothing, because a sweep over an unknown fraction of
+  the registry is not a measurement and stats would read one back as if it were.
+
+
 ## v10.2.0 (2026-08-12)
 
 ### Features
