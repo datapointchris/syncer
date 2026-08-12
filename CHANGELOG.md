@@ -1,6 +1,22 @@
 # CHANGELOG
 
 
+## v10.1.2 (2026-08-12)
+
+### Bug Fixes
+
+- **config**: Create the symlink target's parent too
+  ([`96fbf0d`](https://github.com/datapointchris/syncer/commit/96fbf0dc690c0f6556d80fb7bb092446f0c3e195))
+
+write_registry created the link's parent and not the target's, so a registry symlinked into a
+  directory that does not exist yet raised FileNotFoundError naming the link — a path that is
+  visibly there.
+
+That is the fresh-machine order one step earlier than the existing test covers: the link is deployed
+  before anything has made the directory it points into. The test that claimed to pin this created
+  the target's parent itself, so the one failing case was the one never exercised.
+
+
 ## v10.1.1 (2026-08-12)
 
 ### Bug Fixes
