@@ -23,6 +23,9 @@ from syncer.output import ICON_OK
 from syncer.output import ICON_PULL
 from syncer.output import ICON_PUSH
 from syncer.output import ICON_WARN
+from syncer.output import TALLY_COLOR
+from syncer.output import TALLY_TEXT
+from syncer.output import Tally
 from syncer.output import console
 from syncer.output import emit_json
 from syncer.policy import Action
@@ -32,9 +35,13 @@ from syncer.report import RepoBranchReport
 from syncer.report import Severity
 from syncer.report import collect_failures
 from syncer.report import gather_reports
+from syncer.report import hidden_count
+from syncer.report import is_unverified
 from syncer.report import render_failure_summary
+from syncer.report import render_hidden_note
 from syncer.report import render_report
 from syncer.report import report_severity
+from syncer.report import visible_reports
 from syncer.tracking import BranchSnapshot
 from syncer.tracking import RepoSnapshot
 from syncer.tracking import RepoStatus
@@ -78,10 +85,12 @@ def _operation_status(report: RepoBranchReport) -> RepoStatus:
 def _repo_status(report: RepoBranchReport) -> RepoStatus:
     if report.lifecycle:
         return _LIFECYCLE_TO_STATUS[report.lifecycle]
-    if report.error:
-        # Keyed on git having failed, not on the report being empty: an unknown policy also
-        # produces no rows, but that is a config problem, not a repo syncer could not read.
-        return 'unverified' if report.failures else 'issues'
+    if report.skipped or report.error:
+        # is_unverified rather than a second copy of the rule: it keys on git having failed, not
+        # on the report being empty, since an unknown policy also produces no rows and that is a
+        # config problem rather than a repo syncer could not read. The live display reads the same
+        # predicate, so the count climbing during the run lands in the band it was counted under.
+        return 'unverified' if is_unverified(report) else 'issues'
     severity = report_severity(report)
     if severity == Severity.SYNCED:
         return 'synced'
@@ -148,17 +157,20 @@ def _print_summary_line(summary: RunSummary) -> None:
         parts.append(f'[green]{ICON_PUSH}  {summary.pushed} pushed[/green]')
     if summary.pull_pushed:
         parts.append(f'[green]{ICON_MOVE}  {summary.pull_pushed} pull+pushed[/green]')
-    if summary.pending:
+    # Worded from the shared table, so a counter cannot be spelled one way here and another in
+    # the live display that was counting the same run seconds earlier.
+    for tally, icon, count in (
         # Cyan and worded as syncer's job, not yours: these are the repos `apply` clears without
         # you, and counting them under "need attention" alongside a dirty tree is what made the
         # number unactionable — you could not tell how much of it was actually yours to do.
-        parts.append(f'[cyan]{ICON_MOVE}  {summary.pending} to sync[/cyan]')
-    if summary.issues:
-        parts.append(f'[yellow]{ICON_WARN}  {summary.issues} need you[/yellow]')
-    if summary.failed:
-        # Red and worded separately from `issues`: yellow "need attention" reads as "there is
-        # work to do", when the truth is that syncer could not find out whether there is.
-        parts.append(f'[red]{ICON_ERR}  {summary.failed} unverified[/red]')
+        (Tally.TO_SYNC, ICON_MOVE, summary.pending),
+        (Tally.NEEDS_YOU, ICON_WARN, summary.issues),
+        # Red and separate from `need you`: yellow reads as "there is work to do", when the truth
+        # is that syncer could not find out whether there is.
+        (Tally.UNVERIFIED, ICON_ERR, summary.failed),
+    ):
+        if count:
+            parts.append(f'[{TALLY_COLOR[tally]}]{icon}  {count} {TALLY_TEXT[tally]}[/{TALLY_COLOR[tally]}]')
     console.print('  │  '.join(parts))
 
 
@@ -171,19 +183,24 @@ def run_sync(
     jobs: int = DEFAULT_JOBS,
     jitter: float = DEFAULT_JITTER_SECONDS,
     as_json: bool = False,
+    verbose: bool = False,
 ) -> list[RepoBranchReport]:
     """Run the full sync and render it. Returns the reports so the caller can set an exit code."""
     start = time.monotonic()
-    reports = gather_reports(config, tool_config, cli_policy, apply, jobs, jitter, include_lifecycle=True)
+    reports = gather_reports(config, tool_config, cli_policy, apply, jobs, jitter, include_lifecycle=True, show_progress=not as_json)
     snapshots = [_snapshot(report) for report in reports]
     summary = _summary(snapshots)
 
     if not as_json:
         console.print()
         _print_summary_line(summary)
+        # The summary line is the count of everything; the rows below it are only the repos with
+        # something to say. Which repos are synced is not information — how many are, is.
+        visible = visible_reports(reports, verbose)
+        render_hidden_note(hidden_count(reports, visible))
         console.print()
         # Reports are sorted synced → errors, so repos needing action land nearest the prompt.
-        for report in reports:
+        for report in visible:
             render_report(report, apply)
         render_failure_summary(reports)
 

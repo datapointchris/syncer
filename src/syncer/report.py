@@ -11,16 +11,26 @@ start as slots free up. Each worker also sleeps a small random jitter before its
 call, so the initial burst of `jobs` fetches doesn't hit the remote at the same instant. The
 jitter is bounded per task (no cumulative N×delay floor), so it never slows large repo sets.
 
+Collecting before rendering is what a live progress display pays for: the workers report
+themselves as they start and finish, so the wait is legible — how far in, which repos are in
+flight, how long each has been going — while the report itself stays sorted and arrives whole.
+Streaming each result as it landed was the alternative, and it loses the sort, which is the
+only reason the important rows are the ones nearest the prompt.
+
 Output is sorted by attention, least-to-most, so the repos that need action land at the bottom
 nearest the prompt (least scrolling): synced → operations → warnings → errors. Within each
-group repos are path-sorted.
+group repos are path-sorted. Only the repos above SYNCED are rendered unless `-v` asks for the
+rest: a registry is mostly synced on any ordinary day, and a report you have to scroll to read
+is one where the four rows that mattered were indistinguishable from the seventy that did not.
 """
 
 from __future__ import annotations
 
 import random
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import as_completed
 from dataclasses import dataclass
 from dataclasses import field
 from enum import IntEnum
@@ -29,6 +39,8 @@ from pathlib import Path
 
 from rich.markup import escape
 
+from syncer.breaker import HostBreaker
+from syncer.breaker import Trip
 from syncer.classify import ClassifyError
 from syncer.classify import classify_repo
 from syncer.classify import refresh_remote
@@ -38,8 +50,10 @@ from syncer.config import ToolConfig
 from syncer.config import resolve_clone_url
 from syncer.config import resolve_policies
 from syncer.config import resolve_policy_name
+from syncer.diagnose import Cause
 from syncer.diagnose import FailureGroup
 from syncer.diagnose import group_failures
+from syncer.diagnose import hint_lines
 from syncer.execute import MUTATING_ACTIONS
 from syncer.execute import Outcome
 from syncer.execute import dirty_refusal
@@ -53,6 +67,7 @@ from syncer.output import ICON_OK
 from syncer.output import ICON_PULL
 from syncer.output import ICON_PUSH
 from syncer.output import ICON_WARN
+from syncer.output import Tally
 from syncer.output import console
 from syncer.output import emit_json
 from syncer.output import err_console
@@ -64,10 +79,13 @@ from syncer.policy import Policy
 from syncer.policy import PrimaryState
 from syncer.policy import decide
 from syncer.policy import is_watched_remote
+from syncer.progress import RunProgress
 from syncer.repos import GitFailure
 from syncer.repos import Repo
+from syncer.repos import abort_running_commands
 from syncer.repos import find_repo_in_search_paths
 from syncer.repos import origin_mismatch
+from syncer.repos import reset_abort
 
 DEFAULT_JOBS = 16
 # Upper bound on the random pre-fetch delay each worker sleeps, to desynchronize the initial
@@ -180,6 +198,27 @@ class RepoBranchReport:
     # Repo-level counts captured for event snapshots (0 for lifecycle reports).
     uncommitted: int = 0
     stashes: int = 0
+    # Set when this repo was never contacted because its host had already failed this run. It is
+    # an error like any other unmeasurable repo, but it is not rendered per repo: the cause is
+    # already stated once in the failure summary, and repeating it sixty times is the wall of
+    # noise the skip exists to prevent.
+    skipped: Trip | None = None
+
+
+def is_unverified(report: RepoBranchReport) -> bool:
+    """True when this repo's state could not be established, as opposed to established and untidy.
+
+    The distinction the summary line draws in red rather than yellow, and the one place it is
+    decided. `_repo_status` and the live display both read it, so the count climbing during the
+    run and the count sitting in the summary afterwards cannot disagree about which band a repo
+    landed in. An unknown policy is deliberately *not* unverified: nothing was measured, but
+    nothing failed either — that is a config problem, and git was never asked.
+    """
+    if report.skipped is not None:
+        return True
+    if report.lifecycle:
+        return report.lifecycle == 'clone_failed'
+    return bool(report.error and report.failures)
 
 
 def _state_severity(state: BranchState) -> Severity:
@@ -316,6 +355,21 @@ def report_severity(report: RepoBranchReport) -> Severity:
     return branch_severity
 
 
+def attention_tally(report: RepoBranchReport) -> Tally | None:
+    """Which counter this repo belongs to, or None when it is simply synced.
+
+    Severity alone cannot answer it. ERROR spans both a branch that is genuinely wrong and a repo
+    git could not be asked about, and the summary line has always separated those — so a display
+    keyed on severity had no honest word for the band and invented a fourth one nobody else prints.
+    """
+    severity = report_severity(report)
+    if severity is Severity.SYNCED:
+        return None
+    if severity is Severity.OPERATION:
+        return Tally.TO_SYNC
+    return Tally.UNVERIFIED if is_unverified(report) else Tally.NEEDS_YOU
+
+
 def _watched_remote_branches(repo: Repo, policy: Policy) -> list[tuple[str, str]]:
     """Remote-only branches the policy asked to watch, with each one's age.
 
@@ -368,6 +422,40 @@ def _failed_report(repo: Repo, label: str, repo_config: RepoConfig, error: str, 
     )
 
 
+def _label(repo_config: RepoConfig) -> str:
+    """How a repo is named on screen: its path when that says where it is, else its name."""
+    return repo_config.path if repo_config.path.startswith('~') else repo_config.name
+
+
+def _skipped_report(repo_config: RepoConfig, trip: Trip, url: str) -> RepoBranchReport:
+    """A repo syncer deliberately did not contact, because its host had already failed."""
+    return RepoBranchReport(
+        label=_label(repo_config),
+        path=repo_config.path,
+        name=repo_config.name,
+        error=f'not checked — {trip.summary} failed earlier this run',
+        skipped=trip,
+        expected_url=url,
+    )
+
+
+def _crashed_report(repo_config: RepoConfig, exc: Exception) -> RepoBranchReport:
+    """A repo whose processing raised, turned into an ordinary error report.
+
+    One repo must never take the run down with it. Every future is collected before anything is
+    rendered, so an exception escaping a worker takes every *other* repo's report with it — the
+    whole registry measured, a traceback printed, and not one line about the repos that were fine.
+    That is the same failure as a dead fetch reporting `synced`, in the other direction.
+    """
+    return RepoBranchReport(
+        label=_label(repo_config),
+        path=repo_config.path,
+        name=repo_config.name,
+        error='syncer failed on this repo',
+        error_detail=f'{type(exc).__name__}: {exc}',
+    )
+
+
 def _build_repo_report(
     repo_config: RepoConfig,
     config: SyncerConfig,
@@ -379,18 +467,23 @@ def _build_repo_report(
     include_lifecycle: bool,
     search_paths: list[Path],
     claimed_paths: set[Path],
+    breaker: HostBreaker,
 ) -> RepoBranchReport | None:
     """Do all git work for one repo (runs in a worker thread). Never touches the console.
 
     include_lifecycle=False (branches view) returns None for anything that isn't a cloned git
     repo with a remote. include_lifecycle=True (full sync) surfaces those as lifecycle reports
     and, in apply mode, clones a missing repo.
+
+    `breaker` is required rather than defaulted. A per-repo fallback instance would be the
+    credential storm restored — every repo asking a host that had already refused, with nothing on
+    screen distinguishing that run from a working one.
     """
     if jitter > 0:
         time.sleep(random.uniform(0, jitter))  # desync the initial burst of concurrent fetches
 
     path = Path(repo_config.path).expanduser()
-    label = repo_config.path if repo_config.path.startswith('~') else repo_config.name
+    label = _label(repo_config)
     owner = repo_config.owner or config.owner
     repo = Repo(
         name=repo_config.name,
@@ -421,9 +514,17 @@ def _build_repo_report(
         if found:
             return lifecycle('path_mismatch', f'found at {found} (update repos.json manually)')
         if apply:
+            # repo.url, not contacted_url: there is no clone yet, so there is no origin to read —
+            # and asking git for one inside a directory that does not exist raises.
+            trip = breaker.trip_for(repo.url)
+            if trip is not None:
+                return _skipped_report(repo_config, trip, repo.url)
             cloned, err = repo.clone()
             if cloned:
+                breaker.record_success(repo.url)
                 return lifecycle('cloned', f'cloned to {path}')
+            if repo.failures:
+                breaker.record_failure(repo.url, repo.failures[-1])
             # Name the URL as well as the error: a wrong url_template or an empty registry
             # owner produces a URL that git rejects for reasons its message alone never
             # explains ('repository not found' reads as a permissions problem).
@@ -445,11 +546,20 @@ def _build_repo_report(
             label=label, path=repo_config.path, name=repo_config.name, policy_name=policy_name, error=f'unknown policy {policy_name!r}'
         )
 
+    # Asked before the fetch, so a host that has already refused this run costs nothing further.
+    # Keyed on where this clone really points, which is not always where the registry says.
+    trip = breaker.trip_for(repo.contacted_url)
+    if trip is not None:
+        return _skipped_report(repo_config, trip, repo.contacted_url)
+
     # Before classifying, not after: every branch state is measured against remote-tracking
     # refs, so a dead fetch invalidates the whole report rather than degrading it. Returning
     # here is also what refuses execution for this repo — no execute() call is constructed.
-    if refresh_remote(repo, policy) is not None:
+    fetch_failure = refresh_remote(repo, policy)
+    if fetch_failure is not None:
+        breaker.record_failure(repo.contacted_url, fetch_failure)
         return _failed_report(repo, label, repo_config, 'fetch failed — sync state not verified against origin', policy_name)
+    breaker.record_success(repo.contacted_url)
     try:
         rows = build_branch_rows(repo, policy, apply, fetched=True)
     except ClassifyError as exc:
@@ -476,14 +586,27 @@ def gather_reports(
     jobs: int = DEFAULT_JOBS,
     jitter: float = DEFAULT_JITTER_SECONDS,
     include_lifecycle: bool = False,
+    show_progress: bool = False,
 ) -> list[RepoBranchReport]:
     """Process every active repo concurrently and return the reports sorted by
-    (severity ascending, path) — synced first, errors last, path-sorted within each group."""
+    (severity ascending, path) — synced first, errors last, path-sorted within each group.
+
+    Results are collected as each repo finishes rather than in submission order, purely so the
+    progress display can count them as they land; the sort at the end is total on path, so the
+    rendered order does not depend on which repo won a race.
+
+    A KeyboardInterrupt ends the run rather than the current call. Nothing is rendered and no run
+    event is written: a partial sweep recorded as a run is a fact about a machine that was never
+    measured, and `stats` would read it back as one.
+    """
     policies = resolve_policies(tool_config)
     active_repos = [repo for repo in config.repos if repo.status != 'retired']
+    if not active_repos:
+        return []
     search_paths = [Path(p).expanduser() for p in config.search_paths]
     claimed_paths = {Path(rc.path).expanduser() for rc in active_repos}
 
+    breaker = HostBreaker()
     worker = partial(
         _build_repo_report,
         config=config,
@@ -495,13 +618,84 @@ def gather_reports(
         include_lifecycle=include_lifecycle,
         search_paths=search_paths,
         claimed_paths=claimed_paths,
+        breaker=breaker,
     )
-    with ThreadPoolExecutor(max_workers=max(1, min(jobs, len(active_repos)))) as pool:
-        raw = list(pool.map(worker, active_repos)) if active_repos else []
 
-    reports = [report for report in raw if report is not None]
+    reset_abort()
+    reports: list[RepoBranchReport] = []
+    with RunProgress(len(active_repos), enabled=show_progress) as progress:
+
+        def run_one(repo_config: RepoConfig) -> RepoBranchReport | None:
+            # The bare name, not the report's label: a label is a path so the report says where
+            # the repo is, and four of those overflow one line into a single ellipsised entry —
+            # which loses the only thing the line is for, naming what is slow.
+            token = progress.start(repo_config.name)
+            report: RepoBranchReport | None = None
+            try:
+                report = worker(repo_config)
+            except Exception as exc:
+                report = _crashed_report(repo_config, exc)
+            finally:
+                progress.finish(token, attention_tally(report) if report is not None else None)
+            return report
+
+        pool = ThreadPoolExecutor(max_workers=max(1, min(jobs, len(active_repos))))
+        futures = [pool.submit(run_one, repo_config) for repo_config in active_repos]
+        try:
+            for future in as_completed(futures):
+                report = future.result()
+                if report is not None:
+                    reports.append(report)
+        except KeyboardInterrupt:
+            # Both halves matter: cancel() empties the queue, and the abort ends the git calls
+            # already running. Without the second, shutdown waits out every in-flight fetch and a
+            # Ctrl-C looks ignored for the length of git_timeout.
+            abort_running_commands()
+            for future in futures:
+                future.cancel()
+            raise
+        finally:
+            pool.shutdown(wait=True)
+
     reports.sort(key=lambda report: (report_severity(report), report.path))
     return reports
+
+
+def needs_attention(report: RepoBranchReport) -> bool:
+    """Whether this repo has anything to say. The default view renders only these.
+
+    Severity is the test, so the rule is the same one the sort and the summary line already use:
+    anything above SYNCED is either work syncer will do or work you have to. The exception is a
+    watched remote-only branch, which deliberately never affects severity — it is opt-in, and a
+    branch someone asked to be told about should not need a flag to appear.
+    """
+    return report_severity(report) > Severity.SYNCED or bool(report.remote_only)
+
+
+def visible_reports(reports: list[RepoBranchReport], verbose: bool) -> list[RepoBranchReport]:
+    """The reports to render: everything under `-v`, only what needs attention otherwise.
+
+    A skipped repo is excluded at *both* levels, `-v` included. Its whole explanation is the
+    one cause named in the failure summary, and one line per repo is the noise the skip exists to
+    prevent — sixty of them is what a closed host would produce.
+    """
+    candidates = [report for report in reports if report.skipped is None]
+    return candidates if verbose else [report for report in candidates if needs_attention(report)]
+
+
+def hidden_count(reports: list[RepoBranchReport], visible: list[RepoBranchReport]) -> int:
+    """How many repos were left out, excluding the ones the failure summary already accounts for.
+
+    Counting skipped repos here stated the same repos twice under two framings, and offered a flag
+    that would reveal repos syncer never measured.
+    """
+    return len([report for report in reports if report.skipped is None]) - len(visible)
+
+
+def render_hidden_note(hidden: int) -> None:
+    """Say how many repos were left out, so a short report is never mistaken for a short registry."""
+    if hidden > 0:
+        console.print(f'[blue]  {hidden} repos not shown — [cyan]-v[/cyan] shows every repo[/blue]')
 
 
 def _branch_json(report: RepoBranchReport) -> dict:
@@ -513,6 +707,7 @@ def _branch_json(report: RepoBranchReport) -> dict:
         'error': report.error,
         'error_detail': report.error_detail,
         'origin_mismatch': report.origin_mismatch,
+        'skipped': {'host': report.skipped.host, 'cause': report.skipped.cause.value} if report.skipped else None,
         'branches': [
             {
                 'branch': row.state.branch,
@@ -552,20 +747,40 @@ def render_failure_summary(reports: list[RepoBranchReport]) -> None:
     means twenty identical blobs and no statement of the single thing to fix. This says it once,
     and it is the only place on the sync surface that tells you what to *do* — hint() existed
     but was used exclusively by the config commands.
+
+    It is also where the repos syncer skipped are accounted for. They are folded into the block
+    for the failure that closed their host, because that is the whole of their explanation: one
+    cause, the repos that proved it, and the count that never got asked.
     """
     groups = collect_failures(reports)
-    if not groups:
+    skipped: Counter[tuple[Cause, str]] = Counter((report.skipped.cause, report.skipped.host) for report in reports if report.skipped)
+    if not groups and not skipped:
         return
     err_console.print()
     for group in groups:
         error(f'{ICON_ERR}  {group.summary}')
         hint(f'    {", ".join(group.repos)}')
+        # A group with no cause can never own skipped repos: the breaker refuses to trip on a
+        # failure diagnose declined to name, so nothing was ever skipped on its account.
+        count = skipped.pop((group.cause, group.host), 0) if group.cause is not None else 0
+        if count:
+            hint(f'    {count} more repo{"s" if count != 1 else ""} on {group.host} not contacted after this')
         for line in group.stderr.splitlines():
             # Every word kept — the cause is a summary and summaries lose things — but blank
             # lines dropped, since git's footer leaves a gap in the middle of the block.
             if line.strip():
                 hint(f'    {escape(line)}')
         for line in group.hints:
+            hint(f'  → {line}')
+        err_console.print()
+    # A skip whose closing failure produced no group of its own. Every path that trips the breaker
+    # also records the failure onto a report, so this does not fire today — it is here because
+    # repos nobody contacted must never become a silent fact, and that has to hold under a change
+    # nobody has made yet. It carries the same hints as a group, since a cause with no next command
+    # is the half of a diagnosis you cannot act on.
+    for (cause, host), count in skipped.items():
+        error(f'{ICON_ERR}  {count} repos on {host} not contacted: {cause.value.replace("_", " ")} earlier this run')
+        for line in hint_lines(cause, host):
             hint(f'  → {line}')
         err_console.print()
 
@@ -620,15 +835,19 @@ def report_branches(
     jobs: int = DEFAULT_JOBS,
     jitter: float = DEFAULT_JITTER_SECONDS,
     as_json: bool = False,
+    verbose: bool = False,
 ) -> list[RepoBranchReport]:
     """Per-branch view. Returns the reports so the caller can set an exit code."""
-    reports = gather_reports(config, tool_config, cli_policy, apply, jobs, jitter)  # include_lifecycle defaults False
+    # include_lifecycle defaults False; progress is a terminal affordance and would corrupt --json.
+    reports = gather_reports(config, tool_config, cli_policy, apply, jobs, jitter, show_progress=not as_json)
     if as_json:
         emit_json({'repos': [_branch_json(report) for report in reports]})
         return reports
     console.print()
-    for report in reports:
+    visible = visible_reports(reports, verbose)
+    for report in visible:
         render_report(report, apply)
+    render_hidden_note(hidden_count(reports, visible))
     render_failure_summary(reports)
     return reports
 

@@ -1,22 +1,67 @@
+import os
 import subprocess
+import threading
+import time
+from http.server import BaseHTTPRequestHandler
+from http.server import HTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from syncer.diagnose import Cause
+from syncer.diagnose import classify_failure
 from syncer.output import ALL_ICONS
 from syncer.output import ICON_ERR
 from syncer.output import ICON_OK
 from syncer.output import _display_width
 from syncer.output import _status_line
+from syncer.repos import ABORTED_RETURNCODE
 from syncer.repos import TIMEOUT_RETURNCODE
+from syncer.repos import GitFailure
 from syncer.repos import Repo
 from syncer.repos import _noninteractive_env
+from syncer.repos import abort_running_commands
 from syncer.repos import find_repo_in_search_paths
 from syncer.repos import find_untracked_repos
 from syncer.repos import normalize_remote_url
 from syncer.repos import origin_mismatch
+from syncer.repos import reset_abort
 from syncer.repos import run_command
+
+
+class _FakeProcess:
+    """A git subprocess that never runs.
+
+    run_command drives Popen directly rather than subprocess.run, because a Ctrl-C needs the
+    handle in order to end the call — run() owns its child privately. So a patched
+    `subprocess.run` intercepts nothing and the tests below stub this instead.
+    """
+
+    def __init__(self, *, returncode: int = 0, stdout: str = '', stderr: str = '', hangs: bool = False) -> None:
+        self.returncode = returncode
+        self._stdout = stdout
+        self._stderr = stderr
+        self._hangs = hangs
+        self.killed = False
+
+    def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+        if self._hangs:
+            # Cleared so the reap after kill() returns, as a real killed process does.
+            self._hangs = False
+            raise subprocess.TimeoutExpired(cmd='git', timeout=timeout or 1)
+        return self._stdout, self._stderr
+
+    def kill(self) -> None:
+        self.killed = True
+
+    def terminate(self) -> None:
+        self.killed = True
+
+
+def _patch_git(**kwargs):
+    """Answer every git call in the block with a fresh canned process."""
+    return patch('syncer.repos.subprocess.Popen', side_effect=lambda *_args, **_kwargs: _FakeProcess(**kwargs))
 
 
 def _git(path: Path, *args: str) -> None:
@@ -276,20 +321,17 @@ class TestDefaultBranchStaleRef:
 class TestIsFork:
     def test_is_fork_true(self, git_repo):
         repo = _make_repo(git_repo)
-        result = subprocess.CompletedProcess(args=[], returncode=0, stdout='true\n', stderr='')
-        with patch('subprocess.run', return_value=result):
+        with _patch_git(stdout='true\n'):
             assert repo.is_fork is True
 
     def test_is_fork_false(self, git_repo):
         repo = _make_repo(git_repo)
-        result = subprocess.CompletedProcess(args=[], returncode=0, stdout='false\n', stderr='')
-        with patch('subprocess.run', return_value=result):
+        with _patch_git(stdout='false\n'):
             assert repo.is_fork is False
 
     def test_is_fork_gh_fails(self, git_repo):
         repo = _make_repo(git_repo)
-        result = subprocess.CompletedProcess(args=[], returncode=1, stdout='', stderr='error')
-        with patch('subprocess.run', return_value=result):
+        with _patch_git(returncode=1, stderr='error'):
             assert repo.is_fork is False
 
     def test_non_github_host_never_invokes_gh(self, git_repo):
@@ -297,9 +339,9 @@ class TestIsFork:
         repo that always answers 'no'."""
         repo = _make_repo(git_repo, url='git@bitbucket.org:myworkspace/payments.git')
         assert repo.is_github is False
-        with patch('syncer.repos.subprocess.run') as run:
+        with patch('syncer.repos.subprocess.Popen') as popen:
             assert repo.is_fork is False
-        run.assert_not_called()
+        popen.assert_not_called()
 
     def test_github_ssh_url_is_recognised(self, git_repo):
         assert _make_repo(git_repo, url='git@github.com:datapointchris/syncer.git').is_github is True
@@ -307,11 +349,60 @@ class TestIsFork:
 
 class TestNonInteractiveExecution:
     """Git prompts on /dev/tty, which capture_output does not redirect, so a credential or
-    host-key prompt would block a worker thread indefinitely with nothing on screen."""
+    host-key prompt would block a worker thread indefinitely with nothing on screen.
+
+    GIT_TERMINAL_PROMPT disables git's *own* terminal prompt and nothing else. An askpass program
+    and a credential helper are separate mechanisms git prefers over the terminal, and neither
+    reads that variable — which is how an expired token spawned one GUI helper per repo, all at
+    once, while syncer printed nothing.
+    """
 
     def test_disables_git_terminal_prompting(self, monkeypatch):
         monkeypatch.delenv('GIT_TERMINAL_PROMPT', raising=False)
         assert _noninteractive_env()['GIT_TERMINAL_PROMPT'] == '0'
+
+    def test_disables_the_askpass_chain(self, monkeypatch):
+        """Git takes the first of GIT_ASKPASS, core.askpass and SSH_ASKPASS that is *set*, so an
+        empty value short-circuits the whole chain rather than falling through it."""
+        monkeypatch.setenv('GIT_ASKPASS', '/usr/bin/some-gui-askpass')
+        assert _noninteractive_env()['GIT_ASKPASS'] == ''
+
+    def test_stops_ssh_reaching_for_a_gui(self, monkeypatch):
+        monkeypatch.delenv('SSH_ASKPASS_REQUIRE', raising=False)
+        assert _noninteractive_env()['SSH_ASKPASS_REQUIRE'] == 'never'
+
+    def test_refuses_the_credential_manager_window_in_both_spellings(self, monkeypatch):
+        """Git Credential Manager reads a config key and an environment variable for the same
+        switch, and a machine can have either vintage installed."""
+        monkeypatch.delenv('GIT_CONFIG_COUNT', raising=False)
+        env = _noninteractive_env()
+        assert env['GCM_INTERACTIVE'] == 'never'
+        assert env['GIT_CONFIG_KEY_0'] == 'credential.interactive'
+        assert env['GIT_CONFIG_VALUE_0'] == 'false'
+        assert env['GIT_CONFIG_COUNT'] == '1'
+
+    def test_the_credential_helper_is_left_configured(self, monkeypatch):
+        """Resetting it with `credential.helper=` would break every https remote whose stored
+        credential is fine. A stored credential still answers; only the window is refused."""
+        monkeypatch.delenv('GIT_CONFIG_COUNT', raising=False)
+        env = _noninteractive_env()
+        keys = {env[f'GIT_CONFIG_KEY_{index}'] for index in range(int(env['GIT_CONFIG_COUNT']))}
+        assert 'credential.helper' not in keys
+
+    def test_a_config_the_user_already_set_is_kept(self, monkeypatch):
+        monkeypatch.setenv('GIT_CONFIG_COUNT', '1')
+        monkeypatch.setenv('GIT_CONFIG_KEY_0', 'http.sslVerify')
+        monkeypatch.setenv('GIT_CONFIG_VALUE_0', 'false')
+        env = _noninteractive_env()
+        assert env['GIT_CONFIG_KEY_0'] == 'http.sslVerify'
+        assert env['GIT_CONFIG_KEY_1'] == 'credential.interactive'
+        assert env['GIT_CONFIG_COUNT'] == '2'
+
+    def test_the_injected_config_reaches_git_itself(self):
+        """The environment form rather than argv, so it covers the calls assembled elsewhere — a
+        clone has no repo to run inside, and doctor's probe is built in another module."""
+        result = run_command(['git', 'config', '--get', 'credential.interactive'], timeout=10)
+        assert result.stdout.strip() == 'false'
 
     def test_adds_ssh_batch_mode(self, monkeypatch):
         monkeypatch.delenv('GIT_SSH_COMMAND', raising=False)
@@ -332,12 +423,61 @@ class TestNonInteractiveExecution:
 
     def test_a_timed_out_git_call_reads_as_failure(self, git_repo):
         repo = _make_repo(git_repo, timeout=1)
-        with patch('syncer.repos.subprocess.run', side_effect=subprocess.TimeoutExpired(cmd='git', timeout=1)):
+        with _patch_git(hangs=True):
             failure = repo.fetch_prune()
             assert failure is not None
             assert failure.timed_out
             assert repo.local_branches() == []
             assert repo.default_branch is None
+
+
+class TestAbort:
+    """A Ctrl-C used to appear ignored: the pool's shutdown waits for running tasks, so an
+    interrupt during a fetch storm sat there for the remainder of git_timeout with nothing on
+    screen. Ending the processes is what makes the interrupt land immediately."""
+
+    @pytest.fixture(autouse=True)
+    def _rearm(self):
+        yield
+        reset_abort()
+
+    def test_a_running_command_is_ended(self):
+        result: dict[str, subprocess.CompletedProcess] = {}
+        thread = threading.Thread(target=lambda: result.update(done=run_command(['sleep', '30'], timeout=300)))
+        started = time.monotonic()
+        thread.start()
+        time.sleep(0.3)  # long enough for the process to be registered
+        abort_running_commands()
+        thread.join(timeout=10)
+        assert thread.is_alive() is False
+        assert time.monotonic() - started < 5  # not the 300s timeout it was given
+        assert result['done'].returncode == ABORTED_RETURNCODE
+
+    def test_later_calls_return_without_running(self):
+        abort_running_commands()
+        result = run_command(['sleep', '30'], timeout=300)
+        assert result.returncode == ABORTED_RETURNCODE
+
+    def test_an_aborted_fetch_never_reads_as_a_successful_measurement(self, git_repo):
+        """An abort is recorded like any other failure, because that is what it is to the caller:
+        every branch state is measured against refs this fetch did not refresh. Returning None
+        would let classify proceed against stale data, which is the `(0, 0)` reads as SYNCED bug
+        wearing a different hat."""
+        repo = _make_repo(git_repo)
+        abort_running_commands()
+        failure = repo.fetch()
+        assert failure is not None
+        assert failure.returncode == ABORTED_RETURNCODE
+
+    def test_an_aborted_call_carries_no_diagnosable_cause(self):
+        """So it can never trip the host breaker: a Ctrl-C says nothing about the remote."""
+        repo_failure = GitFailure(argv=('fetch',), returncode=ABORTED_RETURNCODE, stderr='aborted')
+        assert classify_failure(repo_failure) is None
+
+    def test_reset_re_arms_for_the_next_run(self):
+        abort_running_commands()
+        reset_abort()
+        assert run_command(['echo', 'hi'], timeout=10).stdout.strip() == 'hi'
 
 
 class TestFailureRecording:
@@ -442,19 +582,19 @@ class TestUnknownIsNotClean:
 
     def test_an_unreadable_tree_counts_as_dirty(self, git_repo):
         repo = _make_repo(git_repo, timeout=1)
-        with patch('syncer.repos.subprocess.run', side_effect=subprocess.TimeoutExpired(cmd='git', timeout=1)):
+        with _patch_git(hangs=True):
             assert repo.is_dirty is True
 
     def test_no_remotes_is_distinct_from_cannot_ask(self, git_repo):
         repo = _make_repo(git_repo)
         assert repo.remotes() == []  # a repo you never pushed anywhere
-        with patch('syncer.repos.subprocess.run', side_effect=subprocess.TimeoutExpired(cmd='git', timeout=1)):
+        with _patch_git(hangs=True):
             assert repo.remotes() is None  # says nothing about remotes at all
 
     def test_unreadable_counts_are_none_not_zero(self, git_repo):
         """(0, 0) is read as SYNCED by _primary_from_counts, so it can never be the fallback."""
         repo = _make_repo(git_repo, timeout=1)
-        with patch('syncer.repos.subprocess.run', side_effect=subprocess.TimeoutExpired(cmd='git', timeout=1)):
+        with _patch_git(hangs=True):
             assert repo.ahead_behind('main', 'origin/main') is None
 
 
@@ -478,7 +618,7 @@ class TestClone:
 
     def test_a_clone_timeout_returns_its_reason(self, tmp_path):
         repo = _make_repo(tmp_path / 'dest', url='https://example.invalid/x.git', timeout=1)
-        with patch('syncer.repos.subprocess.run', side_effect=subprocess.TimeoutExpired(cmd='git', timeout=5)):
+        with _patch_git(hangs=True):
             ok, err = repo.clone()
         assert ok is False
         assert 'timed out' in err
@@ -687,3 +827,72 @@ class TestFindUntrackedRepos:
     def test_hidden_directories_are_skipped(self, tmp_path):
         self._repo(tmp_path / '.cache' / 'thing')
         assert find_untracked_repos(tmp_path, known_paths=set()) == []
+
+
+class TestAskpassIsNeverLaunched:
+    """The leg GIT_TERMINAL_PROMPT never covered. An askpass program is just a path to an
+    executable, so the failure reproduces with no credential manager and no Windows box: without
+    the fix git runs it and blocks, which is one GUI per repo across a whole run.
+
+    Served by a local 401 rather than an unreachable host. A refused connection never reaches the
+    credential step at all, so asserting the askpass did not run would pass for the wrong reason —
+    which is what the first draft of this did.
+    """
+
+    @pytest.fixture
+    def askpass(self, tmp_path):
+        """A stand-in for the GUI prompt: it records that it ran, and answers."""
+        marker = tmp_path / 'was-run'
+        script = tmp_path / 'askpass.sh'
+        script.write_text(f'#!/bin/sh\ntouch {marker}\necho hunter2\n')
+        script.chmod(0o755)
+        return script, marker
+
+    @pytest.fixture
+    def unauthorized_url(self):
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(401)
+                self.send_header('WWW-Authenticate', 'Basic realm="git"')
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        server = HTTPServer(('127.0.0.1', 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        yield f'http://127.0.0.1:{server.server_port}/x.git'
+        server.shutdown()
+        server.server_close()
+
+    def test_git_does_not_run_a_configured_askpass(self, askpass, unauthorized_url, monkeypatch):
+        script, marker = askpass
+        monkeypatch.setenv('GIT_ASKPASS', str(script))
+        result = run_command(['git', 'ls-remote', unauthorized_url], timeout=20)
+        assert marker.exists() is False
+        # Proves git got as far as needing a credential, so the assertion above means something.
+        # Joined on diagnose's own table rather than on a phrase, since git's wording varies.
+        assert result.returncode != 0
+        assert classify_failure(GitFailure(argv=('ls-remote',), returncode=result.returncode, stderr=result.stderr)) is Cause.AUTH
+
+    def test_the_same_holds_for_core_askpass(self, askpass, unauthorized_url, monkeypatch):
+        """Emptying GIT_ASKPASS short-circuits the chain, so core.askpass is never consulted
+        either — git takes the first of the three that is *set*, not the first that is usable."""
+        script, marker = askpass
+        monkeypatch.delenv('GIT_ASKPASS', raising=False)
+        result = run_command(['git', '-c', f'core.askpass={script}', 'ls-remote', unauthorized_url], timeout=20)
+        assert marker.exists() is False
+        assert classify_failure(GitFailure(argv=('ls-remote',), returncode=result.returncode, stderr=result.stderr)) is Cause.AUTH
+
+    def test_without_the_fix_git_runs_it(self, askpass, unauthorized_url):
+        """The control. Without it both assertions above would pass on a git that never asked."""
+        script, marker = askpass
+        environment = {**os.environ, 'GIT_ASKPASS': str(script), 'GIT_TERMINAL_PROMPT': '0'}
+        subprocess.run(
+            ['git', '-c', 'credential.helper=', 'ls-remote', unauthorized_url],
+            capture_output=True,
+            text=True,
+            env=environment,
+            timeout=20,
+        )
+        assert marker.exists() is True

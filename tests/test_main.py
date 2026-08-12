@@ -1,6 +1,7 @@
 import json
 import shutil
 import subprocess
+from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
@@ -22,14 +23,14 @@ class TestBareInvocation:
         assert 'Usage:' in result.output
         assert 'check' in result.output
 
-    @pytest.mark.parametrize('flag', ['--policy=standard', '--jobs=2', '--repos-file=x.json', '--json', '--per-branch'])
+    @pytest.mark.parametrize('flag', ['--policy=standard', '--jobs=2', '--repos-file=x.json', '--json', '--per-branch', '-v'])
     def test_action_flags_are_rejected_at_the_root(self, flag, monkeypatch):
         """Flags on the root callback are the tell that a default is really a command."""
         monkeypatch.setattr('syncer.main.notify', lambda *_: None)
         assert runner.invoke(app, [flag]).exit_code != 0
 
     @pytest.mark.parametrize('verb', ['check', 'apply'])
-    @pytest.mark.parametrize('flag', ['--policy=standard', '--jobs=2', '--json', '--per-branch'])
+    @pytest.mark.parametrize('flag', ['--policy=standard', '--jobs=2', '--json', '--per-branch', '-v', '--verbose'])
     def test_both_verbs_accept_them_instead(self, verb, flag, monkeypatch):
         monkeypatch.setattr('syncer.main.notify', lambda *_: None)
         assert 'No such option' not in runner.invoke(app, [verb, flag, '--help']).output
@@ -213,3 +214,38 @@ class TestCloneFailureReachesTheScreen:
         assert 'cloned' in result.stdout
         assert 'clone failed' not in result.stdout
         assert (tmp_path / 'ghost' / '.git').is_dir()
+
+
+class TestAnInterruptEndsTheRun:
+    """A Ctrl-C used to look ignored: the pool's shutdown waits for running tasks, so an
+    interrupt during a fetch storm sat there for the remainder of git_timeout with nothing on
+    screen. Measured against a real signal afterwards: 0.2s to exit, code 130."""
+
+    def _registry(self, tmp_path):
+        registry = tmp_path / 'repos.json'
+        registry.write_text(json.dumps({'owner': 'me', 'host': 'https://github.com', 'search_paths': [], 'repos': []}))
+        return registry
+
+    def _invoke(self, tmp_path, monkeypatch, *args):
+        monkeypatch.setattr('syncer.main.notify', lambda *_: None)
+        monkeypatch.setattr('syncer.config.TOOL_CONFIG_PATH', tmp_path / 'absent.toml')
+        monkeypatch.setattr('syncer.tracking.STATE_DIR', tmp_path / 'state')
+        # Both namespaces: sync.py binds gather_reports at import, so patching only report.py's
+        # global leaves the default run — the one that writes history — calling the real thing.
+        with (
+            patch('syncer.report.gather_reports', side_effect=KeyboardInterrupt),
+            patch('syncer.sync.gather_reports', side_effect=KeyboardInterrupt),
+        ):
+            return runner.invoke(app, [*args, '-c', str(self._registry(tmp_path))])
+
+    @pytest.mark.parametrize('args', [('check',), ('apply',), ('check', '--per-branch')])
+    def test_it_exits_130_and_says_so(self, args, tmp_path, monkeypatch):
+        result = self._invoke(tmp_path, monkeypatch, *args)
+        assert result.exit_code == 130
+        assert 'interrupted' in result.output
+
+    def test_no_run_is_recorded(self, tmp_path, monkeypatch):
+        """A sweep that covered some unknown fraction of the registry is not a measurement, and
+        `stats` would read one back as if it were."""
+        self._invoke(tmp_path, monkeypatch, 'check')
+        assert not list((tmp_path / 'state').glob('*.jsonl'))
