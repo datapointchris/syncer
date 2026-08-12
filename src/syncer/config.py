@@ -528,8 +528,13 @@ def write_registry(path: Path, text: str) -> Path:
     valid JSON, so readers resolving the link get one and the original keeps looking
     authoritative while receiving nothing. Making this atomic means resolving the link before the
     rename, never dropping the follow — pinned by TestARegistryThatIsASymlink.
+
+    Both parents are created, because for a symlink they are different directories and the write
+    lands in the target's. Missing it raised FileNotFoundError naming the *link*, about a path
+    that is visibly there.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
+    path.resolve().parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
     return path
 

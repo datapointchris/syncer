@@ -282,6 +282,21 @@ class TestARegistryThatIsASymlink:
         assert link.is_symlink()
         assert real.read_text() == STARTER_REGISTRY
 
+    def test_init_writes_through_a_symlink_whose_target_directory_is_not_there_yet(self, config_home, tmp_path):
+        """The same order one step earlier, when the directory the link points into is itself
+        absent. Creating only the link's parent raised FileNotFoundError naming the link, about a
+        path that is visibly there as a symlink."""
+        real = tmp_path / 'shared' / 'repos.json'
+        link = config_home / 'repos.json'
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(real)
+        assert not real.parent.exists()
+
+        assert runner.invoke(app, ['config', 'init', 'registry']).exit_code == 0
+
+        assert link.is_symlink()
+        assert real.read_text() == STARTER_REGISTRY
+
     def test_edit_seeds_through_the_symlink(self, config_home, tmp_path, monkeypatch):
         """`edit` seeds an absent registry before opening it, which is a third writer of the same
         file and gets the same guarantee."""
