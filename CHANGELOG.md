@@ -1,6 +1,23 @@
 # CHANGELOG
 
 
+## v10.2.0 (2026-08-12)
+
+### Features
+
+- **config**: Resolve $REPOS_JSON below repos_file, above the default
+  ([`edbd201`](https://github.com/datapointchris/syncer/commit/edbd2012a896bb6317cc86f85505f0ded0561a62))
+
+Every reader of the shared registry now consults one declared name, so a machine says where the file
+  is once instead of repeating it in each tool's config. repos_file still wins, for naming a
+  different registry for syncer alone, and the default still names only syncer's own directory.
+
+Adds tests/conftest.py, which the suite never had. It unsets the shared path variables for every
+  test, autouse: 31 tests failed the moment the rung was added, all reading the developer's real
+  80-repo registry where they expected the temp one they built. `doctor` passed against it rather
+  than reporting a missing registry, so the reports were plausible rather than obviously wrong.
+
+
 ## v10.1.3 (2026-08-12)
 
 ### Bug Fixes
