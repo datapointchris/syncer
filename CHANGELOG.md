@@ -1,6 +1,48 @@
 # CHANGELOG
 
 
+## v10.1.1 (2026-08-12)
+
+### Bug Fixes
+
+- Stop inventing a status the registry did not declare
+  ([`a83b37d`](https://github.com/datapointchris/syncer/commit/a83b37de95d214a7b5eecec7f2d5538db55db085))
+
+The model defaulted an absent status to 'active'. fleet did the same, indy and relate dropped the
+  entry instead, so three readers disagreed about which repos exist and every list looked plausible.
+
+standards/data.md now requires the field. Modelling it as required here was tried and reverted: this
+  same parser reads the exemplar registry, whose entries have no lifecycle and carry no status, and
+  making it mandatory rejected all 20 of them. That capability is deliberate — the model's own
+  comment notes a registry can be entirely third-party.
+
+So absent parses as None, meaning undeclared rather than active, and the rule is asserted where the
+  file being read is known to be the repo registry: config validate reports the entries that omit
+  it. Nothing about the sync behaviour moves, because syncer only ever excluded 'retired' and None
+  is not retired.
+
+### Build System
+
+- **precommit**: Resync to forge toolchain 14
+  ([`092c10f`](https://github.com/datapointchris/syncer/commit/092c10f2517753e4191ad80f0edac1c2bbb11087))
+
+### Testing
+
+- Pin that a registry write follows a symlink
+  ([`efbe811`](https://github.com/datapointchris/syncer/commit/efbe81181a6c48dd0a9e2d7ec30112c5f0787a33))
+
+The registry path is commonly a symlink to wherever the registry is really kept, and a write that
+  renames a temp file into place replaces the link instead of writing through it. Both files are
+  valid JSON afterwards, so readers resolving the link get the copy while the original keeps looking
+  authoritative and receives nothing. Measured 2026-08-12 on a registry that forked, one side
+  carrying an entry no other copy had, with nothing reporting it.
+
+All three writers already wrote through the path: scan --write, init, and the seeding edit does.
+  Nothing stated that and nothing checked it, so hardening any one of them atomically would
+  reintroduce the fork silently. They now share write_registry, which is where the constraint is
+  written down and where resolving the link would go.
+
+
 ## v10.1.0 (2026-08-10)
 
 ### Continuous Integration
