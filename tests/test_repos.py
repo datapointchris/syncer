@@ -23,6 +23,13 @@ def _git(path: Path, *args: str) -> None:
     subprocess.run(['git', *args], cwd=path, capture_output=True, text=True)
 
 
+def _rev(path: Path, ref: str) -> str:
+    """Resolve `ref`, or '' when it does not exist — so a setup that never built it compares
+    unequal to a real object rather than blowing up somewhere less legible."""
+    result = subprocess.run(['git', 'rev-parse', ref], cwd=path, capture_output=True, text=True)
+    return result.stdout.strip() if result.returncode == 0 else ''
+
+
 @pytest.fixture
 def git_repo(tmp_path):
     """Create a real git repo for testing."""
@@ -371,28 +378,50 @@ class TestFailureRecording:
         Built with real git rather than a mock, because the whole finding is about which stream
         git writes to under which flags — a mocked CompletedProcess would assert our own guess.
         """
+        # --initial-branch, because the bare's HEAD is what a later clone checks out: left to
+        # init.defaultBranch it said `master` on CI while the branch pushed below was `main`, so
+        # the clone checked out nothing and had no HEAD for its tag to point at.
         bare = tmp_path / 'remote.git'
-        subprocess.run(['git', 'init', '--bare', str(bare)], capture_output=True)
+        subprocess.run(['git', 'init', '--bare', '--initial-branch=main', str(bare)], capture_output=True)
 
+        # Every push names its branch and every checkout creates it. A bare `git push` onto an
+        # empty remote only works where push.autoSetupRemote is configured, so it pushed nothing
+        # on CI and the whole divergence this test is about was silently never built.
         upstream = tmp_path / 'upstream'
         subprocess.run(['git', 'clone', str(bare), str(upstream)], capture_output=True)
         _git(upstream, 'config', 'user.email', 'test@test.com')
         _git(upstream, 'config', 'user.name', 'Test')
+        _git(upstream, 'checkout', '-b', 'main')
         (upstream / 'README.md').write_text('one\n')
         _git(upstream, 'add', '.')
         _git(upstream, 'commit', '-m', 'one')
-        _git(upstream, 'push')
+        _git(upstream, 'push', 'origin', 'main')
 
         local = tmp_path / 'local'
         subprocess.run(['git', 'clone', str(bare), str(local)], capture_output=True)
+        # Set here rather than inherited, so the test states the condition it is about. These are
+        # what make a tag a pruned refspec instead of an auto-follow, and only an explicit refspec
+        # rejects a changed tag — auto-follow skips one that already exists locally and exits 0.
+        # They are on for every repo on the machine this was found on (~/.config/git/common.gitconfig)
+        # and absent on CI, which is why the run there fetched clean.
+        _git(local, 'config', 'fetch.prune', 'true')
+        _git(local, 'config', 'fetch.pruneTags', 'true')
 
         # The tag now means a different commit on each side, which is what git refuses to resolve.
         (upstream / 'README.md').write_text('two\n')
-        _git(upstream, 'commit', '-am', 'two')
-        _git(upstream, 'push')
+        _git(upstream, 'add', 'README.md')
+        _git(upstream, 'commit', '-m', 'two')
+        _git(upstream, 'push', 'origin', 'main')
         _git(upstream, 'tag', 'v1.0.0')
         _git(upstream, 'push', 'origin', 'v1.0.0')
         _git(local, 'tag', 'v1.0.0')
+
+        # _git swallows a non-zero exit, so an unbuilt divergence would otherwise reach the
+        # assertions below as a clean fetch and read as the bug being fixed. Both sides must
+        # resolve: one missing tag is also a broken setup, and it also produces a clean fetch.
+        local_tag, upstream_tag = _rev(local, 'v1.0.0'), _rev(upstream, 'v1.0.0')
+        assert local_tag and upstream_tag
+        assert local_tag != upstream_tag
 
         failure = _make_repo(local).fetch_prune()
         assert failure is not None
