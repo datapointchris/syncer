@@ -471,6 +471,13 @@ def _validate_registry(location: RegistryLocation, tool_config: ToolConfig, prob
         problems.extend(f'{registry_path}: {problem}' for problem in exc.problems)
         return
 
+    # status is required of a repo registry. It is not modelled as required because
+    # this same parser reads the exemplar registry, where entries have no lifecycle —
+    # so the rule is asserted here, where the file being read is the repo registry.
+    undeclared = [repo.name for repo in registry.repos if repo.status is None]
+    if undeclared:
+        problems.append(f'repos: status is required and is missing on: {", ".join(undeclared)}')
+
     known = resolve_policies(tool_config)
     seen_names: dict[str, str] = {}
     seen_paths: dict[str, str] = {}

@@ -65,9 +65,12 @@ def sample_config_with_status():
 
 
 class TestRepoConfig:
-    def test_status_defaults_to_active(self):
+    def test_an_absent_status_is_undeclared_not_active(self):
+        """Inventing 'active' here is what let three readers disagree about which repos
+        exist — fleet counted a status-less entry, indy and relate dropped it, and every
+        list looked plausible. `syncer config validate` reports the omission instead."""
         repo = RepoConfig(name='test', path='~/code/test')
-        assert repo.status == 'active'
+        assert repo.status is None
 
     def test_explicit_status(self):
         repo = RepoConfig(name='test', path='~/code/test', status='dormant')

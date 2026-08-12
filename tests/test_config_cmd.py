@@ -480,5 +480,23 @@ class TestConfigValidate:
     def test_repo_paths_are_not_checked_against_the_disk(self, config_home):
         """validate checks structure, issues checks reality. Blurring them means neither gets
         trusted."""
-        registry = json.dumps({'owner': 'me', 'repos': [{'name': 'r', 'path': '/nowhere/at/all'}]})
+        registry = json.dumps({'owner': 'me', 'repos': [{'name': 'r', 'path': '/nowhere/at/all', 'status': 'active'}]})
         assert self._run(config_home, registry=registry).exit_code == 0
+
+    def test_a_repo_with_no_status_is_reported(self, config_home):
+        """Absent used to parse as active here while other readers dropped the entry, so
+        the registries disagreed about which repos exist and no tool could say so."""
+        registry = json.dumps(
+            {
+                'owner': 'me',
+                'repos': [
+                    {'name': 'declared', 'path': '~/a', 'status': 'active'},
+                    {'name': 'undeclared', 'path': '~/b'},
+                ],
+            }
+        )
+        result = self._run(config_home, registry=registry)
+        assert result.exit_code == 1
+        assert 'status is required' in result.output
+        assert 'undeclared' in result.output
+        assert 'declared,' not in result.output

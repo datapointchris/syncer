@@ -187,7 +187,7 @@ TEMPLATE_REGISTRY = """\
       "name": "example-repo",
       "path": "~/code/example-repo",
       "status": "active",
-      "description": "status is active (the default), dormant, or retired; retired repos are skipped"
+      "description": "status is required and is active, dormant, or retired; retired repos are skipped"
     },
     {
       "name": "example-clone",
@@ -212,7 +212,13 @@ TEMPLATE_REGISTRY = """\
 class RepoConfig(BaseModel):
     name: str
     path: str
-    status: Literal['active', 'dormant', 'retired'] = 'active'
+    # Required by standards/data.md, 'A registry field that selects what tools act
+    # on is required, never defaulted' — but modelled as optional, because this model
+    # also parses the exemplar registry, whose entries have no lifecycle and carry no
+    # status. Absent means undeclared rather than active: inventing a value here is
+    # what let three readers disagree about which repos exist. `syncer config validate`
+    # reports the entries that omit it.
+    status: Literal['active', 'dormant', 'retired'] | None = None
     description: str | None = None
     owner: str | None = None
     # Weak, portable policy hint. Sits at precedence level 3 — below the CLI flag and
