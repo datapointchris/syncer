@@ -363,6 +363,42 @@ class TestFailureRecording:
         repo.local_branches()
         assert repo.failures == []
 
+    def test_a_rejected_tag_fetch_carries_its_reason(self, tmp_path):
+        """A recorded failure with empty stderr is the undiagnosable state GitFailure exists to
+        prevent, and `--quiet` produced exactly that: a tag-clobber fetch exits 1 with zero bytes
+        on stderr, so the repo reported `fetch failed` with no detail and nothing to act on.
+
+        Built with real git rather than a mock, because the whole finding is about which stream
+        git writes to under which flags — a mocked CompletedProcess would assert our own guess.
+        """
+        bare = tmp_path / 'remote.git'
+        subprocess.run(['git', 'init', '--bare', str(bare)], capture_output=True)
+
+        upstream = tmp_path / 'upstream'
+        subprocess.run(['git', 'clone', str(bare), str(upstream)], capture_output=True)
+        _git(upstream, 'config', 'user.email', 'test@test.com')
+        _git(upstream, 'config', 'user.name', 'Test')
+        (upstream / 'README.md').write_text('one\n')
+        _git(upstream, 'add', '.')
+        _git(upstream, 'commit', '-m', 'one')
+        _git(upstream, 'push')
+
+        local = tmp_path / 'local'
+        subprocess.run(['git', 'clone', str(bare), str(local)], capture_output=True)
+
+        # The tag now means a different commit on each side, which is what git refuses to resolve.
+        (upstream / 'README.md').write_text('two\n')
+        _git(upstream, 'commit', '-am', 'two')
+        _git(upstream, 'push')
+        _git(upstream, 'tag', 'v1.0.0')
+        _git(upstream, 'push', 'origin', 'v1.0.0')
+        _git(local, 'tag', 'v1.0.0')
+
+        failure = _make_repo(local).fetch_prune()
+        assert failure is not None
+        assert 'would clobber existing tag' in failure.stderr
+        assert 'v1.0.0' in failure.stderr
+
 
 class TestUnknownIsNotClean:
     """Invariant 2 gates on this. A failing `git status` returning [] read as a clean tree —

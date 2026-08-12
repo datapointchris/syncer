@@ -361,13 +361,19 @@ class Repo:
         against these refs, so a caller that ignores it is reporting on stale or absent data.
         That is exactly what classify_repo did, which is how a repo that had never reached its
         remote reported as synced.
+
+        Never `--quiet`. It buys nothing here — output is captured, and git already suppresses
+        progress when stderr is not a tty — while costing the entire diagnosis: a fetch rejecting
+        a tag exits 1 with *zero bytes* of stderr under `--quiet`, so the repo reported `fetch
+        failed` with no detail line and nothing to act on. A recorded failure whose stderr is
+        empty is the undiagnosable state `GitFailure` exists to prevent.
         """
-        result = self._git('fetch', '--quiet')
+        result = self._git('fetch')
         return None if result.returncode == 0 else self.failures[-1]
 
     def fetch_prune(self) -> GitFailure | None:
         """fetch --prune, so a deleted upstream branch classifies as gone rather than synced."""
-        result = self._git('fetch', '--prune', '--quiet')
+        result = self._git('fetch', '--prune')
         return None if result.returncode == 0 else self.failures[-1]
 
     def set_head_auto(self) -> None:
