@@ -51,7 +51,7 @@ UPDATE_CONFIG = Config(tool='syncer', owner='datapointchris')
 _EPILOG = (
     '[bold]Examples[/bold]\n\n'
     '[cyan]syncer check[/cyan] — report the repos that need something; never writes\n\n'
-    '[cyan]syncer check -v[/cyan] — the same run, listing every repo including the synced ones\n\n'
+    '[cyan]syncer check --all[/cyan] — the same run, listing every repo including the synced ones\n\n'
     "[cyan]syncer apply[/cyan] — pull, push, fast-forward, and clone what's safe\n\n"
     '[cyan]syncer apply -p mirror[/cyan] — run the aggressive mirror policy this once\n\n'
     '[cyan]syncer check --per-branch[/cyan] — quick per-branch view, no lifecycle or history\n\n'
@@ -102,13 +102,16 @@ ReposFile = Annotated[
     Path | None, typer.Option('--repos-file', '-c', help='Use a different repo registry; replaces the default set entirely')
 ]
 JsonOutput = Annotated[bool, typer.Option('--json', help='Emit the run as JSON on stdout instead of a report')]
-Verbose = Annotated[bool, typer.Option('--verbose', '-v', help='Show every repo, including the ones with nothing to report')]
+# --all, not --verbose: this widens the set of repos shown, and `-v` is the fleet's counted
+# log-verbosity flag. Spelling a set-widener `-v` would make `dotfiles check -v` and
+# `syncer check -v` mean different things in two commands spelled the same way.
+ShowAll = Annotated[bool, typer.Option('--all', '-a', help='Show every repo, including the ones with nothing to report')]
 
 # Exit code for a run the user interrupted, matching the shell's convention for SIGINT.
 INTERRUPTED_EXIT_CODE = 130
 
 
-def _run(*, apply: bool, per_branch: bool, policy: str | None, jobs: int, repos_file: Path | None, as_json: bool, verbose: bool) -> None:
+def _run(*, apply: bool, per_branch: bool, policy: str | None, jobs: int, repos_file: Path | None, as_json: bool, show_all: bool) -> None:
     """Both verbs are the same run; only whether it writes and how it is grouped differ."""
     try:
         if per_branch:
@@ -119,7 +122,7 @@ def _run(*, apply: bool, per_branch: bool, policy: str | None, jobs: int, repos_
                 apply=apply,
                 jobs=jobs,
                 as_json=as_json,
-                verbose=verbose,
+                show_all=show_all,
             )
         else:
             syncer_config, repos_path = resolve_registry(repos_file)
@@ -131,7 +134,7 @@ def _run(*, apply: bool, per_branch: bool, policy: str | None, jobs: int, repos_
                 apply=apply,
                 jobs=jobs,
                 as_json=as_json,
-                verbose=verbose,
+                show_all=show_all,
             )
     except KeyboardInterrupt:
         # Nothing is rendered and no event is written. A run that covered some unknown fraction of
@@ -148,18 +151,18 @@ def check(
     jobs: Jobs = DEFAULT_JOBS,
     repos_file: ReposFile = None,
     json_output: JsonOutput = False,
-    verbose: Verbose = False,
+    show_all: ShowAll = False,
 ) -> None:
     """Report what each policy would do to every repo. Never writes.
 
     Only the repos with something to report are shown; the summary line counts the rest, and
-    [bold]-v[/bold] lists them. Repos are checked concurrently and shown least-to-most urgent, so
+    [bold]--all[/bold] lists them. Repos are checked concurrently and shown least-to-most urgent, so
     anything needing attention sits nearest the prompt. --per-branch swaps the repo-level view
     (which also clones missing repos under `apply`, and records run history) for a per-branch one.
 
     Exits 1 if any repo reached an error state, so it can gate a script.
     """
-    _run(apply=False, per_branch=per_branch, policy=policy, jobs=jobs, repos_file=repos_file, as_json=json_output, verbose=verbose)
+    _run(apply=False, per_branch=per_branch, policy=policy, jobs=jobs, repos_file=repos_file, as_json=json_output, show_all=show_all)
 
 
 @app.command(rich_help_panel='Sync')
@@ -169,7 +172,7 @@ def apply(
     jobs: Jobs = DEFAULT_JOBS,
     repos_file: ReposFile = None,
     json_output: JsonOutput = False,
-    verbose: Verbose = False,
+    show_all: ShowAll = False,
 ) -> None:
     """Execute each policy's safe actions: pull, push, fast-forward, clone, prune.
 
@@ -177,11 +180,11 @@ def apply(
     cleanliness cannot be verified, refuse rather than force. `syncer check` is this command's
     dry run: same classification and the same decided actions, without the writes.
 
-    Only the repos with something to report are shown; [bold]-v[/bold] lists every one.
+    Only the repos with something to report are shown; [bold]--all[/bold] lists every one.
 
     Exits 1 if any repo reached an error state, so it can gate a script.
     """
-    _run(apply=True, per_branch=per_branch, policy=policy, jobs=jobs, repos_file=repos_file, as_json=json_output, verbose=verbose)
+    _run(apply=True, per_branch=per_branch, policy=policy, jobs=jobs, repos_file=repos_file, as_json=json_output, show_all=show_all)
 
 
 @app.command(rich_help_panel='Inspect')

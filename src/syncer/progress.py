@@ -36,21 +36,15 @@ from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 
+from syncer.output import TALLY_COLOR
+from syncer.output import TALLY_TEXT
+from syncer.output import Tally
 from syncer.output import err_console
 
 # Enough to see what is holding the run up without the line wrapping on a narrow terminal.
 MAX_RUNNING_SHOWN = 4
 REFRESH_PER_SECOND = 8
 BAR_WIDTH = 24
-
-# Worded exactly as the summary line's counters, so the number that was climbing during the run is
-# the number sitting in the summary afterwards. A count that changes name at the end reads as a
-# different measurement.
-_LEVEL_TALLY: dict[str, tuple[str, str]] = {
-    'operation': ('to sync', 'cyan'),
-    'warning': ('need you', 'yellow'),
-    'error': ('failed', 'red'),
-}
 
 
 @dataclass(frozen=True)
@@ -78,7 +72,7 @@ class RunProgress:
         self.enabled = enabled and total > 0 and self.console.is_terminal
         self._lock = threading.Lock()
         self._running: dict[int, _Running] = {}
-        self._tally: dict[str, int] = {}
+        self._tally: dict[Tally, int] = {}
         self._done = 0
         self._next_token = 0
         self._started = time.monotonic()
@@ -108,20 +102,21 @@ class RunProgress:
                 self._running[token] = _Running(label=label, started=time.monotonic())
         return token
 
-    def finish(self, token: int, level: str | None = None) -> None:
-        """Retire a repo from the display, counting it under `level` when it produced a report."""
+    def finish(self, token: int, tally: Tally | None = None) -> None:
+        """Retire a repo from the display, counting it under `tally` when it earned a counter."""
         with self._lock:
             self._running.pop(token, None)
             self._done += 1
-            if level in _LEVEL_TALLY:
-                self._tally[level] = self._tally.get(level, 0) + 1
+            if tally is not None:
+                self._tally[tally] = self._tally.get(tally, 0) + 1
 
-    def _tally_text(self, tally: dict[str, int]) -> Text:
+    def _tally_text(self, counts: dict[Tally, int]) -> Text:
         text = Text()
-        for level, (label, style) in _LEVEL_TALLY.items():
-            count = tally.get(level, 0)
+        # Iterated over the enum, not the counts, so the counters hold their order as they appear.
+        for tally in Tally:
+            count = counts.get(tally, 0)
             if count:
-                text.append(f'{count} {label}  ', style=style)
+                text.append(f'{count} {TALLY_TEXT[tally]}  ', style=TALLY_COLOR[tally])
         return text
 
     def _running_text(self, running: list[_Running], now: float) -> Text:
@@ -137,7 +132,7 @@ class RunProgress:
         now = time.monotonic()
         with self._lock:
             done = self._done
-            tally = dict(self._tally)
+            counts = dict(self._tally)
             # Oldest first: the repo that has been running longest is the one holding up the run,
             # and it is the one that stays on screen while the quick ones churn past it.
             running = sorted(self._running.values(), key=lambda item: item.started)
@@ -146,7 +141,7 @@ class RunProgress:
             self._spinner,
             Text(f'{done}/{self.total} repos', style='bold'),
             ProgressBar(total=max(self.total, 1), completed=done, width=BAR_WIDTH),
-            self._tally_text(tally),
+            self._tally_text(counts),
             Text(_clock(now - self._started), style='blue'),
         )
         return Group(header, self._running_text(running, now))

@@ -16,6 +16,7 @@ rich to run a subprocess.
 from __future__ import annotations
 
 import json
+from enum import StrEnum
 from typing import Any
 
 from rich.console import Console
@@ -37,6 +38,35 @@ ICON_MOVE = '\uf0ec'
 ICON_DOT = '\uf444'
 
 LINE_WIDTH = 80
+
+
+class Tally(StrEnum):
+    """The attention counters, keyed rather than spelled at each site.
+
+    The live display and the summary line count the same run seconds apart, so a counter that
+    changes its name between them reads as a different measurement. Keying them is the same move
+    `Refusal`/`REFUSAL_TEXT` makes for refusals, and for the same reason: a test joining two
+    surfaces on an English sentence fails whenever someone rewrites the sentence, which teaches
+    you to loosen the assertion instead of trusting it.
+    """
+
+    TO_SYNC = 'to_sync'
+    NEEDS_YOU = 'needs_you'
+    UNVERIFIED = 'unverified'
+
+
+TALLY_TEXT = {
+    Tally.TO_SYNC: 'to sync',
+    Tally.NEEDS_YOU: 'need you',
+    Tally.UNVERIFIED: 'unverified',
+}
+
+# Cyan is syncer's own work, yellow is yours, red is what could not be found out at all.
+TALLY_COLOR = {
+    Tally.TO_SYNC: 'cyan',
+    Tally.NEEDS_YOU: 'yellow',
+    Tally.UNVERIFIED: 'red',
+}
 
 ALL_ICONS = {ICON_OK, ICON_WARN, ICON_ERR, ICON_DOWNLOAD, ICON_PULL, ICON_PUSH, ICON_MOVE}
 

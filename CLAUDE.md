@@ -99,13 +99,27 @@ mutation that never happened into the history `stats` reads back as fact.
 
 **Severity is also what the default view renders.** `needs_attention` is one expression —
 `report_severity(...) > SYNCED` — so the filter, the sort and the summary counts cannot disagree
-about what matters. On the fleet that is 256 lines of report down to 34: a registry is mostly
-synced on any ordinary day, and which repos are synced is not information, whereas *how many* are
-is. `-v` shows every repo, `render_hidden_note` states the count that was left out so a short
-report is never mistaken for a short registry, and `--json` is unaffected — hiding is a rendering
-decision, and the event stream still records every repo or `stats` would report on the bad days
-only. The single exception is a `watch_remote` branch, which deliberately never affects severity:
-it is opt-in, and a branch someone asked to be told about should not then need a flag to appear.
+about what matters. On a registry of 80 repos that is 256 lines of report down to 34: a registry
+is mostly synced on any ordinary day, and which repos are synced is not information, whereas *how
+many* are is. `--all` shows every repo, `render_hidden_note` states the count that was left out so
+a short report is never mistaken for a short registry, and `--json` is unaffected — hiding is a
+rendering decision, and the event stream still records every repo or `stats` would report on the
+bad days only. The single exception is a `watch_remote` branch, which deliberately never affects
+severity: it is opt-in, and a branch someone asked to be told about should not then need a flag to
+appear.
+
+**`--all`, not `-v`.** The flag widens the *set of repos shown*, which is not what `-v` means
+anywhere else: `cli-design.md` reserves it for counted log verbosity, so spending it here would
+both block a real verbosity flag later and make `check -v` mean one thing in this tool and another
+in every neighbouring one.
+
+**The counters are keyed, never spelled twice.** `Tally`/`TALLY_TEXT` in `output.py` is the same
+move `Refusal`/`REFUSAL_TEXT` makes, for the same reason — the live display and the summary line
+count one run seconds apart, and the display printed `failed` where the summary printed
+`unverified` because its own test asserted its own copy of the words. Which counter a repo belongs
+to is `attention_tally`, and it cannot be severity alone: ERROR spans a branch that is genuinely
+wrong and a repo git could not be asked about, which the summary has always separated. That split
+is `is_unverified`, read by `_repo_status` too so there is one definition rather than a mirror.
 
 ## Two surfaces, one core
 
@@ -505,8 +519,14 @@ the damage at `jobs` instead of at the size of the registry is the whole win.
 
 Skipped repos are `RepoBranchReport.skipped` (a `Trip`), carry **zero rows** for the same reason
 an unmeasurable repo does, count as `unverified` rather than `issues` in the run history — nobody
-looked at them — and are **never rendered one per repo**. They are folded into the failure summary
-block for the cause that closed their host, since that is the whole of their explanation.
+looked at them — and are **never rendered one per repo, `--all` included**. They are folded into
+the failure summary block for the cause that closed their host, since that is the whole of their
+explanation, and excluded from `hidden_count` for the same reason: counting them there stated the
+same repos twice under two framings, and offered a flag that would reveal repos syncer never
+measured. `render_failure_summary` keeps a fallback for a skip whose closing failure produced no
+group of its own. Nothing reaches it today — every path that trips the breaker also records the
+failure onto a report — and it stays because repos nobody contacted must not become a silent fact
+under a change nobody has made yet. It carries `hint_lines` for the same reason a group does.
 
 ## Run history
 

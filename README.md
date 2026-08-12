@@ -2,7 +2,7 @@
 
 Check if local git repos are fully synced before switching machines.
 
-Syncer fetches every configured repo concurrently, classifies each branch (ahead/behind/gone/…), and shows what a per-machine [sync policy](#sync-policies) would do. `syncer check` reports and never writes; `syncer apply` executes the safe actions (fast-forward, push, clone, prune). Only the repos with something to report are listed — the summary line counts the rest and `-v` lists them — and they are ordered so anything needing attention lands at the bottom, nearest the prompt.
+Syncer fetches every configured repo concurrently, classifies each branch (ahead/behind/gone/…), and shows what a per-machine [sync policy](#sync-policies) would do. `syncer check` reports and never writes; `syncer apply` executes the safe actions (fast-forward, push, clone, prune). Only the repos with something to report are listed — the summary line counts the rest and `--all` lists them — and they are ordered so anything needing attention lands at the bottom, nearest the prompt.
 
 ## Installing
 
@@ -52,7 +52,7 @@ order, so the first failure is the one to act on. It exits 1 on a real problem, 
 ```bash
 syncer check              # classify every repo/branch and show what would happen; never writes
 syncer apply              # execute each policy's safe actions (pull/push/ff/clone)
-syncer check -v           # list every repo, including the ones with nothing to report
+syncer check --all        # list every repo, including the ones with nothing to report
 syncer check --per-branch # per-branch view: no lifecycle, cloning, or run history
 syncer check --json       # emit the run as JSON on stdout instead of a report
 syncer apply -p observe   # override the resolved policy for this run

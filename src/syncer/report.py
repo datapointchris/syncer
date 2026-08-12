@@ -19,8 +19,8 @@ only reason the important rows are the ones nearest the prompt.
 
 Output is sorted by attention, least-to-most, so the repos that need action land at the bottom
 nearest the prompt (least scrolling): synced → operations → warnings → errors. Within each
-group repos are path-sorted. Only the repos above SYNCED are rendered unless `-v` asks for the
-rest: a registry is mostly synced on any ordinary day, and a report you have to scroll to read
+group repos are path-sorted. Only the repos above SYNCED are rendered unless `--all` asks for
+the rest: a registry is mostly synced on any ordinary day, and a report you have to scroll to read
 is one where the four rows that mattered were indistinguishable from the seventy that did not.
 """
 
@@ -53,6 +53,7 @@ from syncer.config import resolve_policy_name
 from syncer.diagnose import Cause
 from syncer.diagnose import FailureGroup
 from syncer.diagnose import group_failures
+from syncer.diagnose import hint_lines
 from syncer.execute import MUTATING_ACTIONS
 from syncer.execute import Outcome
 from syncer.execute import dirty_refusal
@@ -66,6 +67,7 @@ from syncer.output import ICON_OK
 from syncer.output import ICON_PULL
 from syncer.output import ICON_PUSH
 from syncer.output import ICON_WARN
+from syncer.output import Tally
 from syncer.output import console
 from syncer.output import emit_json
 from syncer.output import err_console
@@ -203,6 +205,22 @@ class RepoBranchReport:
     skipped: Trip | None = None
 
 
+def is_unverified(report: RepoBranchReport) -> bool:
+    """True when this repo's state could not be established, as opposed to established and untidy.
+
+    The distinction the summary line draws in red rather than yellow, and the one place it is
+    decided. `_repo_status` and the live display both read it, so the count climbing during the
+    run and the count sitting in the summary afterwards cannot disagree about which band a repo
+    landed in. An unknown policy is deliberately *not* unverified: nothing was measured, but
+    nothing failed either — that is a config problem, and git was never asked.
+    """
+    if report.skipped is not None:
+        return True
+    if report.lifecycle:
+        return report.lifecycle == 'clone_failed'
+    return bool(report.error and report.failures)
+
+
 def _state_severity(state: BranchState) -> Severity:
     """Severity of the branch state alone, before who-acts-on-it is considered."""
     if state.primary in _ERROR_STATES:
@@ -337,6 +355,21 @@ def report_severity(report: RepoBranchReport) -> Severity:
     return branch_severity
 
 
+def attention_tally(report: RepoBranchReport) -> Tally | None:
+    """Which counter this repo belongs to, or None when it is simply synced.
+
+    Severity alone cannot answer it. ERROR spans both a branch that is genuinely wrong and a repo
+    git could not be asked about, and the summary line has always separated those — so a display
+    keyed on severity had no honest word for the band and invented a fourth one nobody else prints.
+    """
+    severity = report_severity(report)
+    if severity is Severity.SYNCED:
+        return None
+    if severity is Severity.OPERATION:
+        return Tally.TO_SYNC
+    return Tally.UNVERIFIED if is_unverified(report) else Tally.NEEDS_YOU
+
+
 def _watched_remote_branches(repo: Repo, policy: Policy) -> list[tuple[str, str]]:
     """Remote-only branches the policy asked to watch, with each one's age.
 
@@ -410,9 +443,9 @@ def _crashed_report(repo_config: RepoConfig, exc: Exception) -> RepoBranchReport
     """A repo whose processing raised, turned into an ordinary error report.
 
     One repo must never take the run down with it. Every future is collected before anything is
-    rendered, so an exception escaping a worker discarded every *other* repo's report as well —
-    the whole registry measured, a traceback printed, and not one line about the repos that were
-    fine. Which is the same failure as a dead fetch reporting `synced`, in the other direction.
+    rendered, so an exception escaping a worker takes every *other* repo's report with it — the
+    whole registry measured, a traceback printed, and not one line about the repos that were fine.
+    That is the same failure as a dead fetch reporting `synced`, in the other direction.
     """
     return RepoBranchReport(
         label=_label(repo_config),
@@ -434,18 +467,21 @@ def _build_repo_report(
     include_lifecycle: bool,
     search_paths: list[Path],
     claimed_paths: set[Path],
-    breaker: HostBreaker | None = None,
+    breaker: HostBreaker,
 ) -> RepoBranchReport | None:
     """Do all git work for one repo (runs in a worker thread). Never touches the console.
 
     include_lifecycle=False (branches view) returns None for anything that isn't a cloned git
     repo with a remote. include_lifecycle=True (full sync) surfaces those as lifecycle reports
     and, in apply mode, clones a missing repo.
+
+    `breaker` is required rather than defaulted. A per-repo fallback instance would be the
+    credential storm restored — every repo asking a host that had already refused, with nothing on
+    screen distinguishing that run from a working one.
     """
     if jitter > 0:
         time.sleep(random.uniform(0, jitter))  # desync the initial burst of concurrent fetches
 
-    breaker = breaker or HostBreaker()
     path = Path(repo_config.path).expanduser()
     label = _label(repo_config)
     owner = repo_config.owner or config.owner
@@ -600,7 +636,7 @@ def gather_reports(
             except Exception as exc:
                 report = _crashed_report(repo_config, exc)
             finally:
-                progress.finish(token, report_severity(report).name.lower() if report is not None else None)
+                progress.finish(token, attention_tally(report) if report is not None else None)
             return report
 
         pool = ThreadPoolExecutor(max_workers=max(1, min(jobs, len(active_repos))))
@@ -636,18 +672,30 @@ def needs_attention(report: RepoBranchReport) -> bool:
     return report_severity(report) > Severity.SYNCED or bool(report.remote_only)
 
 
-def visible_reports(reports: list[RepoBranchReport], verbose: bool) -> list[RepoBranchReport]:
-    """The reports to render. Everything under `-v`; only what needs attention otherwise."""
-    if verbose:
-        return reports
-    return [report for report in reports if needs_attention(report) and not report.skipped]
+def visible_reports(reports: list[RepoBranchReport], show_all: bool) -> list[RepoBranchReport]:
+    """The reports to render: everything under `--all`, only what needs attention otherwise.
+
+    A skipped repo is excluded at *both* levels, `--all` included. Its whole explanation is the
+    one cause named in the failure summary, and one line per repo is the noise the skip exists to
+    prevent — sixty of them is what a closed host would produce.
+    """
+    candidates = [report for report in reports if report.skipped is None]
+    return candidates if show_all else [report for report in candidates if needs_attention(report)]
 
 
-def render_hidden_note(shown: int, total: int) -> None:
+def hidden_count(reports: list[RepoBranchReport], visible: list[RepoBranchReport]) -> int:
+    """How many repos were left out, excluding the ones the failure summary already accounts for.
+
+    Counting skipped repos here stated the same repos twice under two framings, and offered a flag
+    that would reveal repos syncer never measured.
+    """
+    return len([report for report in reports if report.skipped is None]) - len(visible)
+
+
+def render_hidden_note(hidden: int) -> None:
     """Say how many repos were left out, so a short report is never mistaken for a short registry."""
-    hidden = total - shown
     if hidden > 0:
-        console.print(f'[blue]  {hidden} repos not shown — [cyan]-v[/cyan] shows every repo[/blue]')
+        console.print(f'[blue]  {hidden} repos not shown — [cyan]--all[/cyan] shows every repo[/blue]')
 
 
 def _branch_json(report: RepoBranchReport) -> dict:
@@ -725,10 +773,15 @@ def render_failure_summary(reports: list[RepoBranchReport]) -> None:
         for line in group.hints:
             hint(f'  → {line}')
         err_console.print()
-    # Only reachable if the failure that closed a host produced no group of its own, which the
-    # clone path can do. Printed rather than dropped: repos nobody looked at is not a silent fact.
+    # A skip whose closing failure produced no group of its own. Every path that trips the breaker
+    # also records the failure onto a report, so this does not fire today — it is here because
+    # repos nobody contacted must never become a silent fact, and that has to hold under a change
+    # nobody has made yet. It carries the same hints as a group, since a cause with no next command
+    # is the half of a diagnosis you cannot act on.
     for (cause, host), count in skipped.items():
         error(f'{ICON_ERR}  {count} repos on {host} not contacted: {cause.value.replace("_", " ")} earlier this run')
+        for line in hint_lines(cause, host):
+            hint(f'  → {line}')
         err_console.print()
 
 
@@ -782,7 +835,7 @@ def report_branches(
     jobs: int = DEFAULT_JOBS,
     jitter: float = DEFAULT_JITTER_SECONDS,
     as_json: bool = False,
-    verbose: bool = False,
+    show_all: bool = False,
 ) -> list[RepoBranchReport]:
     """Per-branch view. Returns the reports so the caller can set an exit code."""
     # include_lifecycle defaults False; progress is a terminal affordance and would corrupt --json.
@@ -791,10 +844,10 @@ def report_branches(
         emit_json({'repos': [_branch_json(report) for report in reports]})
         return reports
     console.print()
-    visible = visible_reports(reports, verbose)
+    visible = visible_reports(reports, show_all)
     for report in visible:
         render_report(report, apply)
-    render_hidden_note(len(visible), len(reports))
+    render_hidden_note(hidden_count(reports, visible))
     render_failure_summary(reports)
     return reports
 
