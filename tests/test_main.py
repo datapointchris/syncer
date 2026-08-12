@@ -23,14 +23,14 @@ class TestBareInvocation:
         assert 'Usage:' in result.output
         assert 'check' in result.output
 
-    @pytest.mark.parametrize('flag', ['--policy=standard', '--jobs=2', '--repos-file=x.json', '--json', '--per-branch', '-a'])
+    @pytest.mark.parametrize('flag', ['--policy=standard', '--jobs=2', '--repos-file=x.json', '--json', '--per-branch', '-v'])
     def test_action_flags_are_rejected_at_the_root(self, flag, monkeypatch):
         """Flags on the root callback are the tell that a default is really a command."""
         monkeypatch.setattr('syncer.main.notify', lambda *_: None)
         assert runner.invoke(app, [flag]).exit_code != 0
 
     @pytest.mark.parametrize('verb', ['check', 'apply'])
-    @pytest.mark.parametrize('flag', ['--policy=standard', '--jobs=2', '--json', '--per-branch', '-a', '--all'])
+    @pytest.mark.parametrize('flag', ['--policy=standard', '--jobs=2', '--json', '--per-branch', '-v', '--verbose'])
     def test_both_verbs_accept_them_instead(self, verb, flag, monkeypatch):
         monkeypatch.setattr('syncer.main.notify', lambda *_: None)
         assert 'No such option' not in runner.invoke(app, [verb, flag, '--help']).output

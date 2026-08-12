@@ -586,11 +586,11 @@ class TestOnlyRepoWithSomethingToSayAreShown:
     where the four rows that mattered were indistinguishable from the seventy that did not."""
 
     def test_a_synced_repo_is_hidden_by_default(self):
-        assert visible_reports([_synced_report()], show_all=False) == []
+        assert visible_reports([_synced_report()], verbose=False) == []
 
-    def test_show_all_shows_it(self):
+    def test_verbose_shows_it(self):
         reports = [_synced_report()]
-        assert visible_reports(reports, show_all=True) == reports
+        assert visible_reports(reports, verbose=True) == reports
 
     def test_a_repo_syncer_will_act_on_is_shown(self):
         """`behind → fast_forward` is queued work rather than damage, but it is still the answer
@@ -598,23 +598,23 @@ class TestOnlyRepoWithSomethingToSayAreShown:
         state = BranchState(branch='main', primary=PrimaryState.BEHIND, behind=2, is_default=True, is_current=True)
         report = RepoBranchReport(label='a', path='~/code/a', name='a', rows=[BranchRow(state=state, action=Action.FAST_FORWARD)])
         assert report_severity(report) == Severity.OPERATION
-        assert visible_reports([report], show_all=False) == [report]
+        assert visible_reports([report], verbose=False) == [report]
 
     def test_a_dirty_repo_is_shown(self):
         state = BranchState(branch='main', primary=PrimaryState.SYNCED, is_default=True, is_current=True, dirty=True)
         report = RepoBranchReport(label='a', path='~/code/a', name='a', rows=[BranchRow(state=state, action=Action.SKIP)])
-        assert visible_reports([report], show_all=False) == [report]
+        assert visible_reports([report], verbose=False) == [report]
 
     def test_a_watched_remote_branch_keeps_a_synced_repo_visible(self):
         """watch_remote is opt-in and deliberately never affects severity. A branch someone asked
         to be told about should not then need a flag to appear."""
         report = _synced_report()
         report.remote_only = [('develop', '3 days ago')]
-        assert visible_reports([report], show_all=False) == [report]
+        assert visible_reports([report], verbose=False) == [report]
 
     def test_the_hidden_count_is_a_value_not_a_sentence(self):
         reports = [_synced_report(name) for name in ('alpha', 'bravo', 'charlie')]
-        visible = visible_reports(reports, show_all=False)
+        visible = visible_reports(reports, verbose=False)
         assert hidden_count(reports, visible) == 3
 
     def test_skipped_repos_are_not_counted_as_hidden(self):
@@ -622,7 +622,7 @@ class TestOnlyRepoWithSomethingToSayAreShown:
         repos twice under two framings, and offered a flag that would reveal repos syncer never
         measured."""
         reports = [_synced_report('alpha'), _skipped_report('bravo')]
-        visible = visible_reports(reports, show_all=False)
+        visible = visible_reports(reports, verbose=False)
         assert hidden_count(reports, visible) == 1
 
     def test_the_count_is_stated(self, capsys):
@@ -641,9 +641,9 @@ class TestOnlyRepoWithSomethingToSayAreShown:
         assert 'bravo' not in out
         assert '2 repos not shown' in out
 
-    def test_end_to_end_show_all_prints_them(self, tmp_path, capsys):
+    def test_end_to_end_verbose_prints_them(self, tmp_path, capsys):
         paths = [_make_cloned_repo(tmp_path, name) for name in ('alpha', 'bravo')]
-        report_branches(_config_matching_origin(paths), ToolConfig(default_policy='observe'), jitter=0.0, show_all=True)
+        report_branches(_config_matching_origin(paths), ToolConfig(default_policy='observe'), jitter=0.0, verbose=True)
         out = capsys.readouterr().out
         assert 'alpha' in out
         assert 'bravo' in out
@@ -717,8 +717,8 @@ class TestAHostThatFailedIsNotAskedAgain:
         trip = Trip(host='git.example.com', cause=Cause.AUTH)
         report = RepoBranchReport(label='r1', path='~/code/r1', name='r1', error='not checked', skipped=trip)
         assert report_severity(report) == Severity.ERROR  # it counts, for the exit code
-        assert visible_reports([report], show_all=False) == []  # but it is not sixty lines
-        assert visible_reports([report], show_all=True) == []  # not even under --all
+        assert visible_reports([report], verbose=False) == []  # but it is not sixty lines
+        assert visible_reports([report], verbose=True) == []  # not even under -v
 
 
 class TestOneRepoCannotTakeTheRunDown:

@@ -19,8 +19,8 @@ only reason the important rows are the ones nearest the prompt.
 
 Output is sorted by attention, least-to-most, so the repos that need action land at the bottom
 nearest the prompt (least scrolling): synced → operations → warnings → errors. Within each
-group repos are path-sorted. Only the repos above SYNCED are rendered unless `--all` asks for
-the rest: a registry is mostly synced on any ordinary day, and a report you have to scroll to read
+group repos are path-sorted. Only the repos above SYNCED are rendered unless `-v` asks for the
+rest: a registry is mostly synced on any ordinary day, and a report you have to scroll to read
 is one where the four rows that mattered were indistinguishable from the seventy that did not.
 """
 
@@ -672,15 +672,15 @@ def needs_attention(report: RepoBranchReport) -> bool:
     return report_severity(report) > Severity.SYNCED or bool(report.remote_only)
 
 
-def visible_reports(reports: list[RepoBranchReport], show_all: bool) -> list[RepoBranchReport]:
-    """The reports to render: everything under `--all`, only what needs attention otherwise.
+def visible_reports(reports: list[RepoBranchReport], verbose: bool) -> list[RepoBranchReport]:
+    """The reports to render: everything under `-v`, only what needs attention otherwise.
 
-    A skipped repo is excluded at *both* levels, `--all` included. Its whole explanation is the
+    A skipped repo is excluded at *both* levels, `-v` included. Its whole explanation is the
     one cause named in the failure summary, and one line per repo is the noise the skip exists to
     prevent — sixty of them is what a closed host would produce.
     """
     candidates = [report for report in reports if report.skipped is None]
-    return candidates if show_all else [report for report in candidates if needs_attention(report)]
+    return candidates if verbose else [report for report in candidates if needs_attention(report)]
 
 
 def hidden_count(reports: list[RepoBranchReport], visible: list[RepoBranchReport]) -> int:
@@ -695,7 +695,7 @@ def hidden_count(reports: list[RepoBranchReport], visible: list[RepoBranchReport
 def render_hidden_note(hidden: int) -> None:
     """Say how many repos were left out, so a short report is never mistaken for a short registry."""
     if hidden > 0:
-        console.print(f'[blue]  {hidden} repos not shown — [cyan]--all[/cyan] shows every repo[/blue]')
+        console.print(f'[blue]  {hidden} repos not shown — [cyan]-v[/cyan] shows every repo[/blue]')
 
 
 def _branch_json(report: RepoBranchReport) -> dict:
@@ -835,7 +835,7 @@ def report_branches(
     jobs: int = DEFAULT_JOBS,
     jitter: float = DEFAULT_JITTER_SECONDS,
     as_json: bool = False,
-    show_all: bool = False,
+    verbose: bool = False,
 ) -> list[RepoBranchReport]:
     """Per-branch view. Returns the reports so the caller can set an exit code."""
     # include_lifecycle defaults False; progress is a terminal affordance and would corrupt --json.
@@ -844,7 +844,7 @@ def report_branches(
         emit_json({'repos': [_branch_json(report) for report in reports]})
         return reports
     console.print()
-    visible = visible_reports(reports, show_all)
+    visible = visible_reports(reports, verbose)
     for report in visible:
         render_report(report, apply)
     render_hidden_note(hidden_count(reports, visible))

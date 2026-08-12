@@ -183,7 +183,7 @@ def run_sync(
     jobs: int = DEFAULT_JOBS,
     jitter: float = DEFAULT_JITTER_SECONDS,
     as_json: bool = False,
-    show_all: bool = False,
+    verbose: bool = False,
 ) -> list[RepoBranchReport]:
     """Run the full sync and render it. Returns the reports so the caller can set an exit code."""
     start = time.monotonic()
@@ -196,7 +196,7 @@ def run_sync(
         _print_summary_line(summary)
         # The summary line is the count of everything; the rows below it are only the repos with
         # something to say. Which repos are synced is not information — how many are, is.
-        visible = visible_reports(reports, show_all)
+        visible = visible_reports(reports, verbose)
         render_hidden_note(hidden_count(reports, visible))
         console.print()
         # Reports are sorted synced → errors, so repos needing action land nearest the prompt.

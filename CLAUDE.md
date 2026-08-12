@@ -101,17 +101,20 @@ mutation that never happened into the history `stats` reads back as fact.
 `report_severity(...) > SYNCED` — so the filter, the sort and the summary counts cannot disagree
 about what matters. On a registry of 80 repos that is 256 lines of report down to 34: a registry
 is mostly synced on any ordinary day, and which repos are synced is not information, whereas *how
-many* are is. `--all` shows every repo, `render_hidden_note` states the count that was left out so
+many* are is. `-v` shows every repo, `render_hidden_note` states the count that was left out so
 a short report is never mistaken for a short registry, and `--json` is unaffected — hiding is a
 rendering decision, and the event stream still records every repo or `stats` would report on the
 bad days only. The single exception is a `watch_remote` branch, which deliberately never affects
 severity: it is opt-in, and a branch someone asked to be told about should not then need a flag to
 appear.
 
-**`--all`, not `-v`.** The flag widens the *set of repos shown*, which is not what `-v` means
-anywhere else: `cli-design.md` reserves it for counted log verbosity, so spending it here would
-both block a real verbosity flag later and make `check -v` mean one thing in this tool and another
-in every neighbouring one.
+**`-v`, not `--all`.** The flag changes what is *printed*, never what is done — every repo is
+fetched, classified and decided either way, and the set the run operates on is identical with and
+without it. That is the distinction the two flags carry: `-a` widens the operated-on set (`ls -a`,
+`git branch -a`, `docker ps -a`) while `-v` expands a deliberately summarized default (`pytest -v`
+printing each test instead of a dot). Spelling this one `--all` would imply the default checked a
+subset of the registry, which is a false claim about the single thing syncer exists to be trusted
+about. `cli-design.md` § "`-a` is not a substitute for `-v`" carries the rule.
 
 **The counters are keyed, never spelled twice.** `Tally`/`TALLY_TEXT` in `output.py` is the same
 move `Refusal`/`REFUSAL_TEXT` makes, for the same reason — the live display and the summary line
@@ -519,7 +522,7 @@ the damage at `jobs` instead of at the size of the registry is the whole win.
 
 Skipped repos are `RepoBranchReport.skipped` (a `Trip`), carry **zero rows** for the same reason
 an unmeasurable repo does, count as `unverified` rather than `issues` in the run history — nobody
-looked at them — and are **never rendered one per repo, `--all` included**. They are folded into
+looked at them — and are **never rendered one per repo, `-v` included**. They are folded into
 the failure summary block for the cause that closed their host, since that is the whole of their
 explanation, and excluded from `hidden_count` for the same reason: counting them there stated the
 same repos twice under two framings, and offered a flag that would reveal repos syncer never

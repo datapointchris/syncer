@@ -210,9 +210,9 @@ class TestTheDefaultRunShowsOnlyWhatNeedsSomething:
         assert 'alpha' not in out
         assert '2 repos not shown' in out
 
-    def test_show_all_lists_them(self, tmp_path, capsys):
+    def test_verbose_lists_them(self, tmp_path, capsys):
         paths = [_make_cloned_repo(tmp_path, name) for name in ('alpha', 'bravo')]
-        run_sync(_config_matching_origin(paths), ToolConfig(default_policy='observe'), tmp_path / 'events.jsonl', jitter=0.0, show_all=True)
+        run_sync(_config_matching_origin(paths), ToolConfig(default_policy='observe'), tmp_path / 'events.jsonl', jitter=0.0, verbose=True)
         out = capsys.readouterr().out
         assert 'alpha' in out
         assert 'repos not shown' not in out
