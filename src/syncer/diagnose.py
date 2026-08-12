@@ -57,6 +57,12 @@ _PATTERNS: tuple[tuple[Cause, tuple[str, ...]], ...] = (
             'could not read username',
             'could not read password',
             'terminal prompts disabled',
+            # What git says once the askpass chain is closed as well as the terminal prompt, which
+            # is the ordinary shape of a missing credential under syncer. Absent, the commonest
+            # auth failure this tool produces would carry no cause, no hint, and never trip the
+            # host breaker — the diagnosis would go quiet exactly where it was needed most.
+            'unable to get password from user',
+            'unable to get username from user',
             'invalid username or password',
             'support for password authentication was removed',
             'access denied',

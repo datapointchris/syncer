@@ -1,11 +1,15 @@
+import os
 import subprocess
 import threading
 import time
+from http.server import BaseHTTPRequestHandler
+from http.server import HTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from syncer.diagnose import Cause
 from syncer.diagnose import classify_failure
 from syncer.output import ALL_ICONS
 from syncer.output import ICON_ERR
@@ -823,3 +827,72 @@ class TestFindUntrackedRepos:
     def test_hidden_directories_are_skipped(self, tmp_path):
         self._repo(tmp_path / '.cache' / 'thing')
         assert find_untracked_repos(tmp_path, known_paths=set()) == []
+
+
+class TestAskpassIsNeverLaunched:
+    """The leg GIT_TERMINAL_PROMPT never covered. An askpass program is just a path to an
+    executable, so the failure reproduces with no credential manager and no Windows box: without
+    the fix git runs it and blocks, which is one GUI per repo across a whole run.
+
+    Served by a local 401 rather than an unreachable host. A refused connection never reaches the
+    credential step at all, so asserting the askpass did not run would pass for the wrong reason —
+    which is what the first draft of this did.
+    """
+
+    @pytest.fixture
+    def askpass(self, tmp_path):
+        """A stand-in for the GUI prompt: it records that it ran, and answers."""
+        marker = tmp_path / 'was-run'
+        script = tmp_path / 'askpass.sh'
+        script.write_text(f'#!/bin/sh\ntouch {marker}\necho hunter2\n')
+        script.chmod(0o755)
+        return script, marker
+
+    @pytest.fixture
+    def unauthorized_url(self):
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(401)
+                self.send_header('WWW-Authenticate', 'Basic realm="git"')
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        server = HTTPServer(('127.0.0.1', 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        yield f'http://127.0.0.1:{server.server_port}/x.git'
+        server.shutdown()
+        server.server_close()
+
+    def test_git_does_not_run_a_configured_askpass(self, askpass, unauthorized_url, monkeypatch):
+        script, marker = askpass
+        monkeypatch.setenv('GIT_ASKPASS', str(script))
+        result = run_command(['git', 'ls-remote', unauthorized_url], timeout=20)
+        assert marker.exists() is False
+        # Proves git got as far as needing a credential, so the assertion above means something.
+        # Joined on diagnose's own table rather than on a phrase, since git's wording varies.
+        assert result.returncode != 0
+        assert classify_failure(GitFailure(argv=('ls-remote',), returncode=result.returncode, stderr=result.stderr)) is Cause.AUTH
+
+    def test_the_same_holds_for_core_askpass(self, askpass, unauthorized_url, monkeypatch):
+        """Emptying GIT_ASKPASS short-circuits the chain, so core.askpass is never consulted
+        either — git takes the first of the three that is *set*, not the first that is usable."""
+        script, marker = askpass
+        monkeypatch.delenv('GIT_ASKPASS', raising=False)
+        result = run_command(['git', '-c', f'core.askpass={script}', 'ls-remote', unauthorized_url], timeout=20)
+        assert marker.exists() is False
+        assert classify_failure(GitFailure(argv=('ls-remote',), returncode=result.returncode, stderr=result.stderr)) is Cause.AUTH
+
+    def test_without_the_fix_git_runs_it(self, askpass, unauthorized_url):
+        """The control. Without it both assertions above would pass on a git that never asked."""
+        script, marker = askpass
+        environment = {**os.environ, 'GIT_ASKPASS': str(script), 'GIT_TERMINAL_PROMPT': '0'}
+        subprocess.run(
+            ['git', '-c', 'credential.helper=', 'ls-remote', unauthorized_url],
+            capture_output=True,
+            text=True,
+            env=environment,
+            timeout=20,
+        )
+        assert marker.exists() is True

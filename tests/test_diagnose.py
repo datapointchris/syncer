@@ -179,3 +179,20 @@ class TestGroupFailures:
         assert group.cause is None
         assert group.hints == ()
         assert group.stderr == 'something novel'
+
+
+class TestTheAskpassClosureIsDiagnosable:
+    """syncer closes the askpass chain as well as the terminal prompt, and git words that failure
+    differently. Unrecognised, the commonest auth failure this tool produces would carry no cause,
+    no hint, and would never trip the host breaker."""
+
+    def test_password_refusal_is_auth(self):
+        failure = GitFailure(argv=('ls-remote',), returncode=128, stderr='fatal: unable to get password from user')
+        assert classify_failure(failure) is Cause.AUTH
+
+    def test_username_refusal_is_auth(self):
+        failure = GitFailure(argv=('ls-remote',), returncode=128, stderr='fatal: unable to get username from user')
+        assert classify_failure(failure) is Cause.AUTH
+
+    def test_it_still_earns_a_next_command(self):
+        assert any('credential' in line or 'ssh' in line for line in hint_lines(Cause.AUTH, 'https://git.example.com/o/r.git'))
