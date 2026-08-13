@@ -1,6 +1,31 @@
 # CHANGELOG
 
 
+## v11.1.0 (2026-08-13)
+
+### Features
+
+- **report**: Say what to run for unresolved rows
+  ([`d47b261`](https://github.com/datapointchris/syncer/commit/d47b261bb88c8bcdefde6c1f68616b54cb327a4f))
+
+A row syncer will not clear said what was true and nothing about what to do. remedy.py turns each
+  one into a command, keyed off the branch state and the refusal rather than matched on prose. Rows
+  apply will clear get nothing: a command beside queued work invites a race.
+
+No command it emits can lose work. Rebasing onto a branch's own upstream leaves it strictly ahead,
+  so the publish after is a plain push, and a force is never wanted. Every command carries the -C of
+  the tree the branch is really in, which for a worktree branch is not the repo.
+
+Also refuses to fast-forward a branch a linked worktree has checked out. is_current reads this
+  checkout's HEAD alone, so such a branch looked unchecked-out, and _ff_ref was exempted from the
+  dirty guard on that premise. branch -f and branch -D refuse for themselves; update-ref does not,
+  so it moved a live worktree's HEAD while the index stayed put, leaving the new commit's files
+  staged as deletions in a tree never measured.
+
+checkout_refusal joins the report's mirror for the same reason: mirror's *:diverged = rebase_push
+  printed a rebase arrow on every non-current diverged branch and refused all of them.
+
+
 ## v11.0.1 (2026-08-13)
 
 ### Bug Fixes
