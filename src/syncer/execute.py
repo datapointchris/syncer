@@ -19,10 +19,13 @@ independent of any policy:
 8. A branch matching the policy's `protected` patterns admits no action that publishes or
    destroys — checked centrally here, before dispatch, so it holds for every action including
    ones added later.
+9. Never move a branch another worktree has checked out. `branch -f` and `branch -D` inherit
+   git's own refusal; update-ref is plumbing and does not check, so ff_ref guards it explicitly.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from enum import StrEnum
 from typing import Literal
 from typing import NamedTuple
@@ -52,6 +55,7 @@ class Refusal(StrEnum):
 
     NOT_CURRENT = 'not_current'
     IS_CURRENT = 'is_current'
+    WORKTREE_CHECKOUT = 'worktree_checkout'
     NO_UPSTREAM = 'no_upstream'
     HAS_UPSTREAM = 'has_upstream'
     DIRTY_TREE = 'dirty_tree'
@@ -74,6 +78,7 @@ class Refusal(StrEnum):
 REFUSAL_TEXT: dict[Refusal, str] = {
     Refusal.NOT_CURRENT: '{verb} requires the branch to be current',
     Refusal.IS_CURRENT: 'ff_ref is for non-current branches; use pull_ff',
+    Refusal.WORKTREE_CHECKOUT: 'branch is checked out in another worktree',
     Refusal.NO_UPSTREAM: 'branch has no upstream',
     Refusal.HAS_UPSTREAM: 'branch already has an upstream',
     Refusal.DIRTY_TREE: 'working tree is dirty',
@@ -158,6 +163,11 @@ def _pull_ff(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
 def _ff_ref(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     if state.is_current:
         return _refused(state, Action.FF_REF, Refusal.IS_CURRENT)
+    # Invariant 9. `is_current` is this checkout's HEAD only, so a branch live in a linked
+    # worktree reads as "not checked out" here and update-ref — plumbing, and the one mechanism
+    # on the menu git does not protect — would move it under a tree syncer never measured.
+    if repo.held_by_worktree(state.branch):
+        return _refused(state, Action.FF_REF, Refusal.WORKTREE_CHECKOUT)
     if not state.upstream:
         return _refused(state, Action.FF_REF, Refusal.NO_UPSTREAM)
     if not _is_strictly_behind(repo, state.branch, state.upstream):  # invariant 3
@@ -255,7 +265,7 @@ def _delete_local(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     return Outcome(branch=state.branch, action=Action.DELETE_LOCAL, status='failed', message=err)
 
 
-_MUTATORS = {
+_MUTATORS: dict[Action, Callable[[BranchState, Repo, Policy], Outcome]] = {
     Action.FAST_FORWARD: _fast_forward,
     Action.PULL_FF: _pull_ff,
     Action.FF_REF: _ff_ref,
@@ -268,10 +278,13 @@ _MUTATORS = {
 # The actions syncer performs, as opposed to the ones that only surface something (skip, report,
 # prompt). Derived from _MUTATORS rather than listed again, so the reporter's notion of "syncer
 # will handle this" cannot drift from the set of things that actually have a mutator.
-MUTATING_ACTIONS = frozenset(_MUTATORS)
+MUTATING_ACTIONS: frozenset[Action] = frozenset(_MUTATORS)
 
-# The one mutator that never reads or writes the working tree: update-ref moves a ref that is not
-# checked out, so a dirty tree is irrelevant to it (and _ff_ref accordingly has no dirty guard).
+# The one mutator that never reads or writes *this* checkout's tree: update-ref moves a ref whose
+# branch is not the current one, so this repo's dirtiness is irrelevant to it (and _ff_ref
+# accordingly has no dirty guard). The premise holds only because invariant 9 refuses first — a
+# branch a linked worktree has checked out is not "not checked out", and moving its ref is exactly
+# the tree-corrupting write this exemption reads as impossible.
 _WORKTREE_SAFE = frozenset({Action.FF_REF})
 
 
@@ -324,7 +337,7 @@ ACTION_DOCS: dict[Action, ActionDoc] = {
     Action.FAST_FORWARD: ActionDoc(
         summary='advance a branch to its upstream',
         runs='git merge --ff-only <upstream>  (current)  ·  git update-ref (not current)',
-        refuses=(Refusal.NO_UPSTREAM, Refusal.DIRTY_TREE, Refusal.NOT_STRICTLY_BEHIND),
+        refuses=(Refusal.NO_UPSTREAM, Refusal.DIRTY_TREE, Refusal.NOT_STRICTLY_BEHIND, Refusal.WORKTREE_CHECKOUT),
         never='creates a merge commit, or moves a branch the upstream is not strictly ahead of',
         applies_to=frozenset({PrimaryState.BEHIND}),
     ),
@@ -338,8 +351,8 @@ ACTION_DOCS: dict[Action, ActionDoc] = {
     Action.FF_REF: ActionDoc(
         summary='fast-forward a branch that is not checked out (mechanism)',
         runs='git update-ref refs/heads/<branch> <upstream>',
-        refuses=(Refusal.IS_CURRENT, Refusal.NO_UPSTREAM, Refusal.NOT_STRICTLY_BEHIND),
-        never='touches the working tree — it moves a ref that is not checked out, which is why it has no dirty guard',
+        refuses=(Refusal.IS_CURRENT, Refusal.WORKTREE_CHECKOUT, Refusal.NO_UPSTREAM, Refusal.NOT_STRICTLY_BEHIND),
+        never='moves a ref any working tree has checked out — this one or a linked worktree, which git itself does not check here',
         applies_to=frozenset({PrimaryState.BEHIND}),
     ),
     Action.PUSH: ActionDoc(
@@ -397,7 +410,7 @@ ACTION_DOCS: dict[Action, ActionDoc] = {
 }
 
 
-def dirty_refusal(action: Action, state: BranchState, dirty: bool) -> str | None:
+def dirty_refusal(action: Action, state: BranchState, dirty: bool) -> Refusal | None:
     """Why a dirty working tree refuses `action`, or None if it admits it.
 
     Shared with the reporter for the same reason protection_refusal is: rendering the decided
@@ -412,10 +425,48 @@ def dirty_refusal(action: Action, state: BranchState, dirty: bool) -> str | None
     # tree whenever the branch is not the current one.
     if action in _WORKTREE_SAFE or (action == Action.FAST_FORWARD and not state.is_current):
         return None
-    return REFUSAL_TEXT[Refusal.DIRTY_TREE]
+    return Refusal.DIRTY_TREE
 
 
-def protection_refusal(action: Action, state: BranchState, policy: Policy) -> str | None:
+def checkout_refusal(action: Action, state: BranchState) -> Refusal | None:
+    """Why `action` is refused by which branch happens to be checked out, or None if it admits it.
+
+    The mechanisms split on this and each guard's first line tests it, so it is as static as
+    protection and as knowable without running anything. Missing from the mirror, `mirror`'s
+    `*:diverged = rebase_push` printed a rebase arrow on every non-current diverged branch and
+    refused all of them — the arrow promising an action apply never makes, which is the failure
+    dirty_refusal and protection_refusal already exist to prevent.
+
+    FAST_FORWARD is absent on purpose: it dispatches between the two mechanisms precisely so that
+    neither side of the split refuses it.
+    """
+    if action in (Action.PULL_FF, Action.REBASE_PUSH) and not state.is_current:
+        return Refusal.NOT_CURRENT
+    if action is Action.FF_REF and state.is_current:
+        return Refusal.IS_CURRENT
+    return None
+
+
+def worktree_refusal(action: Action, state: BranchState) -> Refusal | None:
+    """Why a linked worktree holding this branch refuses `action`, or None if it admits it.
+
+    The third gate the reporter can evaluate without executing, for the same reason as the other
+    two: `behind → fast_forward` on a branch a worktree owns is an arrow apply will never follow,
+    and an arrow nobody can act on is the part of a row that costs it its meaning.
+
+    Only the update-ref path is gated here. pull_ff needs the branch current, which no linked
+    worktree's branch is, so it is already refused for a different reason; the rest of the menu
+    inherits git's own worktree refusal. Invariant 9 is still enforced live inside _ff_ref against
+    repo.held_by_worktree — this only mirrors it.
+    """
+    if state.worktree is None:
+        return None
+    if action is Action.FF_REF or (action is Action.FAST_FORWARD and not state.is_current):
+        return Refusal.WORKTREE_CHECKOUT
+    return None
+
+
+def protection_refusal(action: Action, state: BranchState, policy: Policy) -> Refusal | None:
     """Why `action` is refused on a protected branch, or None if the branch admits it.
 
     Shared with the reporter rather than living inside execute(), because protection is static
@@ -424,8 +475,33 @@ def protection_refusal(action: Action, state: BranchState, policy: Policy) -> st
     """
     if action in PROTECTED_ALLOWED:
         return None
+    return None if matching_protection(state.branch, policy) is None else Refusal.PROTECTED
+
+
+def blocking_refusal(action: Action, state: BranchState, policy: Policy, dirty: bool) -> Refusal | None:
+    """The reason `apply` would refuse `action`, when that is knowable without running anything.
+
+    The three static gates in one place, so a caller cannot consult two of them and miss the
+    third. Anything a guard can only discover mid-write (a rebase conflict, unreadable counts)
+    is deliberately absent — a row must not promise a refusal any more than it promises an action.
+    """
+    return (
+        protection_refusal(action, state, policy)
+        or checkout_refusal(action, state)
+        or worktree_refusal(action, state)
+        or dirty_refusal(action, state, dirty)
+    )
+
+
+def describe_block(reason: Refusal, action: Action, state: BranchState, policy: Policy) -> str:
+    """A blocking refusal's wording, with the runtime values its template needs filled in.
+
+    The action supplies `{verb}`. Left to _DOC_FIELDS it renders as 'this action', which is the
+    right stand-in for a reference page listing refusals in the abstract and the wrong one on a
+    row that already names the action two words earlier.
+    """
     pattern = matching_protection(state.branch, policy)
-    return None if pattern is None else REFUSAL_TEXT[Refusal.PROTECTED].format(pattern=pattern)
+    return REFUSAL_TEXT[reason].format_map({**_DOC_FIELDS, 'verb': action.value, 'pattern': pattern or '<glob>'})
 
 
 def execute(action: Action, state: BranchState, repo: Repo, policy: Policy) -> Outcome:

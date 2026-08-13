@@ -18,10 +18,10 @@ therefore exhaustively testable without touching git:
 | Execute | `execute.py` | impure (git writes) | The only place that mutates. Enforces the hard invariants (below) and refuses rather than forces. |
 | Report | `report.py` | impure (concurrency + render) | Runs classify→decide→(execute) per repo on a thread pool, sorts by attention, renders. |
 
-Two modules sit beside the pipeline rather than in it, both about surviving a bad machine rather
-than about deciding anything: `breaker.py` (**pure**) answers whether a host is still worth
-asking, and `progress.py` draws the live display over the pool. Neither is consulted by
-`decide()`, and neither can change what an action does.
+Three modules sit beside the pipeline rather than in it, none of them able to change what an
+action does and none consulted by `decide()`: `breaker.py` (**pure**) answers whether a host is
+still worth asking, `progress.py` draws the live display over the pool, and `remedy.py` (**pure**)
+turns a row syncer will not clear into the command that clears it.
 
 `decide()` being pure is why `tests/test_policy.py` can enumerate the full cartesian product
 of primary-states × policies as a no-git truth table. Keep git and FS I/O out of `policy.py`
@@ -60,12 +60,20 @@ modifiers are **execute-time gates, never decision inputs** — `decide()` is in
 invisible to `decide()`.
 
 A gate the reporter can evaluate without executing must still be *shown*, though, or the report
-promises an action `apply` never makes. Two are: `protection_refusal()` (static config) and
-`dirty_refusal()` (one `git status` per repo). Both live in `execute.py` beside the guards they
-mirror, both feed `BranchRow.blocked`, and `TestDirtyRefusalMatchesExecute` asserts the mirror
-agrees with `execute()` for every action on the menu — a mirror that drifts is worse than none,
-because the arrow is the only part of a row anyone acts on. A gate that can only be discovered
-mid-write (a rebase conflict, unreadable counts) stays out of `blocked` deliberately.
+promises an action `apply` never makes. Four are, all composed by `blocking_refusal()` so a caller
+cannot consult three and miss the fourth: `protection_refusal()` (static config),
+`checkout_refusal()` (which branch is current), `worktree_refusal()` (a linked worktree holds it)
+and `dirty_refusal()` (one `git status` per repo). All live in `execute.py` beside the guards they
+mirror, all feed `BranchRow.blocked`, and the mirror tests assert each agrees with `execute()` for
+every action on the menu — a mirror that drifts is worse than none, because the arrow is the only
+part of a row anyone acts on. `checkout_refusal` was the one missing: `mirror`'s
+`*:diverged = rebase_push` printed a rebase arrow on every non-current diverged branch and refused
+all of them. A gate that can only be discovered mid-write (a rebase conflict, unreadable counts)
+stays out of `blocked` deliberately.
+
+`blocked` is a `Refusal` key, never prose — `blocked_message` carries the wording, exactly the
+`Outcome.reason`/`Outcome.message` split and for the same reason: severity and the remedy join on
+the key, and nothing joins on a sentence.
 
 ## Severity is ownership, not git state
 
@@ -177,6 +185,14 @@ time — and refuses rather than forces. Guaranteed independent of any policy:
    does (it advances to what the upstream already contains), `push`/`rebase_push`/
    `set_upstream_push`/`delete_local` do not. `protected` lives on `Policy`, so it is
    machine-local like every other policy setting, and no built-in sets one.
+9. Never move a branch another worktree has checked out. `is_current` is *this* checkout's HEAD
+   alone, so a branch a linked worktree holds reads as "not checked out" — and `_ff_ref` was
+   exempted from the dirty guard on exactly that premise. `branch -f` and `branch -D` refuse for
+   themselves; `update-ref` is plumbing and does not, so it moved a live worktree's HEAD while
+   the index stayed put, leaving the new commit's files staged as deletions in a tree syncer
+   never measured the dirtiness of. `repo.held_by_worktree` answers True when `git worktree list`
+   fails, the same polarity as `is_dirty` and for the same reason. `BranchState.worktree` records
+   the path for the reporter and for the hint; `decide()` is invariant to it.
 
 Any new `Action` must be added to the `Action` enum, mapped in `_MUTATORS`, and given a mutator
 that re-checks its own preconditions live. Never add an unsafe primitive to the menu.
@@ -341,6 +357,43 @@ Policy resolution per repo, first hit wins (`resolve_policy_name`):
 Built-ins (`policy.py`): `standard` (default-branch auto-sync, feature branches report-only),
 `observe` (report everything, mutate nothing — note: **does not pull**), `mirror` (auto everything
 safe, opt-in always-on-box policy).
+
+## The report says what to run, for the rows it will not clear
+
+`remedy.py` is **pure**, sits beside the pipeline like `diagnose.py` does, and carries the same
+shape of honesty rules — because it is the same job for a different input. `diagnose` turns a git
+*failure* into a hint; this turns a *state syncer has decided not to act on* into one. Both are
+enumerable, so both are truth tables rather than something discovered by running git.
+
+`remedy_for(state, action, repo_path, blocked, refused) -> Remedy`, rendered by `render_remedy`
+under the row it belongs to. Its rules:
+
+- **Nothing is suggested where syncer acts.** An unblocked mutating action gets an empty `Remedy`;
+  `apply` is the remedy there, and a command printed beside queued work invites someone to race it.
+- **No command can lose work.** No `--force`, no `reset`, no `checkout`, no `stash`. Invariant 1
+  governs what syncer runs and is worth nothing if the report tells you to force by hand. Nothing
+  needs one: rebasing a branch onto *its own* upstream leaves it strictly ahead, so the publish
+  after is an ordinary push. `TestHonestyRules` asserts it over the whole table, matching argv
+  **tokens** rather than substrings — `-f` is inside `--ff-only`, and a check that reads a
+  fast-forward as a force is one that gets relaxed rather than trusted.
+- **Every command names its directory**, and it is `state.worktree` when one holds the branch.
+  `git -C <repo> rebase` in the main checkout rebases whatever *that* has checked out, which is a
+  different branch — the case that motivated the module.
+- **`_tracks_own_remote` decides the wording**, because `diverged` means two different things. A
+  branch tracking `origin/main` is your work on a base that moved; one tracking `origin/<itself>`
+  is two machines disagreeing. The report showed both as `N ahead, N behind`.
+- **syncer never says what to do with uncommitted work.** It has no commit or stash action for the
+  same reason, so the dirty remedy is `git status --short` and nothing else.
+- **The policy note is the other half of "why not".** Most unresolved rows are a policy saying
+  `report`, not a limit, so the note names the rule key that would change it. Candidates come from
+  `ACTION_DOCS.applies_to` — proven against the mutators — minus `MECHANISM_ACTIONS`, since a rule
+  naming `pull_ff`/`ff_ref` is refused for half of all checkout states.
+- **Every `Refusal` is routed or listed in `NO_REMEDY`**, so a new one fails a test rather than
+  rendering blank. A refusal with nothing to say falls through to the branch state underneath it.
+
+Rendered on **stdout** with its row, not through `hint()` — that writes to stderr, which is right
+for the failure summary (a block about the run) and wrong here, since a redirected report would
+keep every row and lose the line saying what to do about it.
 
 ## Read-only checks that are not sync state
 

@@ -78,6 +78,19 @@ def origin_mismatch(repo: Repo) -> str | None:
     return actual
 
 
+def _same_dir(left: str | Path, right: str | Path) -> bool:
+    """Whether two paths name the same directory, symlinks and relative spellings folded out.
+
+    `git worktree list` prints fully resolved paths while a registry entry is whatever the user
+    typed, so a plain == would read this repo's own working directory as a linked worktree of
+    itself on any machine whose home or /tmp is a symlink — macOS being the obvious one.
+    """
+    try:
+        return Path(left).resolve() == Path(right).resolve()
+    except OSError:
+        return Path(left) == Path(right)
+
+
 def _add_git_config(env: dict[str, str], key: str, value: str) -> None:
     """Append the environment form of `git -c key=value`, keeping any the caller already set.
 
@@ -335,6 +348,53 @@ class Repo:
         local = set(self.local_branches())
         remote = (line.removeprefix('origin/') for line in result.stdout.splitlines() if line)
         return [branch for branch in remote if branch != 'HEAD' and branch not in local]
+
+    @cached_property
+    def linked_worktree_branches(self) -> dict[str, str] | None:
+        """Branch -> path for every branch checked out in a *linked* worktree, or None if unasked.
+
+        This repo's own working directory is excluded: a branch checked out here is `is_current`,
+        which the pipeline already models. What it does not model is a branch that is current
+        somewhere *else*, and the two are not interchangeable for a mutator.
+
+        `git branch -f` and `git branch -D` both refuse a branch a worktree holds, so most of the
+        menu inherits git's own protection. `update-ref` is plumbing and does not check, so
+        _ff_ref moved a live worktree's HEAD out from under it — leaving that tree's index
+        describing a commit it no longer points at, with files from the new commit staged as
+        deletions, in a tree syncer never looked at and whose dirtiness it never measured.
+
+        None (not {}) when git could not say, so the two readers can take the polarity each needs:
+        a guard must refuse what it cannot verify, while a hint that stays silent costs nothing.
+        Cached because every branch in a repo asks the same question of one unchanging answer.
+        """
+        result = self._git('worktree', 'list', '--porcelain')
+        if result.returncode != 0:
+            return None
+        found: dict[str, str] = {}
+        path = ''
+        for line in result.stdout.splitlines():
+            keyword, _, value = line.partition(' ')
+            if keyword == 'worktree':
+                path = value
+            elif keyword == 'branch' and path and not _same_dir(path, self.path):
+                found[value.removeprefix('refs/heads/')] = path
+        return found
+
+    def worktree_for(self, branch: str) -> str | None:
+        """Path of the linked worktree holding `branch`, or None if none does — or git could not say.
+
+        For naming a directory in a hint. Use `held_by_worktree` for anything gating a write.
+        """
+        return (self.linked_worktree_branches or {}).get(branch)
+
+    def held_by_worktree(self, branch: str) -> bool:
+        """True when another worktree has `branch` checked out — *or* git could not tell us.
+
+        The same polarity as is_dirty, for the same reason: this gates a write, and "cannot
+        verify" has to answer the way that refuses.
+        """
+        worktrees = self.linked_worktree_branches
+        return True if worktrees is None else branch in worktrees
 
     def branch_age(self, ref: str) -> str:
         """Human-readable age of a ref's last commit ('3 days ago'), or '' if it can't be read."""

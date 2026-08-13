@@ -134,6 +134,18 @@ class TestDecideModifierInvariance:
                 )
                 assert decide(state, policy) == baseline
 
+    @pytest.mark.parametrize('policy_name', list(BUILTIN_POLICIES))
+    @pytest.mark.parametrize('primary', ALL_STATES)
+    def test_a_linked_worktree_does_not_affect_the_decision(self, policy_name, primary):
+        """`worktree` joined dirty and stashed as an execute-time gate, so it is under the same
+        rule: it decides whether an action is refused, never which action is chosen. A policy
+        that decided differently for a worktree branch would be deciding on where a checkout
+        happens to live, which is not a property of the branch."""
+        policy = BUILTIN_POLICIES[policy_name]
+        for is_default, is_current in itertools.product([True, False], repeat=2):
+            state = _state(primary, branch='main', is_default=is_default, is_current=is_current)
+            assert decide(state.model_copy(update={'worktree': '/elsewhere/wt'}), policy) == decide(state, policy)
+
 
 class TestSelectorPrecedence:
     def test_exact_name_beats_glob_and_star(self):

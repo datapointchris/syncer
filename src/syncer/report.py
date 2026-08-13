@@ -56,9 +56,10 @@ from syncer.diagnose import group_failures
 from syncer.diagnose import hint_lines
 from syncer.execute import MUTATING_ACTIONS
 from syncer.execute import Outcome
-from syncer.execute import dirty_refusal
+from syncer.execute import Refusal
+from syncer.execute import blocking_refusal
+from syncer.execute import describe_block
 from syncer.execute import execute
-from syncer.execute import protection_refusal
 from syncer.output import ICON_DOT
 from syncer.output import ICON_DOWNLOAD
 from syncer.output import ICON_ERR
@@ -80,6 +81,8 @@ from syncer.policy import PrimaryState
 from syncer.policy import decide
 from syncer.policy import is_watched_remote
 from syncer.progress import RunProgress
+from syncer.remedy import Remedy
+from syncer.remedy import remedy_for
 from syncer.repos import GitFailure
 from syncer.repos import Repo
 from syncer.repos import abort_running_commands
@@ -164,10 +167,19 @@ class BranchRow:
     action: Action
     outcome: Outcome | None = None
     # Why `apply` would refuse this action, computed whether or not it ran: protection (static
-    # config) or a dirty working tree (read once per repo). Both are knowable without executing,
-    # so a report-only run can and should show them rather than promising an action apply will
-    # decline. Anything a guard can only discover mid-write stays absent here.
-    blocked: str | None = None
+    # config), a linked worktree holding the branch, or a dirty working tree (read once per repo).
+    # All three are knowable without executing, so a report-only run can and should show them
+    # rather than promising an action apply will decline. Anything a guard can only discover
+    # mid-write stays absent here. Keyed, not prose — the remedy joins on it.
+    blocked: Refusal | None = None
+    # The same refusal as prose, for display only. The Outcome.reason / Outcome.message split,
+    # for the same reason: the key is what severity and the remedy join on, and nothing joins on
+    # a sentence. Held rather than derived because only the row builder has the policy the
+    # protected pattern comes from.
+    blocked_message: str = ''
+    # What the reader can run themselves, for a row syncer has decided not to clear. Empty
+    # wherever `apply` would handle it: a command printed beside queued work invites a race.
+    remedy: Remedy = field(default_factory=Remedy)
 
 
 @dataclass
@@ -306,7 +318,9 @@ def _branch_line(row: BranchRow, uncommitted: int = 0, stashes: int = 0) -> str:
     line = _branch_prefix(row, uncommitted, stashes)
     if row.action in MUTATING_ACTIONS:
         line = f'{line} [blue]→ {row.action.value}[/blue]'
-    return f'{line} [yellow](would refuse: {row.blocked})[/yellow]' if row.blocked else line
+    if not row.blocked:
+        return line
+    return f'{line} [yellow](would refuse: {row.blocked_message or row.blocked.value})[/yellow]'
 
 
 _OUTCOME_COLOR = {
@@ -391,8 +405,17 @@ def build_branch_rows(repo: Repo, policy: Policy, apply: bool, *, fetched: bool 
     for state in classify_repo(repo, policy, fetched=fetched):
         action = decide(state, policy)
         outcome = execute(action, state, repo, policy) if apply else None
-        blocked = protection_refusal(action, state, policy) or dirty_refusal(action, state, dirty)
-        rows.append(BranchRow(state=state, action=action, outcome=outcome, blocked=blocked))
+        blocked = blocking_refusal(action, state, policy, dirty)
+        rows.append(
+            BranchRow(
+                state=state,
+                action=action,
+                outcome=outcome,
+                blocked=blocked,
+                blocked_message=describe_block(blocked, action, state, policy) if blocked else '',
+                remedy=remedy_for(state, action, str(repo.path), blocked, outcome.reason if outcome else None),
+            )
+        )
     return rows
 
 
@@ -717,8 +740,11 @@ def _branch_json(report: RepoBranchReport) -> dict:
                 'is_default': row.state.is_default,
                 'is_current': row.state.is_current,
                 'dirty': row.state.dirty,
+                'worktree': row.state.worktree,
                 'action': row.action.value,
-                'blocked': row.blocked,
+                'blocked': row.blocked_message or None,
+                'blocked_reason': row.blocked.value if row.blocked else None,
+                'remedy': {'commands': list(row.remedy.commands), 'notes': list(row.remedy.notes)} if row.remedy else None,
                 'outcome': row.outcome.status if row.outcome else None,
                 'outcome_message': row.outcome.message or None if row.outcome else None,
             }
@@ -785,6 +811,23 @@ def render_failure_summary(reports: list[RepoBranchReport]) -> None:
         err_console.print()
 
 
+def render_remedy(remedy: Remedy) -> None:
+    """The commands under the row they belong to, on stdout with it.
+
+    Not through hint(): that writes to stderr, which is right for the failure summary — a block
+    about the run rather than about a repo — and wrong here, because a redirected report would
+    keep every row and lose the line telling you what to do about it, and the two would interleave
+    on the terminal besides.
+
+    soft_wrap because a command that wrapped is one that cannot be double-clicked, and escape()
+    because a branch name may legally contain the square brackets Rich reads as a style tag.
+    """
+    for command in remedy.commands:
+        console.print(f'      [cyan]$ {escape(command)}[/cyan]', soft_wrap=True)
+    for note in remedy.notes:
+        console.print(f'      [blue]{escape(note)}[/blue]', soft_wrap=True)
+
+
 def render_report(report: RepoBranchReport, apply: bool) -> None:
     if report.lifecycle:
         icon, color, message, _ = LIFECYCLE_STYLE[report.lifecycle]
@@ -821,6 +864,7 @@ def render_report(report: RepoBranchReport, apply: bool) -> None:
     render_row = _apply_line if apply else _branch_line
     for row in report.rows:
         console.print(render_row(row, report.uncommitted, report.stashes))
+        render_remedy(row.remedy)
     for branch, age in report.remote_only:
         # No local copy, so nothing to sync — browse it with `git log origin/<branch>`.
         console.print(f'  [blue]{ICON_DOT}  origin/{branch} — remote only, last commit {age}[/blue]')

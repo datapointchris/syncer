@@ -90,6 +90,12 @@ PROTECTED_ALLOWED = frozenset(
     }
 )
 
+# The mechanism half of the fast-forward split, as opposed to the FAST_FORWARD intent that
+# dispatches between them. Each is refused whenever the branch sits on the other side of the
+# checkout split, so nothing may *suggest* one — TestBuiltinsNameIntentNotMechanism asserts the
+# built-ins never decide one, and this is the same rule for anything that recommends an action.
+MECHANISM_ACTIONS = frozenset({Action.PULL_FF, Action.FF_REF})
+
 # Selector words that are roles, not literal branch names or globs.
 ROLE_SELECTORS = {'default', 'current'}
 GLOB_CHARS = set('*?[]')
@@ -108,6 +114,11 @@ class BranchState(BaseModel):
     stashed: bool = False
     upstream: str | None = None
     merged_into_target: bool = False
+    # Path of a *linked* worktree holding this branch, when one does. `is_current` covers only
+    # this checkout's HEAD, so without this a branch live in a worktree is indistinguishable from
+    # one nothing has checked out — the distinction invariant 9 turns on. An execute-time gate
+    # and a hint target, never a decision input: decide() is invariant to it.
+    worktree: str | None = None
 
 
 class Policy(BaseModel):

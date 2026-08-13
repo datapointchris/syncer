@@ -166,6 +166,24 @@ class TestClassifyModifiers:
         assert state.is_default is True
         assert state.is_current is True
 
+    def test_a_branch_in_a_linked_worktree_records_where(self, cloned_repo, tmp_path):
+        """Without this a worktree branch is indistinguishable from one nothing has checked out,
+        which is the distinction invariant 9 turns on and the one a hint has to name."""
+        _git(cloned_repo, 'branch', 'side')
+        linked = tmp_path / 'linked'
+        _git(cloned_repo, 'worktree', 'add', str(linked), 'side')
+        repo = _make_repo(cloned_repo)
+        state = classify_branch(repo, 'side', default='main', current='main', dirty_current=False, stashed=False)
+        assert state.is_current is False
+        assert state.worktree == str(linked)
+
+    def test_the_current_branch_is_never_also_a_worktree(self, cloned_repo):
+        """is_current already says this checkout holds it, and the guards read the two fields as
+        alternatives — a branch reported as both would be refused twice for one fact."""
+        repo = _make_repo(cloned_repo)
+        state = classify_branch(repo, 'main', default='main', current='main', dirty_current=False, stashed=False)
+        assert state.worktree is None
+
 
 class TestClassifyRepoScope:
     def test_scope_default_only_returns_default(self, cloned_repo):

@@ -10,9 +10,11 @@ from syncer.execute import MUTATING_ACTIONS
 from syncer.execute import REFUSAL_TEXT
 from syncer.execute import Outcome
 from syncer.execute import Refusal
+from syncer.execute import checkout_refusal
 from syncer.execute import describe_refusal
 from syncer.execute import dirty_refusal
 from syncer.execute import execute
+from syncer.execute import worktree_refusal
 from syncer.policy import PROTECTED_ALLOWED
 from syncer.policy import STATE_DOCS
 from syncer.policy import Action
@@ -531,6 +533,159 @@ class TestDirtyRefusalMatchesExecute:
         state = _state_for(repo, 'main')
         for action in set(Action) - MUTATING_ACTIONS:
             assert dirty_refusal(action, state, dirty=True) is None, action
+
+
+# ---------- linked worktrees (invariant 9) ---------- #
+
+
+def _worktree_behind(cloned_repo: Path, tmp_path: Path, branch: str = 'wt-branch') -> tuple[Repo, Path]:
+    """A branch checked out in a linked worktree, one commit behind its upstream.
+
+    The exact shape the fast-forward path meets on a machine that uses worktrees at all: from the
+    main checkout the branch is not current, which is the condition _ff_ref reads as 'no tree to
+    disturb'.
+    """
+    _git(cloned_repo, 'push', 'origin', f'main:refs/heads/{branch}')
+    _git(cloned_repo, 'fetch')
+    _git(cloned_repo, 'branch', branch, f'origin/{branch}')
+    worktree = tmp_path / 'linked'
+    _git(cloned_repo, 'worktree', 'add', str(worktree), branch)
+
+    second = tmp_path / 'second'
+    subprocess.run(['git', 'clone', '-b', branch, str(tmp_path / 'remote.git'), str(second)], capture_output=True)
+    _git(second, 'config', 'user.email', 'test@test.com')
+    _git(second, 'config', 'user.name', 'Test')
+    _commit(second, 'remote.txt', 'remote change')
+    _git(second, 'push')
+
+    repo = _make_repo(cloned_repo)
+    repo.fetch_prune()
+    return repo, worktree
+
+
+class TestWorktreeCheckout:
+    """Invariant 9. `is_current` is this checkout's HEAD alone, so a branch a linked worktree
+    holds reads as 'not checked out' — and update-ref is the one mechanism on the menu git does
+    not protect, unlike `branch -f` and `branch -D` which refuse for themselves.
+
+    Left unguarded this moved a live worktree's HEAD while its index stayed at the old commit,
+    so files added by the new commit showed up staged for deletion in a tree syncer never
+    measured the dirtiness of. Proved against real worktrees rather than a mocked ref, because
+    the whole failure was a wrong belief about what git does here.
+    """
+
+    def test_ff_ref_refuses_and_the_worktree_is_untouched(self, cloned_repo, tmp_path):
+        repo, worktree = _worktree_behind(cloned_repo, tmp_path)
+        state = _state_for(repo, 'wt-branch')
+        assert state.primary == PrimaryState.BEHIND
+        before = _git(worktree, 'rev-parse', 'HEAD').stdout.strip()
+
+        outcome = execute(Action.FF_REF, state, repo, POLICY)
+
+        assert outcome.status == 'refused'
+        assert outcome.reason is Refusal.WORKTREE_CHECKOUT
+        assert _git(worktree, 'rev-parse', 'HEAD').stdout.strip() == before
+        # The real damage was never the ref — it was the tree left describing a commit it no
+        # longer pointed at, which a bare HEAD check would not have caught.
+        assert _git(worktree, 'status', '--porcelain').stdout == ''
+
+    def test_fast_forward_inherits_the_refusal(self, cloned_repo, tmp_path):
+        """The intent dispatches to _ff_ref for a non-current branch, so it must not be a way
+        round the guard the mechanism enforces."""
+        repo, worktree = _worktree_behind(cloned_repo, tmp_path)
+        state = _state_for(repo, 'wt-branch')
+        before = _git(worktree, 'rev-parse', 'HEAD').stdout.strip()
+
+        outcome = execute(Action.FAST_FORWARD, state, repo, POLICY)
+
+        assert outcome.status == 'refused'
+        assert outcome.reason is Refusal.WORKTREE_CHECKOUT
+        assert _git(worktree, 'rev-parse', 'HEAD').stdout.strip() == before
+
+    def test_the_report_predicts_the_refusal(self, cloned_repo, tmp_path):
+        """The mirror, for the same reason dirty_refusal has one: `1 behind → fast_forward` on a
+        branch apply will always refuse is an arrow nobody can act on."""
+        repo, _ = _worktree_behind(cloned_repo, tmp_path)
+        state = _state_for(repo, 'wt-branch')
+        assert state.worktree is not None
+        assert worktree_refusal(Action.FF_REF, state) is Refusal.WORKTREE_CHECKOUT
+        assert worktree_refusal(Action.FAST_FORWARD, state) is Refusal.WORKTREE_CHECKOUT
+
+    def test_an_ordinary_non_current_branch_still_fast_forwards(self, cloned_repo, tmp_path):
+        """The guard must cost nothing where no worktree is involved — otherwise it would refuse
+        every non-current branch and disable ff_ref outright."""
+        _git(cloned_repo, 'checkout', '-b', 'feature')
+        _git(cloned_repo, 'push', '-u', 'origin', 'feature')
+        _git(cloned_repo, 'checkout', 'main')
+        _second_clone_pushes(tmp_path)
+        second = tmp_path / 'second'
+        _git(second, 'checkout', '-b', 'feature', 'origin/feature')
+        _commit(second, 'more.txt', 'on feature')
+        _git(second, 'push', 'origin', 'feature')
+
+        repo = _make_repo(cloned_repo)
+        repo.fetch_prune()
+        state = _state_for(repo, 'feature')
+        assert state.worktree is None
+        assert worktree_refusal(Action.FF_REF, state) is None
+        assert execute(Action.FF_REF, state, repo, POLICY).status == 'done'
+
+    def test_unreadable_worktree_list_refuses_rather_than_proceeds(self, cloned_repo, tmp_path):
+        """Cannot-verify has to answer the way that refuses, the same polarity as is_dirty. The
+        opposite reading is what made a failed `git status` mean permission to mutate."""
+        repo, worktree = _worktree_behind(cloned_repo, tmp_path)
+        state = _state_for(repo, 'wt-branch')
+        before = _git(worktree, 'rev-parse', 'HEAD').stdout.strip()
+        repo.__dict__['linked_worktree_branches'] = None  # as if `git worktree list` had failed
+
+        outcome = execute(Action.FF_REF, state, repo, POLICY)
+
+        assert outcome.reason is Refusal.WORKTREE_CHECKOUT
+        assert _git(worktree, 'rev-parse', 'HEAD').stdout.strip() == before
+
+    def test_git_protects_the_other_destructive_paths_itself(self, cloned_repo, tmp_path):
+        """Why only ff_ref carries the guard, established rather than assumed — the reasoning
+        that skipped it for update-ref was 'git would refuse', and for these two that is true."""
+        repo, worktree = _worktree_behind(cloned_repo, tmp_path)
+        assert _git(cloned_repo, 'branch', '-D', 'wt-branch').returncode != 0
+        assert _git(cloned_repo, 'branch', '-f', 'wt-branch', 'origin/wt-branch').returncode != 0
+        assert _git(worktree, 'rev-parse', '--abbrev-ref', 'HEAD').stdout.strip() == 'wt-branch'
+
+
+class TestCheckoutRefusal:
+    """The static current/non-current gate, mirrored for the report. Absent it, mirror's
+    `*:diverged = rebase_push` printed a rebase arrow on every non-current diverged branch and
+    refused all of them at execute time."""
+
+    def test_rebase_push_is_predicted_refused_off_the_current_branch(self, cloned_repo):
+        repo = _make_repo(cloned_repo)
+        state = _state_for(repo, 'main').model_copy(update={'is_current': False})
+        assert checkout_refusal(Action.REBASE_PUSH, state) is Refusal.NOT_CURRENT
+        assert checkout_refusal(Action.PULL_FF, state) is Refusal.NOT_CURRENT
+
+    def test_ff_ref_is_predicted_refused_on_it(self, cloned_repo):
+        repo = _make_repo(cloned_repo)
+        state = _state_for(repo, 'main')
+        assert state.is_current
+        assert checkout_refusal(Action.FF_REF, state) is Refusal.IS_CURRENT
+
+    def test_fast_forward_is_never_gated_on_checkout(self, cloned_repo):
+        """It dispatches between the mechanisms precisely so neither side of the split refuses
+        it, which is why policies name the intent."""
+        repo = _make_repo(cloned_repo)
+        current = _state_for(repo, 'main')
+        assert checkout_refusal(Action.FAST_FORWARD, current) is None
+        assert checkout_refusal(Action.FAST_FORWARD, current.model_copy(update={'is_current': False})) is None
+
+    def test_the_mirror_agrees_with_execute_for_every_action(self, cloned_repo):
+        """Both directions, as the dirty mirror does: a gate that over-predicts puts a refusal on
+        a row apply would have cleared."""
+        repo = _make_repo(cloned_repo)
+        for state in (_state_for(repo, 'main'), _state_for(repo, 'main').model_copy(update={'is_current': False})):
+            for action in MUTATING_ACTIONS:
+                predicted = checkout_refusal(action, state)
+                if predicted is not None:
+                    assert execute(action, state, repo, POLICY).reason is predicted, action
 
 
 # ---------- protected branches (invariant 8) ---------- #

@@ -14,11 +14,13 @@ from syncer.config import resolve_policies
 from syncer.diagnose import Cause
 from syncer.execute import MUTATING_ACTIONS
 from syncer.execute import Outcome
+from syncer.execute import describe_block
 from syncer.execute import protection_refusal
 from syncer.policy import Action
 from syncer.policy import BranchState
 from syncer.policy import Policy
 from syncer.policy import PrimaryState
+from syncer.remedy import Remedy
 from syncer.report import BranchRow
 from syncer.report import RepoBranchReport
 from syncer.report import Severity
@@ -32,6 +34,7 @@ from syncer.report import gather_reports
 from syncer.report import hidden_count
 from syncer.report import render_failure_summary
 from syncer.report import render_hidden_note
+from syncer.report import render_remedy
 from syncer.report import report_branches
 from syncer.report import report_severity
 from syncer.report import visible_reports
@@ -398,6 +401,42 @@ class TestApplyRowsFollowTheSameArrowRule:
         assert 'interactive prompt not implemented (v1)' in _apply_line(row)
 
 
+class TestRemedyRendering:
+    """The commands belong to the row above them, so they render with it on stdout — not through
+    hint(), which writes to stderr for the failure summary, a block about the run rather than
+    about a repo."""
+
+    def _remedy(self):
+        return Remedy(commands=('git -C /repo rebase origin/main',), notes=('feature tracks origin/main.',))
+
+    def test_commands_and_notes_both_render(self, capsys):
+        render_remedy(self._remedy())
+        out = capsys.readouterr().out
+        assert 'git -C /repo rebase origin/main' in out
+        assert 'feature tracks origin/main.' in out
+
+    def test_it_goes_to_stdout_with_its_row(self, capsys):
+        render_remedy(self._remedy())
+        captured = capsys.readouterr()
+        assert captured.err == ''
+        assert captured.out != ''
+
+    def test_an_empty_remedy_prints_nothing(self, capsys):
+        render_remedy(Remedy())
+        assert capsys.readouterr().out == ''
+
+    def test_a_command_is_never_wrapped(self, capsys):
+        """A wrapped command cannot be double-clicked, which is the only thing it is there for."""
+        long_path = '/home/u/' + 'nested/' * 20 + 'repo'
+        render_remedy(Remedy(commands=(f'git -C {long_path} rebase origin/main',)))
+        out = capsys.readouterr().out
+        assert f'git -C {long_path} rebase origin/main' in out
+
+    def test_a_branch_name_with_brackets_survives_rich_markup(self, capsys):
+        render_remedy(Remedy(commands=('git -C /repo branch -d fix[1]',)))
+        assert 'fix[1]' in capsys.readouterr().out
+
+
 class TestProtectedBranchReporting:
     """Protection is static config, so a report-only run can say so. Rendering the decided
     `push` alone would promise a push that --apply is never going to make."""
@@ -405,12 +444,19 @@ class TestProtectedBranchReporting:
     def _row(self, action, protected):
         state = BranchState(branch='develop', primary=PrimaryState.AHEAD, ahead=2, upstream='origin/develop')
         policy = Policy(name='p', protected=protected)
-        return BranchRow(state=state, action=action, blocked=protection_refusal(action, state, policy))
+        blocked = protection_refusal(action, state, policy)
+        return BranchRow(
+            state=state,
+            action=action,
+            blocked=blocked,
+            blocked_message=describe_block(blocked, action, state, policy) if blocked else '',
+        )
 
     def test_report_line_marks_an_action_protection_would_refuse(self):
         line = _branch_line(self._row(Action.PUSH, ['develop']))
         assert 'would refuse' in line
-        assert 'develop' in line
+        # The pattern, not just the branch name: 'protected by "release/*"' says what to edit.
+        assert "'develop'" in line
 
     def test_report_line_is_unchanged_when_nothing_is_protected(self):
         row = self._row(Action.PUSH, [])
@@ -421,7 +467,7 @@ class TestProtectedBranchReporting:
         """It is the guard working as configured. Counting it as an error would paint develop
         red at the bottom of every run forever, which trains you to ignore the bottom."""
         row = self._row(Action.PUSH, ['develop'])
-        row.outcome = Outcome(branch='develop', action=Action.PUSH, status='refused', message=row.blocked or '')
+        row.outcome = Outcome(branch='develop', action=Action.PUSH, status='refused', message=row.blocked_message)
         assert _row_severity(row) == Severity.WARNING
 
     def test_other_refusals_are_still_errors(self):

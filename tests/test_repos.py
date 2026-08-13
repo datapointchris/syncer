@@ -569,6 +569,60 @@ class TestFailureRecording:
         assert 'v1.0.0' in failure.stderr
 
 
+class TestLinkedWorktrees:
+    """Which tree holds a branch, for the guard that stops update-ref moving a ref out from
+    under a live worktree. The repo's own working directory is never one of these — a branch
+    checked out there is `is_current`, which the pipeline already models."""
+
+    def test_the_main_checkout_is_not_reported_as_a_linked_worktree(self, git_repo):
+        repo = _make_repo(git_repo)
+        assert repo.linked_worktree_branches == {}
+        assert repo.worktree_for(repo.current_branch) is None
+        assert repo.held_by_worktree(repo.current_branch) is False
+
+    def test_a_linked_worktree_is_found_by_branch(self, git_repo, tmp_path):
+        _git(git_repo, 'branch', 'side')
+        linked = tmp_path / 'linked'
+        _git(git_repo, 'worktree', 'add', str(linked), 'side')
+        repo = _make_repo(git_repo)
+        assert repo.worktree_for('side') == str(linked)
+        assert repo.held_by_worktree('side') is True
+        assert repo.held_by_worktree('nonexistent') is False
+
+    def test_a_symlinked_repo_path_is_still_recognised_as_its_own(self, git_repo, tmp_path):
+        """`git worktree list` prints fully resolved paths while a registry entry is whatever was
+        typed, so a plain == would read the main checkout as a linked worktree of itself on any
+        machine whose home or /tmp is a symlink."""
+        link = tmp_path / 'via-symlink'
+        link.symlink_to(git_repo)
+        repo = _make_repo(link)
+        assert repo.linked_worktree_branches == {}
+
+    def test_an_unreadable_answer_is_none_not_empty(self, tmp_path):
+        """None and {} mean different things to the two callers: a guard must refuse what it
+        cannot verify, while a hint that stays silent costs nothing. Collapsing them would make
+        'git could not say' read as 'no worktree holds it', i.e. as permission to move the ref."""
+        plain = tmp_path / 'not-a-repo'
+        plain.mkdir()
+        repo = _make_repo(plain)
+        assert repo.linked_worktree_branches is None
+        assert repo.worktree_for('side') is None
+        assert repo.held_by_worktree('side') is True
+
+    def test_the_answer_is_read_once_per_repo(self, git_repo, tmp_path):
+        """Every branch asks the same question of an answer that cannot change mid-run, and a
+        registry of eighty repos pays for it once each."""
+        _git(git_repo, 'branch', 'side')
+        _git(git_repo, 'worktree', 'add', str(tmp_path / 'linked'), 'side')
+        repo = _make_repo(git_repo)
+        calls = []
+        original = repo._git
+        repo._git = lambda *args, **kwargs: (calls.append(args), original(*args, **kwargs))[1]
+        for _ in range(3):
+            repo.held_by_worktree('side')
+        assert [args for args in calls if args[:2] == ('worktree', 'list')] == [('worktree', 'list', '--porcelain')]
+
+
 class TestUnknownIsNotClean:
     """Invariant 2 gates on this. A failing `git status` returning [] read as a clean tree —
     i.e. as permission to mutate — which is the wrong direction for a safety check."""
