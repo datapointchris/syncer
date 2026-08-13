@@ -1,6 +1,28 @@
 # CHANGELOG
 
 
+## v11.0.1 (2026-08-13)
+
+### Bug Fixes
+
+- **config**: Refuse a top-level key syncer does not read
+  ([`f704cb8`](https://github.com/datapointchris/syncer/commit/f704cb8052510685977b9385bfe97ac6b05b85f5))
+
+A key inside a policies table was already refused; the top level was not, and that was the half that
+  mattered. repos_file became repos_registry on 2026-08-13, and until now a machine still carrying
+  the old spelling read as one that had declared nothing — syncer fell through to its own data
+  directory and reported an empty registry, which is indistinguishable from having one.
+
+The registry stays tolerant and deliberately so: SyncerConfig ignores fields it has no use for,
+  because the exemplar registry carries several and the file is shared with other readers. A tool's
+  own config is the opposite case — nothing else writes it, so an unread key is a mistake rather
+  than someone else's field.
+
+The key set is declared rather than derived from the model. parse_tool_config reads each one by name
+  and pydantic ignores what it is not handed, so deriving it would turn a key dropped from that call
+  into an unknown one instead of an unread one.
+
+
 ## v11.0.0 (2026-08-13)
 
 ### Features
