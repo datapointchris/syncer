@@ -1,6 +1,41 @@
 # CHANGELOG
 
 
+## v11.0.0 (2026-08-13)
+
+### Features
+
+- Resolve the registry in three SYNCER_ rungs
+  ([`1045cc1`](https://github.com/datapointchris/syncer/commit/1045cc1f863fdb5bde5f3d9cd26a9e46abfeea6f))
+
+The registry now resolves as $SYNCER_REPOS_REGISTRY, then repos_registry in config.toml, then
+  syncer's own default, with -c/--repos-file above all three. Every rung is syncer's own, and syncer
+  reads no variable that is not prefixed SYNCER_.
+
+The unprefixed $REPOS_JSON rung is deleted rather than renamed. It was exported from ~/.env, which a
+  process that sources no profile never sees: run the way a systemd timer runs it, the variable was
+  absent and the tool fell through to a default registry that was not there, exiting 0 on a report
+  of nothing. The rung was empty in exactly the unattended runs it existed to serve, and config.toml
+  is already the machine layer that reaches every process.
+
+Renaming it to $SYNCER_REPOS_JSON was rejected: the tool has no variable of its own today, so an ad
+  hoc override means editing the machine's config and putting it back. The new variable sits above
+  the config for that reason — the variable is this shell, the config is this machine.
+
+The config key is repos_registry to match, so the key and the variable name one thing rather than
+  two.
+
+BREAKING CHANGE: the config.toml key `repos_file` is now `repos_registry`, and $REPOS_JSON is no
+  longer consulted. A machine keeping its registry outside ~/.config/syncer/repos.json must name it
+  in config.toml under the new key, or export $SYNCER_REPOS_REGISTRY.
+
+### Breaking Changes
+
+- The config.toml key `repos_file` is now `repos_registry`, and $REPOS_JSON is no longer consulted.
+  A machine keeping its registry outside ~/.config/syncer/repos.json must name it in config.toml
+  under the new key, or export $SYNCER_REPOS_REGISTRY.
+
+
 ## v10.3.0 (2026-08-12)
 
 ### Bug Fixes
