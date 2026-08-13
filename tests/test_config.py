@@ -496,6 +496,19 @@ class TestPolicyPatching:
             parse_tool_config(tomllib.loads(tool_config.read_text()))
         assert any('extends' in line for line in exc.value.problems)
 
+    def test_a_top_level_key_syncer_does_not_read_is_an_error(self):
+        """The half that mattered and the half left open. `repos_file` became `repos_registry`
+        on 2026-08-13, and a machine still carrying the old spelling read as one that had
+        declared nothing — syncer fell to its own data directory and reported an empty registry,
+        which is indistinguishable from having one."""
+        with pytest.raises(ConfigError) as exc:
+            parse_tool_config(tomllib.loads('repos_file = "~/dev/repos.json"\n'))
+        assert any('repos_file' in line for line in exc.value.problems)
+
+    def test_the_keys_syncer_does_read_are_not_refused(self):
+        """The guard is a denylist by omission, so it fails closed on a key that is real."""
+        parse_tool_config(tomllib.loads('repos_registry = "~/r.json"\ndefault_policy = "standard"\ngit_timeout = 60\n'))
+
     def test_extending_an_unknown_policy_names_both(self, tool_config):
         with pytest.raises(ConfigError) as exc:
             parse_tool_config(tomllib.loads('[policies.tidy]\nextend = "nope"\n'))

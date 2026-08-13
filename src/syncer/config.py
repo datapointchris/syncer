@@ -461,6 +461,12 @@ def _build_policies(raw_policies: dict[str, Any], bases: dict[str, str] | None =
     return resolved
 
 
+# Every key this file may carry. Declared rather than inferred from the model, because the
+# construction below reads each one by name and pydantic ignores what it is not handed —
+# so a key dropped from that call would silently become "unknown" rather than unread.
+_TOOL_CONFIG_KEYS = frozenset({'repos_registry', 'default_policy', 'policies', 'repo_overrides', 'git_timeout'})
+
+
 def parse_tool_config(raw: dict[str, Any]) -> ToolConfig:
     """Build a ToolConfig from parsed TOML, injecting each policy's name from its table key.
 
@@ -468,7 +474,18 @@ def parse_tool_config(raw: dict[str, Any]) -> ToolConfig:
     through the same construction the real load does, rather than a second approximation of it.
     Policies are built one at a time so a bad rule reports which policy it is in — pydantic's
     own error names only `rules`, which is no help in a file holding several.
+
+    A key syncer does not read is refused, the way one inside a `policies` table already was.
+    The top level was the half that mattered and the half left open: `repos_file` was renamed to
+    `repos_registry` on 2026-08-13, and until this a machine still carrying the old spelling read
+    as a machine that had declared nothing — syncer fell to its own data directory and reported an
+    empty registry, which is indistinguishable from having one.
     """
+    unknown = sorted(set(raw) - _TOOL_CONFIG_KEYS)
+    if unknown:
+        known = ', '.join(sorted(_TOOL_CONFIG_KEYS))
+        raise ConfigError([f'unknown key {key!r}; known: {known}' for key in unknown])
+
     bases: dict[str, str] = {}
     policies = _build_policies(raw.get('policies', {}), bases)
 
