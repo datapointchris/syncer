@@ -76,9 +76,9 @@ class TestTemplateRoundTrip:
         made the first-ever run print three bogus `would clone` lines."""
         assert 'policies' not in STARTER_TOOL_CONFIG
         assert 'repo_overrides' not in STARTER_TOOL_CONFIG
-        # Not even commented out: repos_file is the one setting whose wrong value fails every run
-        # outright, and a shared config.toml naming a path one machine lacks is a real incident.
-        assert 'repos_file' not in STARTER_TOOL_CONFIG
+        # Not even commented out: repos_registry is the one setting whose wrong value fails every
+        # run outright, and a shared config.toml naming a path one machine lacks is a real incident.
+        assert 'repos_registry' not in STARTER_TOOL_CONFIG
         assert json.loads(STARTER_REGISTRY)['repos'] == []
 
     def test_template_documents_every_state_and_action(self):
@@ -116,17 +116,17 @@ class TestConfigInit:
         assert (config_home / 'config.toml').read_text() == 'default_policy = "observe"\n'
         assert (config_home / 'repos.json').read_text() == '{"owner": "me", "repos": []}'
 
-    def test_creates_the_registry_where_repos_file_points(self, config_home, tmp_path):
+    def test_creates_the_registry_where_repos_registry_points(self, config_home, tmp_path):
         """The scaffold lands at the path syncer will actually read, not at the default — a
         registry created anywhere else is a file nothing loads."""
         elsewhere = tmp_path / 'shared' / 'registry.json'
-        _write(config_home / 'config.toml', f'repos_file = "{elsewhere}"\n')
+        _write(config_home / 'config.toml', f'repos_registry = "{elsewhere}"\n')
         result = runner.invoke(app, ['config', 'init', 'registry'])
         assert result.exit_code == 0
         assert elsewhere.read_text() == STARTER_REGISTRY
         assert not (config_home / 'repos.json').exists()
         # The provenance is the answer to "why is it looking there", so it rides on the message.
-        assert 'repos_file' in result.output
+        assert 'repos_registry' in result.output
 
     def test_the_config_it_just_wrote_names_the_registry_path(self, config_home, tmp_path):
         """Resolution order matters within one invocation: reading the tool config before writing
@@ -339,9 +339,9 @@ class TestConfigEdit:
 
     def test_it_opens_the_registry_syncer_actually_reads(self, config_home, fake_editor, tmp_path):
         """Resolved through registry_location, not an assumed default — the two differ on every
-        machine that sets repos_file, and editing the wrong file changes nothing."""
+        machine that sets repos_registry, and editing the wrong file changes nothing."""
         elsewhere = tmp_path / 'shared' / 'registry.json'
-        _write(config_home / 'config.toml', f'repos_file = "{elsewhere}"\n')
+        _write(config_home / 'config.toml', f'repos_registry = "{elsewhere}"\n')
         assert runner.invoke(app, ['config', 'edit', 'registry']).exit_code == 0
         assert fake_editor.read_text().strip() == str(elsewhere)
 
@@ -441,10 +441,10 @@ class TestConfigValidate:
         assert result.exit_code == 1
         assert 'repo_overrides.some-repo' in result.output
 
-    def test_repos_file_must_exist(self, config_home, tmp_path):
-        result = self._run(config_home, f'repos_file = "{tmp_path / "absent.json"}"\n')
+    def test_repos_registry_must_exist(self, config_home, tmp_path):
+        result = self._run(config_home, f'repos_registry = "{tmp_path / "absent.json"}"\n')
         assert result.exit_code == 1
-        assert 'repos_file' in result.output
+        assert 'repos_registry' in result.output
 
     def test_malformed_registry_json(self, config_home):
         result = self._run(config_home, registry='{not json')
@@ -485,10 +485,10 @@ class TestConfigValidate:
         assert result.exit_code == 1
         assert 'config init registry' in result.output
 
-    def test_unreachable_repos_file_says_how_to_fall_back(self, config_home, tmp_path):
+    def test_unreachable_repos_registry_says_how_to_fall_back(self, config_home, tmp_path):
         """The work-box case: a config naming a registry this machine does not have. Reporting
         only the missing path leaves the reader with no way out of it."""
-        result = self._run(config_home, f'repos_file = "{tmp_path / "elsewhere.json"}"\n')
+        result = self._run(config_home, f'repos_registry = "{tmp_path / "elsewhere.json"}"\n')
         assert result.exit_code == 1
         assert 'comment it out' in result.output
 

@@ -35,7 +35,7 @@ CONFIG_DIR = xdg_config_home() / 'syncer'
 TOOL_CONFIG_PATH = CONFIG_DIR / 'config.toml'
 
 # Registry location when config.toml names none. Deliberately a syncer-owned path: sharing one
-# registry with other tools is an arrangement between them, so it belongs in repos_file on the
+# registry with other tools is an arrangement between them, so it belongs in repos_registry on the
 # machines that want it — never in the default.
 DEFAULT_REPOS_FILE = CONFIG_DIR / 'repos.json'
 
@@ -67,7 +67,7 @@ STARTER_TOOL_CONFIG = """\
 default_policy = "standard"
 """
 
-# No `repos_file` line, not even commented out. It is the one setting whose correct value differs
+# No `repos_registry` line, not even commented out. It is the one setting whose correct value differs
 # per machine and whose wrong value fails every run outright rather than degrading — a config
 # deployed from a shared source pointed one machine at a directory that only existed on another.
 # A scaffold should not put the idea in front of someone unprompted.
@@ -90,7 +90,8 @@ TEMPLATE_TOOL_CONFIG = """\
 # file `syncer config init` scaffolds. Point it elsewhere only when another tool reads the same
 # registry, in which case every machine that has that file names the shared path here — a machine
 # without it must leave this commented out, or every run fails on a path it cannot have.
-# repos_file = "~/shared/repos.json"
+# $SYNCER_REPOS_REGISTRY overrides this for one run, and -c/--repos-file overrides both.
+# repos_registry = "~/shared/repos.json"
 
 # Policy for any repo that names no other. Built-ins: standard, observe, mirror.
 default_policy = "standard"
@@ -300,7 +301,7 @@ class ToolConfig(BaseModel):
     repo can sync aggressively on an always-on box and report-only on a laptop.
     """
 
-    repos_file: str | None = None
+    repos_registry: str | None = None
     default_policy: str = 'standard'
     policies: dict[str, Policy] = {}
     # policy name -> the policy it was merged onto, for `policy show` to mark which rules a patch
@@ -473,7 +474,7 @@ def parse_tool_config(raw: dict[str, Any]) -> ToolConfig:
 
     try:
         return ToolConfig(
-            repos_file=raw.get('repos_file'),
+            repos_registry=raw.get('repos_registry'),
             default_policy=raw.get('default_policy', 'standard'),
             policies=policies,
             policy_bases=bases,
@@ -588,7 +589,7 @@ class RegistryLocation(NamedTuple):
     """A resolved registry path plus why syncer is looking there.
 
     The provenance travels with the path because the path alone is not enough to act on: a
-    machine that inherits a `repos_file` naming a directory it does not have reads as syncer
+    machine that inherits a `repos_registry` naming a directory it does not have reads as syncer
     hard-coding someone else's layout, and no message said which file chose the path.
     """
 
@@ -603,25 +604,30 @@ def registry_source_note(source: str | None) -> str:
 
 
 def registry_location(tool_config: ToolConfig, override: Path | None = None) -> RegistryLocation:
-    """Resolve the registry path: --repos-file, then config.toml's repos_file, then $REPOS_JSON,
-    then the default.
+    """Resolve the registry path: --repos-file, then $SYNCER_REPOS_REGISTRY, then config.toml's
+    repos_registry, then the default.
 
     Takes an already-loaded ToolConfig so `config validate` can resolve the registry from the
     config it just parsed and diagnosed, instead of loading the same broken file a second time.
 
-    $REPOS_JSON is the machine-wide answer every reader of the registry consults, so a machine
-    declares the path once rather than repeating it in each tool's config. It sits below the
-    config, so naming a different registry for syncer alone still works, and above the default,
-    so an unset value is the only route to syncer's own directory. Only a declared variable
-    belongs at this layer — an undeclared one resolves to nothing and silently sends the tool to
-    its default, which is the failure the config key exists to prevent.
+    Every rung is syncer's own, and syncer reads no variable that is not prefixed `SYNCER_`. An
+    unprefixed $REPOS_JSON used to sit between the config key and the default, so that a machine
+    could name the shared registry once for every tool that reads it. It came out because it was
+    exported from ~/.env, which a process that sources no profile never sees: run the way a
+    systemd timer runs it, the variable was absent and the tool resolved a default registry that
+    was not there. The rung was empty in exactly the unattended runs it existed to serve, and
+    config.toml is already the machine layer — it reaches every process.
+
+    The variable that replaced it sits *above* the config rather than below, because the layers
+    answer different questions: the variable is this shell and the config is this machine. A
+    one-off run against another registry should not need the config edited and put back.
     """
     if override is not None:
         return RegistryLocation(override.expanduser(), 'the --repos-file flag')
-    if tool_config.repos_file:
-        return RegistryLocation(Path(tool_config.repos_file).expanduser(), f'repos_file in {TOOL_CONFIG_PATH}')
-    if declared := os.environ.get('REPOS_JSON'):
-        return RegistryLocation(Path(declared).expanduser(), '$REPOS_JSON')
+    if declared := os.environ.get('SYNCER_REPOS_REGISTRY'):
+        return RegistryLocation(Path(declared).expanduser(), '$SYNCER_REPOS_REGISTRY')
+    if tool_config.repos_registry:
+        return RegistryLocation(Path(tool_config.repos_registry).expanduser(), f'repos_registry in {TOOL_CONFIG_PATH}')
     return RegistryLocation(DEFAULT_REPOS_FILE)
 
 

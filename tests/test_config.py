@@ -93,14 +93,14 @@ class TestLoadToolConfig:
     def test_missing_config_returns_defaults(self, tool_config):
         # tool_config fixture monkeypatches the path but doesn't write it
         loaded = load_tool_config()
-        assert loaded.repos_file is None
+        assert loaded.repos_registry is None
         assert loaded.default_policy == 'standard'
         assert loaded.policies == {}
 
-    def test_parses_repos_file_and_default_policy(self, tool_config):
-        tool_config.write_text('repos_file = "~/registries/repos.json"\ndefault_policy = "observe"\n')
+    def test_parses_repos_registry_and_default_policy(self, tool_config):
+        tool_config.write_text('repos_registry = "~/registries/repos.json"\ndefault_policy = "observe"\n')
         loaded = load_tool_config()
-        assert loaded.repos_file == '~/registries/repos.json'
+        assert loaded.repos_registry == '~/registries/repos.json'
         assert loaded.default_policy == 'observe'
 
     def test_parses_custom_policy_with_injected_name(self, tool_config):
@@ -273,8 +273,8 @@ class TestLoadReposFile:
         """A path this machine never had is the common failure, and the actionable half of it is
         which file named the path — not that the file is absent."""
         with pytest.raises(SystemExit):
-            _load_repos_file(repos_file, 'repos_file in /somewhere/config.toml')
-        assert 'repos_file in /somewhere/config.toml' in capsys.readouterr().err
+            _load_repos_file(repos_file, 'repos_registry in /somewhere/config.toml')
+        assert 'repos_registry in /somewhere/config.toml' in capsys.readouterr().err
 
     def test_repos_sorted_by_path(self, repos_file, sample_config):
         repos_file.write_text(json.dumps(sample_config))
@@ -285,11 +285,11 @@ class TestLoadReposFile:
 
 class TestGetReposFilePath:
     def test_reads_from_tool_config(self, tool_config, repos_file):
-        tool_config.write_text(f'repos_file = "{repos_file}"\n')
+        tool_config.write_text(f'repos_registry = "{repos_file}"\n')
         assert get_repos_file_path() == repos_file
 
     def test_explicit_override_wins(self, tool_config, repos_file, tmp_path):
-        tool_config.write_text(f'repos_file = "{repos_file}"\n')
+        tool_config.write_text(f'repos_registry = "{repos_file}"\n')
         other = tmp_path / 'work-repos.json'
         assert get_repos_file_path(other) == other
 
@@ -308,36 +308,53 @@ class TestRegistryLocation:
     def test_default_has_no_source(self, tool_config):
         assert registry_location(ToolConfig()).source is None
 
-    def test_repos_file_names_the_config_that_set_it(self, tool_config, repos_file):
-        location = registry_location(ToolConfig(repos_file=str(repos_file)))
+    def test_repos_registry_names_the_config_that_set_it(self, tool_config, repos_file):
+        location = registry_location(ToolConfig(repos_registry=str(repos_file)))
         assert location.path == repos_file
-        assert 'repos_file' in location.source
+        assert 'repos_registry' in location.source
         assert str(tool_config) in location.source
 
     def test_the_flag_names_itself(self, tool_config, repos_file, tmp_path):
-        location = registry_location(ToolConfig(repos_file=str(repos_file)), tmp_path / 'work.json')
+        location = registry_location(ToolConfig(repos_registry=str(repos_file)), tmp_path / 'work.json')
         assert location.path == tmp_path / 'work.json'
         assert '--repos-file' in location.source
 
-    def test_the_declared_variable_answers_when_the_config_does_not(self, tool_config, tmp_path, monkeypatch):
-        """One machine declares the registry once; every tool that reads it consults the same name."""
-        monkeypatch.setenv('REPOS_JSON', str(tmp_path / 'declared.json'))
+    def test_the_syncer_variable_answers_when_the_config_does_not(self, tool_config, tmp_path, monkeypatch):
+        """An ad hoc override that does not require editing the config and putting it back."""
+        monkeypatch.setenv('SYNCER_REPOS_REGISTRY', str(tmp_path / 'declared.json'))
         location = registry_location(ToolConfig())
         assert location.path == tmp_path / 'declared.json'
-        assert location.source == '$REPOS_JSON'
+        assert location.source == '$SYNCER_REPOS_REGISTRY'
 
-    def test_the_config_beats_the_declared_variable(self, tool_config, repos_file, tmp_path, monkeypatch):
-        """Naming a different registry for syncer alone has to keep working."""
-        monkeypatch.setenv('REPOS_JSON', str(tmp_path / 'declared.json'))
-        location = registry_location(ToolConfig(repos_file=str(repos_file)))
-        assert location.path == repos_file
-        assert 'repos_file' in location.source
+    def test_the_variable_beats_the_config(self, tool_config, repos_file, tmp_path, monkeypatch):
+        """The rungs answer different questions: the variable is this shell, the config is this
+        machine, so one run against another registry cannot need the machine's config changed."""
+        monkeypatch.setenv('SYNCER_REPOS_REGISTRY', str(tmp_path / 'declared.json'))
+        location = registry_location(ToolConfig(repos_registry=str(repos_file)))
+        assert location.path == tmp_path / 'declared.json'
+        assert location.source == '$SYNCER_REPOS_REGISTRY'
+
+    def test_the_flag_beats_the_variable(self, tool_config, tmp_path, monkeypatch):
+        monkeypatch.setenv('SYNCER_REPOS_REGISTRY', str(tmp_path / 'declared.json'))
+        location = registry_location(ToolConfig(), tmp_path / 'work.json')
+        assert location.path == tmp_path / 'work.json'
+        assert '--repos-file' in location.source
+
+    def test_the_unprefixed_variable_is_never_consulted(self, tool_config, tmp_path, monkeypatch):
+        """syncer reads no variable that is not prefixed SYNCER_. $REPOS_JSON was a rung here and
+        came out: it is exported from ~/.env, which a process that sources no profile never sees,
+        so the layer was empty in exactly the unattended runs it existed to serve."""
+        monkeypatch.setenv('REPOS_JSON', str(tmp_path / 'shared.json'))
+        monkeypatch.setattr('syncer.config.DEFAULT_REPOS_FILE', tmp_path / 'syncer' / 'repos.json')
+        location = registry_location(ToolConfig())
+        assert location.path == tmp_path / 'syncer' / 'repos.json'
+        assert location.source is None
 
 
 class TestResolveConfig:
     def test_resolve_via_tool_config(self, tool_config, repos_file, sample_config):
         repos_file.write_text(json.dumps(sample_config))
-        tool_config.write_text(f'repos_file = "{repos_file}"\n')
+        tool_config.write_text(f'repos_registry = "{repos_file}"\n')
         config = resolve_config()
         assert config.owner == 'testuser'
 

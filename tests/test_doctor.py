@@ -64,10 +64,10 @@ class TestPrerequisiteOrder:
         assert any('registry' in line for line in paths.detail)
 
     def test_the_registry_path_carries_its_provenance(self, isolated):
-        (isolated / 'config.toml').write_text('repos_file = "/nowhere/repos.json"\n')
+        (isolated / 'config.toml').write_text('repos_registry = "/nowhere/repos.json"\n')
         checks = run_doctor()
         [paths] = _named(checks, 'paths')
-        assert any('from repos_file' in line for line in paths.detail)
+        assert any('from repos_registry' in line for line in paths.detail)
 
     def test_a_broken_config_is_named_not_raised(self, isolated):
         """load_tool_config sys.exits on a bad file; a diagnostic must not become the crash it

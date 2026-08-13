@@ -191,7 +191,7 @@ current/non-current split needs the same treatment.
 
 ## Config: two files, deliberately split
 
-- **`repos.json`** (default `$XDG_CONFIG_HOME/syncer/repos.json`, repointed by `repos_file` in
+- **`repos.json`** (default `$XDG_CONFIG_HOME/syncer/repos.json`, repointed by `repos_registry` in
   `config.toml`) — the repo **identity registry**: `owner`, `host`, `search_paths`,
   `exclude_paths`, and per-repo `{name, path, status, description, owner?, sync_policy?,
   toolchain?}`. Portable across machines. **syncer never modifies one that holds repos** — it is
@@ -202,14 +202,14 @@ current/non-current split needs the same treatment.
   the last one to clobber silently. A tool that can only tell you to hand-write a file whose shape
   it already knows, from data already on disk, has pushed its own job onto the reader.
 
-  A registry can be shared with other tools by pointing `repos_file` at a common location. That
+  A registry can be shared with other tools by pointing `repos_registry` at a common location. That
   sharing is an arrangement between those tools, **never a syncer fact** — the default must stay a
   syncer-owned XDG path, so a machine that has never heard of that location still works. Nothing
   shipped in this repo may *recommend* a specific shared path either: the tool-config template used
   to name one and say every machine points here, which reads as an instruction rather than an
   example, and a `config.toml` deployed from a shared source then pointed a machine at a registry
   that only ever existed on another. `config.toml` is machine-local in the operational sense, not
-  just by convention: `repos_file` is the one setting whose correct value differs per machine and
+  just by convention: `repos_registry` is the one setting whose correct value differs per machine and
   whose wrong value fails every run outright rather than degrading, so that file must never be
   distributed from a shared source.
 
@@ -248,8 +248,22 @@ current/non-current split needs the same treatment.
   is never reported as untracked. `~/code/refs` belongs to the exemplar registry and `~/code/1904labs`
   belongs to no personal registry at all.
 - **`config.toml`** (`$XDG_CONFIG_HOME/syncer/config.toml`) — **machine-local** tool config:
-  `repos_file` pointer, `default_policy`, custom `[policies.*]`, `[repo_overrides]`, and
+  `repos_registry` pointer, `default_policy`, custom `[policies.*]`, `[repo_overrides]`, and
   `git_timeout`.
+
+**Three rungs, all syncer's own, and `-c/--repos-file` beats every one**: `$SYNCER_REPOS_REGISTRY`
+(this shell), `repos_registry` in `config.toml` (this machine), then `DEFAULT_REPOS_FILE`. syncer
+reads **no variable that is not prefixed `SYNCER_`** — that prefix rule is the invariant, and it is
+what stops one fleet's vocabulary being compiled into a generic tool.
+
+An unprefixed `$REPOS_JSON` used to sit between the config key and the default, so a machine could
+name a shared registry once for every tool that reads it. It came out because it was exported from
+`~/.env`, which a process that sources no profile never sees — `systemctl --user show-environment`
+has no `REPOS_JSON`. Run the way a timer runs it, the rung was empty and the tool fell through to a
+default registry that was not there, so the layer was missing in exactly the unattended runs it
+existed to serve. `config.toml` is already the machine layer and it reaches every process.
+`TestRegistryLocation` asserts the variable is never consulted; re-adding it re-breaks unattended
+runs on every machine that keeps its registry outside syncer's own directory.
 
 **Scaffolding and teaching are separate, on purpose.** `config.py` holds two pairs: `STARTER_*`,
 which `config init` **writes**, and `TEMPLATE_*`, which `config example` **prints**.
@@ -261,7 +275,7 @@ byte-for-byte the file `init` writes. The cost was observed, not theoretical: `i
 run printed three `would clone` lines for repos that never existed. **A scaffold must have nothing
 in it to delete**; a reference must have everything. Those are different documents.
 
-`STARTER_TOOL_CONFIG` is three lines and deliberately contains no `repos_file`, *not even
+`STARTER_TOOL_CONFIG` is three lines and deliberately contains no `repos_registry`, *not even
 commented out* — it is the one setting whose correct value differs per machine and whose wrong
 value fails every run outright rather than degrading, so a scaffold must not put the idea in front
 of someone unprompted. `STARTER_REGISTRY` has `"repos": []`.

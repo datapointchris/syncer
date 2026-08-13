@@ -103,7 +103,7 @@ def _git_present() -> Check:
 def _paths(tool_config: ToolConfig, override: Path | None) -> Check:
     """Always OK — this is context, not a verdict.
 
-    It is also the single most valuable line on a broken machine: a `repos_file` inherited from
+    It is also the single most valuable line on a broken machine: a `repos_registry` inherited from
     a shared config pointed one machine at a directory that only existed on another, and nothing
     in syncer's output named what had chosen the path, so the tool looked like it had someone
     else's layout hard-coded.

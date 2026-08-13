@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import pytest
 
-# Every variable syncer consults that names a file outside its own directories. A machine
-# that runs syncer exports these, so a test relying on the built-in default silently reads
-# the developer's real registry instead of the temp one it built.
+# Every variable that can name a registry outside syncer's own directories. A machine that runs
+# syncer exports these, so a test relying on the built-in default silently reads the developer's
+# real registry instead of the temp one it built.
 #
-# Measured when $REPOS_JSON was added to registry_location: 31 tests failed at once, and the
-# reports were plausible rather than obviously wrong — `doctor` passed against 80 real repos
-# where the test expected a missing registry. The suite had no environment isolation at all
+# Measured when an environment rung was first added to registry_location: 31 tests failed at once,
+# and the reports were plausible rather than obviously wrong — `doctor` passed against 80 real
+# repos where the test expected a missing registry. The suite had no environment isolation at all
 # until then, which held only because syncer had no environment layer to leak.
-SHARED_PATH_VARS = ('REPOS_JSON',)
+#
+# REPOS_JSON stays in the list although nothing reads it any more. Machines still export it, so
+# clearing it keeps a rung re-added by accident from quietly reading the real registry;
+# TestRegistryLocation is what catches the rung itself.
+SHARED_PATH_VARS = ('SYNCER_REPOS_REGISTRY', 'REPOS_JSON')
 
 
 @pytest.fixture(autouse=True)

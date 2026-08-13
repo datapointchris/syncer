@@ -90,12 +90,14 @@ Two files, deliberately split. `syncer config path` prints where both resolve to
 **`~/.config/syncer/config.toml`** — machine-local tool config: which registry to read, the default policy, custom policies, per-repo overrides, and the git timeout. `syncer config init` writes a three-line starter with nothing in it to delete; `syncer config example config` prints a fully annotated one showing every option. That annotated version carries a worked example policy named `laptop` — a teaching device, not a built-in, however much `syncer policy list` would make it look like one if you kept it.
 
 ```toml
-# repos_file = "~/shared/repos.json"  # defaults to ~/.config/syncer/repos.json
+# repos_registry = "~/shared/repos.json"  # defaults to ~/.config/syncer/repos.json
 default_policy = "standard"
-git_timeout = 120                     # ceiling on a single git call; clones get 5x this
+git_timeout = 120                        # ceiling on a single git call; clones get 5x this
 ```
 
-`repos_file` is worth setting only when another tool reads the same registry file, and then only on the machines that have it. Because it is machine-local, this file is the one thing that must **not** be shared between machines: a config naming a path only some of them have makes every run there fail on a registry that was never going to exist. Any message about a missing registry names what chose the path — `(from repos_file in ~/.config/syncer/config.toml)` — and offers both exits, creating one there or dropping the pointer.
+`repos_registry` is worth setting only when another tool reads the same registry file, and then only on the machines that have it. Because it is machine-local, this file is the one thing that must **not** be shared between machines: a config naming a path only some of them have makes every run there fail on a registry that was never going to exist. Any message about a missing registry names what chose the path — `(from repos_registry in ~/.config/syncer/config.toml)` — and offers both exits, creating one there or dropping the pointer.
+
+The registry resolves in three rungs, and `-c/--repos-file` beats all of them: `$SYNCER_REPOS_REGISTRY` for this shell, `repos_registry` for this machine, then syncer's own `~/.config/syncer/repos.json`. Syncer reads no variable that is not prefixed `SYNCER_` — an unprefixed one shared between tools is invisible to any run that sources no profile, which is every unattended one.
 
 **`~/.config/syncer/repos.json`** — the repo registry, portable between machines. `syncer config init registry` writes an annotated one; `syncer config example registry` prints it without writing.
 

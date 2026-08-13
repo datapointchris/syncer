@@ -369,7 +369,7 @@ def config_edit(
     _requested_files(which)
     if which == 'registry':
         # Resolved through registry_location so this opens what syncer actually reads, not an
-        # assumed default — the two differ on every machine that sets repos_file.
+        # assumed default — the two differ on every machine that sets repos_registry.
         location = registry_location(load_tool_config(), repos_file)
         target = location.path
         if not target.exists():
@@ -441,11 +441,11 @@ def _validate_tool_config(problems: list[str]) -> ToolConfig:
     for repo_name, policy_name in tool_config.repo_overrides.items():
         if policy_name not in known:
             problems.append(f'repo_overrides.{repo_name}: unknown policy {policy_name!r}')
-    if tool_config.repos_file and not Path(tool_config.repos_file).expanduser().exists():
+    if tool_config.repos_registry and not Path(tool_config.repos_registry).expanduser().exists():
         # The likely cause is a config copied from a machine that has the shared registry onto one
         # that does not, so the message names the way out rather than only the missing path.
         problems.append(
-            f'repos_file: no such file: {Path(tool_config.repos_file).expanduser()}'
+            f'repos_registry: no such file: {Path(tool_config.repos_registry).expanduser()}'
             f" — comment it out to use this machine's own registry at {DEFAULT_REPOS_FILE}"
         )
     return tool_config
