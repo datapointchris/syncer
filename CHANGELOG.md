@@ -1,6 +1,28 @@
 # CHANGELOG
 
 
+## v11.1.1 (2026-08-16)
+
+### Bug Fixes
+
+- **execute**: Refuse a worktree-held delete, and stop refusing one on a dirty tree
+  ([`c5b1059`](https://github.com/datapointchris/syncer/commit/c5b10594a2278ce3f04b23ecc1e438edf6d34639))
+
+delete_local inherited git's refusal of `branch -D` for a branch a linked worktree holds. git
+  returns that as a failure carrying prose, so the outcome was `failed` with no key on it, and the
+  reporter — which runs no git — could not predict it at all. A worktree-per-branch repo printed
+  `gone -> delete_local` on every merged branch apply was always going to bounce.
+
+The dirty guard on the same action protected nothing. Uncommitted changes belong to a tree, never to
+  a branch, so a dirty tree is no evidence about the ref being deleted; `branch -D` on a branch
+  checked out nowhere reads and writes no tree. It made every merged branch in a repo with work in
+  progress uncollectable, which on a repo somebody works in daily is permanently.
+
+Both remedies were wrong for the rows they landed on. The dirty one named the worktree, where
+  `status` prints nothing, while the tree syncer measured is the repo's own. The worktree one said
+  `merge --ff-only`, which advances nothing on a branch whose remote is gone.
+
+
 ## v11.1.0 (2026-08-13)
 
 ### Features
