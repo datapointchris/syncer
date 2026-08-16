@@ -1,6 +1,24 @@
 # CHANGELOG
 
 
+## v11.2.1 (2026-08-16)
+
+### Bug Fixes
+
+- **report**: Write remedy paths under $HOME the way the row header writes them
+  ([`4648e31`](https://github.com/datapointchris/syncer/commit/4648e31db3f58a12107c074725f04b086672c114))
+
+The registry stores ~/dotfiles and the header prints that, while a remedy was built from the
+  expanded path, so one block spelled the same directory two ways. The long form put 'git -C <repo>
+  worktree remove <worktree>' past 90 columns. soft_wrap stops Rich breaking the line but nothing
+  stops the terminal, and a command that wraps is one that gets half-copied -- which cost the
+  leading git, after which the shell found a different worktree on PATH and called the subcommand
+  invalid.
+
+Display only. Nothing joins on these strings, and every path a guard uses is resolved from git at
+  write time.
+
+
 ## v11.2.0 (2026-08-16)
 
 ### Features
