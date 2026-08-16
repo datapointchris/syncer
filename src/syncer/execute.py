@@ -7,20 +7,24 @@ independent of any policy:
 
 1. Never --force / -f / --force-with-lease (no such argv is ever constructed).
 2. Never mutate a branch whose working tree is dirty — or whose cleanliness cannot be verified.
-   `git status` failing used to read as a clean tree, i.e. as permission to mutate.
+   `git status` failing used to read as a clean tree, i.e. as permission to mutate. The exemptions
+   are the actions that touch no tree at all (_TREE_INDEPENDENT), each refusing under invariant 9
+   first so that "checked out nowhere" is verified rather than assumed.
 3. fast_forward / pull_ff / ff_ref require strict ancestry (upstream strictly ahead), re-checked here.
 4. rebase_push aborts on conflict and downgrades to a refusal — never a half-rebase.
-5. delete_local only under the full GONE ∧ integrated ∧ ¬current ∧ ¬default ∧ ¬merge-target ∧
-   clean guard. Integration is proven by ancestry or by patch equivalence, never assumed from
-   the remote branch having been deleted.
+5. delete_local only under the full GONE ∧ integrated ∧ ¬current ∧ ¬worktree ∧ ¬default ∧
+   ¬merge-target guard. Integration is proven by ancestry or by patch equivalence, never assumed
+   from the remote branch having been deleted.
 6. Any precondition that fails at execute time is refused and reported, never forced.
 7. execute always acts on the branch the state was classified from (explicit refspecs /
    ref names), never the incidentally-checked-out branch.
 8. A branch matching the policy's `protected` patterns admits no action that publishes or
    destroys — checked centrally here, before dispatch, so it holds for every action including
    ones added later.
-9. Never move a branch another worktree has checked out. `branch -f` and `branch -D` inherit
-   git's own refusal; update-ref is plumbing and does not check, so ff_ref guards it explicitly.
+9. Never write the ref of a branch another worktree has checked out. ff_ref and delete_local guard
+   it explicitly — update-ref is plumbing and git does not check it at all, and git's own refusal
+   of `branch -D` arrives as prose in a failure, which no caller can join on and no report can
+   predict.
 """
 
 from __future__ import annotations
@@ -248,10 +252,13 @@ def _delete_local(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
         return _refused(state, Action.DELETE_LOCAL, Refusal.NOT_GONE)
     if state.is_current:
         return _refused(state, Action.DELETE_LOCAL, Refusal.DELETE_CURRENT)
+    # Invariant 9, stated rather than inherited. git refuses this itself, but a refusal only git
+    # knows about arrives as a `failed` outcome carrying prose, which nothing joins on and the
+    # reporter cannot predict — so the row promised an arrow apply was never going to follow.
+    if repo.held_by_worktree(state.branch):
+        return _refused(state, Action.DELETE_LOCAL, Refusal.WORKTREE_CHECKOUT)
     if state.is_default:
         return _refused(state, Action.DELETE_LOCAL, Refusal.DELETE_DEFAULT)
-    if repo.is_dirty:
-        return _refused(state, Action.DELETE_LOCAL, Refusal.DIRTY_TREE)
     target = policy.merge_target or repo.default_branch
     if not target:
         return _refused(state, Action.DELETE_LOCAL, Refusal.NO_MERGE_TARGET)
@@ -280,12 +287,14 @@ _MUTATORS: dict[Action, Callable[[BranchState, Repo, Policy], Outcome]] = {
 # will handle this" cannot drift from the set of things that actually have a mutator.
 MUTATING_ACTIONS: frozenset[Action] = frozenset(_MUTATORS)
 
-# The one mutator that never reads or writes *this* checkout's tree: update-ref moves a ref whose
-# branch is not the current one, so this repo's dirtiness is irrelevant to it (and _ff_ref
-# accordingly has no dirty guard). The premise holds only because invariant 9 refuses first — a
-# branch a linked worktree has checked out is not "not checked out", and moving its ref is exactly
-# the tree-corrupting write this exemption reads as impossible.
-_WORKTREE_SAFE = frozenset({Action.FF_REF})
+# The mutators that never read or write a working tree at all: both move a ref whose branch is
+# checked out nowhere, so no repo's dirtiness bears on them. The premise holds only because
+# invariant 9 refuses first in each — a branch a linked worktree has checked out is not "not
+# checked out", and writing its ref from outside is exactly the tree-corrupting write these
+# exemptions read as impossible. Uncommitted changes belong to a tree, never to a branch, so a
+# dirty tree cannot be evidence about the ref being deleted; refusing on it protected nothing and
+# left every merged branch in a repo with work in progress uncollectable.
+_TREE_INDEPENDENT = frozenset({Action.FF_REF, Action.DELETE_LOCAL})
 
 
 class ActionDoc(NamedTuple):
@@ -395,8 +404,8 @@ ACTION_DOCS: dict[Action, ActionDoc] = {
         refuses=(
             Refusal.NOT_GONE,
             Refusal.DELETE_CURRENT,
+            Refusal.WORKTREE_CHECKOUT,
             Refusal.DELETE_DEFAULT,
-            Refusal.DIRTY_TREE,
             Refusal.NO_MERGE_TARGET,
             Refusal.DELETE_MERGE_TARGET,
             Refusal.NOT_INTEGRATED,
@@ -423,7 +432,7 @@ def dirty_refusal(action: Action, state: BranchState, dirty: bool) -> Refusal | 
         return None
     # fast_forward dispatches on checkout state, so it inherits _ff_ref's indifference to the
     # tree whenever the branch is not the current one.
-    if action in _WORKTREE_SAFE or (action == Action.FAST_FORWARD and not state.is_current):
+    if action in _TREE_INDEPENDENT or (action == Action.FAST_FORWARD and not state.is_current):
         return None
     return Refusal.DIRTY_TREE
 
@@ -454,14 +463,19 @@ def worktree_refusal(action: Action, state: BranchState) -> Refusal | None:
     two: `behind → fast_forward` on a branch a worktree owns is an arrow apply will never follow,
     and an arrow nobody can act on is the part of a row that costs it its meaning.
 
-    Only the update-ref path is gated here. pull_ff needs the branch current, which no linked
-    worktree's branch is, so it is already refused for a different reason; the rest of the menu
-    inherits git's own worktree refusal. Invariant 9 is still enforced live inside _ff_ref against
-    repo.held_by_worktree — this only mirrors it.
+    The ref-writing actions are gated here. pull_ff needs the branch current, which no linked
+    worktree's branch is, so it is already refused for a different reason. Invariant 9 is still
+    enforced live inside _ff_ref and _delete_local against repo.held_by_worktree — this only
+    mirrors it.
+
+    delete_local is here because git's own refusal is not a substitute for one of ours. git returns
+    it as a failure carrying prose, so the outcome is `failed` rather than `refused`, nothing can
+    join on the reason, and the reporter — which never runs git — cannot predict it at all. Three
+    merged branches printed `→ delete_local` and would each have hit that.
     """
     if state.worktree is None:
         return None
-    if action is Action.FF_REF or (action is Action.FAST_FORWARD and not state.is_current):
+    if action in (Action.FF_REF, Action.DELETE_LOCAL) or (action is Action.FAST_FORWARD and not state.is_current):
         return Refusal.WORKTREE_CHECKOUT
     return None
 

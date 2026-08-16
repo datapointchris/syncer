@@ -21,9 +21,11 @@ The honesty rules, which are testable statements rather than intentions:
    Nothing below needs one: rebasing a branch onto *its own upstream* leaves it strictly ahead,
    so the publish that follows is an ordinary push. A force is only ever wanted when rebasing
    onto some *other* base, which syncer neither does nor suggests.
-3. **Name the directory the branch is actually in.** A branch checked out in a linked worktree is
+3. **Name the directory the fact is actually about.** A branch checked out in a linked worktree is
    not fixed from the main checkout — `git -C <repo> rebase` there rebases something else
-   entirely. Every command is emitted with the `-C` that makes it true where it is pasted.
+   entirely. The inverse holds for anything measured on the repo rather than the branch: the dirty
+   tree is the repo's own, and pointing `status` at the worktree printed nothing at all. Every
+   command is emitted with the `-C` that makes it true where it is pasted.
 4. **Never tell anyone what to do with their uncommitted work.** syncer has no standing to decide
    between committing and stashing, which is why it has no action for either. It says where the
    changes are and stops.
@@ -142,18 +144,43 @@ NO_REMEDY = frozenset(
 )
 
 
-def _refusal_remedy(reason: Refusal, state: BranchState, where: str) -> Remedy:
-    if reason is Refusal.DIRTY_TREE:
-        # Honesty rule 4: where the changes are, and nothing about what to do with them.
+def _worktree_checkout(state: BranchState, action: Action, repo_path: str) -> Remedy:
+    """What a linked worktree holding the branch leaves the reader to do, per action.
+
+    The two are opposite errands and one command cannot serve both. Advancing the branch happens
+    *inside* the worktree, where the tree moves with the ref. Deleting it happens from the main
+    checkout and has to dispose of the worktree first — git will not delete a ref a worktree holds.
+    """
+    if action is Action.DELETE_LOCAL:
         return Remedy(
-            commands=(_git_in(where, 'status', '--short'),),
+            commands=(
+                _git_in(repo_path, 'worktree', 'remove', state.worktree or ''),
+                _git_in(repo_path, 'branch', '-d', state.branch),
+            ),
+            notes=(
+                f'{state.branch} is merged, but the worktree at {state.worktree} still holds the ref, which git will not delete.',
+                'Neither command can lose work: `worktree remove` refuses a tree with modified or untracked files,',
+                'and -d refuses a branch whose work is unmerged.',
+            ),
+        )
+    return Remedy(
+        commands=(_git_in(state.worktree or repo_path, 'merge', '--ff-only', state.upstream or ''),),
+        notes=(f'{state.branch} is checked out at {state.worktree} — run it there, where the tree moves with the ref.',),
+    )
+
+
+def _refusal_remedy(reason: Refusal, state: BranchState, action: Action, repo_path: str) -> Remedy:
+    where = state.worktree or repo_path
+    if reason is Refusal.DIRTY_TREE:
+        # Honesty rule 4: where the changes are, and nothing about what to do with them. Rule 3
+        # inverts here — the tree syncer measured is the repo's own, never the worktree's, so
+        # naming `where` sent the reader to run `status` somewhere it prints nothing.
+        return Remedy(
+            commands=(_git_in(repo_path, 'status', '--short'),),
             notes=('syncer refuses every action that touches a dirty tree, and has no action that would clear one.',),
         )
     if reason is Refusal.WORKTREE_CHECKOUT:
-        return Remedy(
-            commands=(_git_in(state.worktree or where, 'merge', '--ff-only', state.upstream or ''),),
-            notes=(f'{state.branch} is checked out at {state.worktree} — run it there, where the tree moves with the ref.',),
-        )
+        return _worktree_checkout(state, action, repo_path)
     if reason is Refusal.PROTECTED:
         return Remedy(
             notes=(
@@ -217,7 +244,7 @@ def remedy_for(state: BranchState, action: Action, repo_path: str, blocked: Refu
     where = state.worktree or repo_path
     reason = refused or blocked
     if reason is not None:
-        remedy = _refusal_remedy(reason, state, where)
+        remedy = _refusal_remedy(reason, state, action, repo_path)
         if remedy:
             return remedy
     if action in MUTATING_ACTIONS and blocked is None and refused is None:

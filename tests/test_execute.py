@@ -519,6 +519,29 @@ class TestDirtyRefusalMatchesExecute:
         assert dirty_refusal(Action.FAST_FORWARD, state, dirty=True) is None  # dispatches to ff_ref
         assert execute(Action.FAST_FORWARD, state, repo, POLICY).status == 'done'
 
+    def test_delete_local_really_is_indifferent_to_the_tree(self, cloned_repo):
+        """The second exemption in _TREE_INDEPENDENT, proved the same way. Uncommitted changes
+        belong to a tree, never to a branch, so a dirty tree is no evidence about the ref being
+        deleted — and refusing on it left every merged branch in a repo with work in progress
+        uncollectable, which on a repo somebody works in daily is permanently."""
+        _git(cloned_repo, 'checkout', '-b', 'merged-then-deleted')
+        _git(cloned_repo, 'push', '-u', 'origin', 'merged-then-deleted')
+        _git(cloned_repo, 'checkout', 'main')
+        _git(cloned_repo, 'push', 'origin', '--delete', 'merged-then-deleted')
+
+        repo = _make_repo(cloned_repo)
+        repo.fetch_prune()
+        self._dirty(cloned_repo)
+        state = _state_for(repo, 'merged-then-deleted')
+        assert state.primary == PrimaryState.GONE
+        assert repo.is_dirty
+        before_dirty = repo.uncommitted_changes
+
+        assert dirty_refusal(Action.DELETE_LOCAL, state, dirty=True) is None
+        assert execute(Action.DELETE_LOCAL, state, repo, POLICY).status == 'done'
+        assert 'merged-then-deleted' not in repo.local_branches()
+        assert repo.uncommitted_changes == before_dirty  # the work in the tree is untouched
+
     def test_a_clean_tree_blocks_nothing(self, cloned_repo):
         repo = _make_repo(cloned_repo)
         state = _state_for(repo, 'main')
@@ -563,10 +586,29 @@ def _worktree_behind(cloned_repo: Path, tmp_path: Path, branch: str = 'wt-branch
     return repo, worktree
 
 
+def _worktree_gone(cloned_repo: Path, tmp_path: Path, branch: str = 'wt-gone') -> tuple[Repo, Path]:
+    """A merged branch whose remote is deleted, still checked out in a linked worktree.
+
+    The shape a worktree-per-branch workflow leaves behind on every merged PR: nothing is wrong
+    with the branch, delete_local's whole guard passes, and the only thing standing in the way is
+    the worktree still holding the ref.
+    """
+    _git(cloned_repo, 'push', 'origin', f'main:refs/heads/{branch}')
+    _git(cloned_repo, 'fetch')
+    _git(cloned_repo, 'branch', branch, f'origin/{branch}')
+    worktree = tmp_path / 'linked-gone'
+    _git(cloned_repo, 'worktree', 'add', str(worktree), branch)
+    _git(cloned_repo, 'push', 'origin', '--delete', branch)
+
+    repo = _make_repo(cloned_repo)
+    repo.fetch_prune()
+    return repo, worktree
+
+
 class TestWorktreeCheckout:
     """Invariant 9. `is_current` is this checkout's HEAD alone, so a branch a linked worktree
-    holds reads as 'not checked out' — and update-ref is the one mechanism on the menu git does
-    not protect, unlike `branch -f` and `branch -D` which refuse for themselves.
+    holds reads as 'not checked out' — and update-ref is the mechanism git does not protect at
+    all, unlike `branch -f` and `branch -D` which refuse for themselves.
 
     Left unguarded this moved a live worktree's HEAD while its index stayed at the old commit,
     so files added by the new commit showed up staged for deletion in a tree syncer never
@@ -643,13 +685,46 @@ class TestWorktreeCheckout:
         assert outcome.reason is Refusal.WORKTREE_CHECKOUT
         assert _git(worktree, 'rev-parse', 'HEAD').stdout.strip() == before
 
-    def test_git_protects_the_other_destructive_paths_itself(self, cloned_repo, tmp_path):
-        """Why only ff_ref carries the guard, established rather than assumed — the reasoning
-        that skipped it for update-ref was 'git would refuse', and for these two that is true."""
+    def test_git_refuses_the_destructive_paths_too(self, cloned_repo, tmp_path):
+        """git's own refusal, established rather than assumed. It is why the ref never moves —
+        and, on its own, not why syncer refuses: see the delete_local tests below."""
         repo, worktree = _worktree_behind(cloned_repo, tmp_path)
         assert _git(cloned_repo, 'branch', '-D', 'wt-branch').returncode != 0
         assert _git(cloned_repo, 'branch', '-f', 'wt-branch', 'origin/wt-branch').returncode != 0
         assert _git(worktree, 'rev-parse', '--abbrev-ref', 'HEAD').stdout.strip() == 'wt-branch'
+
+    def test_delete_local_refuses_a_branch_a_worktree_holds(self, cloned_repo, tmp_path):
+        """Inheriting git's refusal is not the same as making one. git returns it as a failure
+        carrying prose, so the outcome was `failed` with no key on it — and the reporter, which
+        runs no git at all, could not predict it, printing `gone → delete_local` on a row apply
+        was always going to bounce."""
+        repo, worktree = _worktree_gone(cloned_repo, tmp_path)
+        state = _state_for(repo, 'wt-gone')
+        assert state.primary == PrimaryState.GONE
+
+        outcome = execute(Action.DELETE_LOCAL, state, repo, POLICY)
+
+        assert outcome.status == 'refused'
+        assert outcome.reason is Refusal.WORKTREE_CHECKOUT
+        assert 'wt-gone' in repo.local_branches()
+        assert _git(worktree, 'rev-parse', '--abbrev-ref', 'HEAD').stdout.strip() == 'wt-gone'
+
+    def test_the_report_predicts_the_delete_refusal(self, cloned_repo, tmp_path):
+        repo, _ = _worktree_gone(cloned_repo, tmp_path)
+        state = _state_for(repo, 'wt-gone')
+        assert worktree_refusal(Action.DELETE_LOCAL, state) is Refusal.WORKTREE_CHECKOUT
+
+    def test_removing_the_worktree_is_all_that_stands_in_the_way(self, cloned_repo, tmp_path):
+        """The rest of the guard passes, which is what makes the refusal worth a remedy rather
+        than a full stop: the branch is merged and the remote is gone."""
+        repo, worktree = _worktree_gone(cloned_repo, tmp_path)
+        assert _git(cloned_repo, 'worktree', 'remove', str(worktree)).returncode == 0
+
+        repo = _make_repo(cloned_repo)
+        outcome = execute(Action.DELETE_LOCAL, _state_for(repo, 'wt-gone'), repo, POLICY)
+
+        assert outcome.status == 'done'
+        assert 'wt-gone' not in repo.local_branches()
 
 
 class TestCheckoutRefusal:

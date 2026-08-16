@@ -150,6 +150,24 @@ class TestRefusalRemedies:
         assert remedy.commands == (f'git -C {WORKTREE} merge --ff-only origin/feature',)
         assert WORKTREE in _text(remedy)
 
+    def test_a_worktree_refusal_on_a_delete_disposes_of_the_worktree_first(self):
+        """The same refusal, the opposite errand. `merge --ff-only` on a branch whose remote is
+        gone advances nothing, and the reader is left with the row unexplained."""
+        state = _state(PrimaryState.GONE, worktree=WORKTREE)
+        remedy = remedy_for(state, Action.DELETE_LOCAL, REPO, Refusal.WORKTREE_CHECKOUT, None)
+        assert remedy.commands == (
+            f'git -C {REPO} worktree remove {WORKTREE}',
+            f'git -C {REPO} branch -d feature',
+        )
+
+    def test_a_dirty_refusal_names_the_repo_even_when_the_branch_is_elsewhere(self):
+        """Honesty rule 3 inverts for a repo-scoped fact. The tree syncer measured is the repo's
+        own, so pointing `status` at the worktree sent the reader somewhere it prints nothing —
+        under a line telling them their tree was dirty."""
+        state = _state(PrimaryState.GONE, worktree=WORKTREE)
+        remedy = remedy_for(state, Action.DELETE_LOCAL, REPO, Refusal.DIRTY_TREE, None)
+        assert remedy.commands == (f'git -C {REPO} status --short',)
+
     def test_protection_names_the_file_to_edit_and_offers_no_command(self):
         remedy = remedy_for(_state(PrimaryState.AHEAD), Action.PUSH, REPO, Refusal.PROTECTED, None)
         assert remedy.commands == ()
@@ -176,27 +194,28 @@ class TestHonestyRules:
         for primary in PrimaryState:
             for upstream in ('origin/feature', 'origin/main', None):
                 for reason in (None, *Refusal):
-                    remedy = remedy_for(
-                        _state(primary, upstream=upstream, worktree=WORKTREE),
-                        Action.REPORT,
-                        REPO,
-                        reason,
-                        None,
-                    )
-                    for command in remedy.commands:
-                        assert not DESTRUCTIVE & set(command.split()), (primary, reason, command)
+                    for action in Action:
+                        remedy = remedy_for(
+                            _state(primary, upstream=upstream, worktree=WORKTREE),
+                            action,
+                            REPO,
+                            reason,
+                            None,
+                        )
+                        for command in remedy.commands:
+                            assert not DESTRUCTIVE & set(command.split()), (primary, action, reason, command)
 
     def test_every_refusal_is_answered_or_deliberately_silent(self):
         """A new Refusal must be routed or listed, never left to render blank — the direction
         ACTION_DOCS and PROTECTED_ALLOWED both take."""
         state = _state(PrimaryState.BEHIND, worktree=WORKTREE)
         for reason in Refusal:
-            handled = bool(_refusal_remedy(reason, state, REPO))
+            handled = bool(_refusal_remedy(reason, state, Action.REPORT, REPO))
             assert handled is (reason not in NO_REMEDY), reason
 
     def test_no_remedy_set_and_the_handled_set_do_not_overlap(self):
         state = _state(PrimaryState.BEHIND, worktree=WORKTREE)
-        assert not any(_refusal_remedy(reason, state, REPO) for reason in NO_REMEDY)
+        assert not any(_refusal_remedy(reason, state, Action.REPORT, REPO) for reason in NO_REMEDY)
 
     def test_every_command_names_a_directory(self):
         """Honesty rule 3, structurally: a bare `git rebase` is right only if you happen to be

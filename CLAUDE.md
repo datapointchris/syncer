@@ -158,16 +158,21 @@ time — and refuses rather than forces. Guaranteed independent of any policy:
    The old `uncommitted_changes` returned `[]` on failure, so callers testing its truthiness
    read a broken git as a clean tree, i.e. as permission to mutate. Anything that gates a write
    on a git read needs that polarity: a `list | None` cannot express it, because `None` is falsy.
-   `_ff_ref` is the sole exemption (`_WORKTREE_SAFE`): `update-ref` moves a ref that is not
-   checked out, so no tree is read or written. **syncer never resolves a dirty tree** — there is
+   `_TREE_INDEPENDENT` holds the exemptions, and both are the same shape: `_ff_ref` moves a ref
+   and `_delete_local` removes one, each for a branch checked out nowhere, so no tree is read or
+   written. Both verify that rather than assume it — invariant 9 refuses inside each first.
+   Uncommitted changes belong to a tree and never to a branch, so a dirty tree is no evidence
+   about the ref being deleted; the guard `_delete_local` used to carry protected nothing and made
+   every merged branch in a repo with work in progress uncollectable, which on a repo somebody
+   works in daily is permanently. **syncer never resolves a dirty tree** — there is
    no commit or stash action and there will not be one; capturing your uncommitted work is a
    decision the tool has no standing to make. It reports the tree and refuses everything that
    would touch it.
 3. `fast_forward`/`pull_ff`/`ff_ref` require strict ancestry (upstream strictly ahead), re-checked
    at write time.
 4. `rebase_push` aborts on conflict and downgrades to a refusal — never a half-rebase.
-5. `delete_local` only under the full `GONE ∧ integrated ∧ ¬current ∧ ¬default ∧ ¬merge-target ∧
-   clean` guard. Uses `branch -D` (not `-d`) because a GONE branch has no upstream for git's own
+5. `delete_local` only under the full `GONE ∧ integrated ∧ ¬current ∧ ¬worktree ∧ ¬default ∧
+   ¬merge-target` guard. Uses `branch -D` (not `-d`) because a GONE branch has no upstream for git's own
    merged-heuristic to consult — safety comes from our explicit guard, not git's. *Integrated*
    means the target provably holds the work, by ancestry **or** patch equivalence (`git cherry`),
    never inferred from the remote branch having been deleted — a branch deleted without merging
@@ -185,14 +190,22 @@ time — and refuses rather than forces. Guaranteed independent of any policy:
    does (it advances to what the upstream already contains), `push`/`rebase_push`/
    `set_upstream_push`/`delete_local` do not. `protected` lives on `Policy`, so it is
    machine-local like every other policy setting, and no built-in sets one.
-9. Never move a branch another worktree has checked out. `is_current` is *this* checkout's HEAD
-   alone, so a branch a linked worktree holds reads as "not checked out" — and `_ff_ref` was
-   exempted from the dirty guard on exactly that premise. `branch -f` and `branch -D` refuse for
-   themselves; `update-ref` is plumbing and does not, so it moved a live worktree's HEAD while
+9. Never write the ref of a branch another worktree has checked out. `is_current` is *this*
+   checkout's HEAD alone, so a branch a linked worktree holds reads as "not checked out" — and
+   both `_TREE_INDEPENDENT` members were exempted from the dirty guard on exactly that premise.
+   `update-ref` is plumbing and git does not check it, so it moved a live worktree's HEAD while
    the index stayed put, leaving the new commit's files staged as deletions in a tree syncer
    never measured the dirtiness of. `repo.held_by_worktree` answers True when `git worktree list`
    fails, the same polarity as `is_dirty` and for the same reason. `BranchState.worktree` records
    the path for the reporter and for the hint; `decide()` is invariant to it.
+
+   **`_delete_local` guards it explicitly even though `branch -D` refuses for itself**, and
+   inheriting that refusal was the mistake. git returns it as a *failure* carrying prose, so the
+   outcome is `failed` rather than `refused`, `Outcome.reason` is empty and nothing can join on
+   it, and the reporter — which runs no git — cannot predict it at all. `syncer check` on a
+   worktree-per-branch repo therefore printed `gone → delete_local` on three merged branches
+   `apply` was always going to bounce, which is the arrow-that-promises-nothing failure the
+   mirror gates exist to prevent.
 
 Any new `Action` must be added to the `Action` enum, mapped in `_MUTATORS`, and given a mutator
 that re-checks its own preconditions live. Never add an unsafe primitive to the menu.
@@ -378,7 +391,13 @@ under the row it belongs to. Its rules:
   fast-forward as a force is one that gets relaxed rather than trusted.
 - **Every command names its directory**, and it is `state.worktree` when one holds the branch.
   `git -C <repo> rebase` in the main checkout rebases whatever *that* has checked out, which is a
-  different branch — the case that motivated the module.
+  different branch — the case that motivated the module. It inverts for a fact measured on the
+  repo rather than the branch: the tree behind `DIRTY_TREE` is the repo's own, so the worktree's
+  path sent the reader to run `status` somewhere it prints nothing, directly under a line telling
+  them their tree was dirty.
+- **A refusal is not one errand**, so `_refusal_remedy` takes the action. `WORKTREE_CHECKOUT` on a
+  fast-forward means run the merge inside the worktree; on a `delete_local` it means dispose of
+  the worktree first, and `merge --ff-only` on a branch whose remote is gone advances nothing.
 - **`_tracks_own_remote` decides the wording**, because `diverged` means two different things. A
   branch tracking `origin/main` is your work on a base that moved; one tracking `origin/<itself>`
   is two machines disagreeing. The report showed both as `N ahead, N behind`.
