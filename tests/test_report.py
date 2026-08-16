@@ -436,6 +436,26 @@ class TestRemedyRendering:
         render_remedy(Remedy(commands=('git -C /repo branch -d fix[1]',)))
         assert 'fix[1]' in capsys.readouterr().out
 
+    def test_paths_under_home_are_written_the_way_the_row_header_writes_them(self, capsys):
+        """One block spelled the same directory two ways: `~/dotfiles` on the header and the
+        expanded path in the command under it. The long form put a worktree remove past 90
+        columns, and a command the terminal wraps is one that gets half-copied."""
+        home = str(Path.home())
+        render_remedy(
+            Remedy(
+                commands=(f'git -C {home}/dotfiles worktree remove {home}/.worktrees/dotfiles/x',),
+                notes=(f'x is checked out at {home}/.worktrees/dotfiles/x.',),
+            )
+        )
+        out = capsys.readouterr().out
+        assert 'git -C ~/dotfiles worktree remove ~/.worktrees/dotfiles/x' in out
+        assert 'x is checked out at ~/.worktrees/dotfiles/x.' in out
+        assert home not in out
+
+    def test_a_path_outside_home_is_left_alone(self, capsys):
+        render_remedy(Remedy(commands=('git -C /srv/repos/thing status --short',)))
+        assert 'git -C /srv/repos/thing status --short' in capsys.readouterr().out
+
 
 class TestProtectedBranchReporting:
     """Protection is static config, so a report-only run can say so. Rendering the decided

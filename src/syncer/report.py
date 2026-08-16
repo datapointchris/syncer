@@ -811,6 +811,22 @@ def render_failure_summary(reports: list[RepoBranchReport]) -> None:
         err_console.print()
 
 
+def shorten_home(text: str) -> str:
+    """Paths under $HOME written the way the row above already writes them.
+
+    The registry stores `~/dotfiles` and the header prints that, while a remedy is built from the
+    expanded path — so one block spelled the same directory two ways, and the longer spelling put
+    `git -C <repo> worktree remove <worktree>` past 90 columns. soft_wrap keeps Rich from breaking
+    it, but nothing keeps the terminal from doing so, and a command that wraps is one that gets
+    half-copied. That is not hypothetical: it cost a leading `git`, and the shell then found a
+    different `worktree` on PATH and reported the subcommand as invalid.
+
+    Display only. Nothing joins on these strings, and the paths the guards use are resolved from
+    git at write time.
+    """
+    return text.replace(f'{Path.home()}/', '~/')
+
+
 def render_remedy(remedy: Remedy) -> None:
     """The commands under the row they belong to, on stdout with it.
 
@@ -823,9 +839,9 @@ def render_remedy(remedy: Remedy) -> None:
     because a branch name may legally contain the square brackets Rich reads as a style tag.
     """
     for command in remedy.commands:
-        console.print(f'      [cyan]$ {escape(command)}[/cyan]', soft_wrap=True)
+        console.print(f'      [cyan]$ {escape(shorten_home(command))}[/cyan]', soft_wrap=True)
     for note in remedy.notes:
-        console.print(f'      [blue]{escape(note)}[/blue]', soft_wrap=True)
+        console.print(f'      [blue]{escape(shorten_home(note))}[/blue]', soft_wrap=True)
 
 
 def render_report(report: RepoBranchReport, apply: bool) -> None:
