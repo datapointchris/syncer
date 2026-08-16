@@ -1,6 +1,29 @@
 # CHANGELOG
 
 
+## v11.2.0 (2026-08-16)
+
+### Features
+
+- **execute**: Fast-forward a branch inside the worktree that holds it
+  ([`baa1015`](https://github.com/datapointchris/syncer/commit/baa101522ff30cdc436898900870da4e6fffabaa))
+
+fast_forward had two mechanisms for three places a branch can be checked out. A branch a linked
+  worktree held fell to ff_ref, which invariant 9 refuses -- update-ref writes the ref from outside
+  and leaves that worktree's index describing a commit it no longer points at. So the branch was
+  reported and never advanced, and a worktree parked for a few days drifted without limit. One here
+  was 128 commits behind.
+
+ff_worktree is the missing third: the same argv pull_ff runs, in the worktree, with the same
+  strict-ancestry check. That is the opposite of what invariant 9 forbids, since a merge moves ref,
+  index and tree together. Its dirty guard is the worktree's own tree, which is the only one it
+  writes; BranchState.dirty is the main checkout's and the two are routinely opposite.
+
+This is the shape 'worktree new' leaves behind. It branches off origin/<default> and git's
+  branch.autoSetupMerge makes the new branch track it, so every worktree branch with no commits of
+  its own reads as N behind and falls further back every time the default moves.
+
+
 ## v11.1.1 (2026-08-16)
 
 ### Bug Fixes
