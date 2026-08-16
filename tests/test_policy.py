@@ -3,6 +3,7 @@ import itertools
 import pytest
 
 from syncer.policy import BUILTIN_POLICIES
+from syncer.policy import MECHANISM_ACTIONS
 from syncer.policy import PROTECTED_ALLOWED
 from syncer.policy import Action
 from syncer.policy import BranchState
@@ -99,10 +100,13 @@ class TestDecideObserve:
 
 
 class TestBuiltinsNameIntentNotMechanism:
-    """pull_ff refuses on a non-current branch and ff_ref refuses on a current one, so a
-    built-in that names either mechanism is refused for half of all checkout states. Both
-    built-ins did exactly that: `default:behind = pull_ff` never ran unless the default
-    branch happened to be checked out, and `*:behind = ff_ref` never ran when it was."""
+    """Each mechanism covers one place a branch can be checked out, so a built-in naming one is
+    refused everywhere the branch is somewhere else. Both built-ins did exactly that:
+    `default:behind = pull_ff` never ran unless the default branch happened to be checked out,
+    and `*:behind = ff_ref` never ran when it was.
+
+    Asserted against MECHANISM_ACTIONS rather than a list of members, so a mechanism added later
+    is covered without anyone remembering this test — which is how ff_worktree arrived."""
 
     @pytest.mark.parametrize('policy_name', list(BUILTIN_POLICIES))
     @pytest.mark.parametrize('primary', ALL_STATES)
@@ -110,7 +114,7 @@ class TestBuiltinsNameIntentNotMechanism:
         policy = BUILTIN_POLICIES[policy_name]
         for is_default, is_current in itertools.product([True, False], repeat=2):
             state = _state(primary, branch='main', is_default=is_default, is_current=is_current)
-            assert decide(state, policy) not in (Action.PULL_FF, Action.FF_REF)
+            assert decide(state, policy) not in MECHANISM_ACTIONS
 
 
 class TestDecideModifierInvariance:
@@ -240,7 +244,15 @@ class TestProtectedBranches:
     def test_allowlist_covers_only_actions_that_neither_publish_nor_destroy(self):
         """An allowlist, so a new Action is refused on a protected branch by default. Anything
         added here has to be provably incapable of publishing local work or losing it."""
-        assert set(PROTECTED_ALLOWED) == {Action.SKIP, Action.REPORT, Action.PROMPT, Action.FAST_FORWARD, Action.PULL_FF, Action.FF_REF}
+        assert set(PROTECTED_ALLOWED) == {
+            Action.SKIP,
+            Action.REPORT,
+            Action.PROMPT,
+            Action.FAST_FORWARD,
+            Action.PULL_FF,
+            Action.FF_WORKTREE,
+            Action.FF_REF,
+        }
         assert not PROTECTED_ALLOWED & {Action.PUSH, Action.REBASE_PUSH, Action.SET_UPSTREAM_PUSH, Action.DELETE_LOCAL}
 
     def test_decide_is_invariant_to_protection(self):

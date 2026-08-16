@@ -45,16 +45,18 @@ class Action(StrEnum):
     """The safe menu. Every action here is pre-vetted safe; a policy can never opt into
     an unsafe primitive (force-push, dirty-tree mutation, history rewrite).
 
-    FAST_FORWARD is the intent 'advance this branch to its upstream'; PULL_FF and FF_REF
-    are the two mechanisms that implement it, and each refuses in the checkout state the
-    other one handles. Rules should name the intent — a rule naming a mechanism is refused
-    whenever the branch happens to be on the wrong side of that split.
+    FAST_FORWARD is the intent 'advance this branch to its upstream'; PULL_FF, FF_WORKTREE and
+    FF_REF are the three mechanisms that implement it, one per place the branch can be checked
+    out — here, in a linked worktree, or nowhere. Each refuses in the states the others handle.
+    Rules should name the intent: a rule naming a mechanism is refused whenever the branch is
+    checked out somewhere that mechanism does not cover, which is most of the time.
     """
 
     SKIP = 'skip'
     REPORT = 'report'
     FAST_FORWARD = 'fast_forward'
     PULL_FF = 'pull_ff'
+    FF_WORKTREE = 'ff_worktree'
     FF_REF = 'ff_ref'
     PUSH = 'push'
     REBASE_PUSH = 'rebase_push'
@@ -86,15 +88,17 @@ PROTECTED_ALLOWED = frozenset(
         Action.PROMPT,
         Action.FAST_FORWARD,
         Action.PULL_FF,
+        Action.FF_WORKTREE,
         Action.FF_REF,
     }
 )
 
 # The mechanism half of the fast-forward split, as opposed to the FAST_FORWARD intent that
-# dispatches between them. Each is refused whenever the branch sits on the other side of the
-# checkout split, so nothing may *suggest* one — TestBuiltinsNameIntentNotMechanism asserts the
-# built-ins never decide one, and this is the same rule for anything that recommends an action.
-MECHANISM_ACTIONS = frozenset({Action.PULL_FF, Action.FF_REF})
+# dispatches between them. Each is refused whenever the branch is checked out somewhere that
+# mechanism does not cover, so nothing may *suggest* one — TestBuiltinsNameIntentNotMechanism
+# asserts the built-ins never decide one, and this is the same rule for anything that
+# recommends an action.
+MECHANISM_ACTIONS = frozenset({Action.PULL_FF, Action.FF_WORKTREE, Action.FF_REF})
 
 # Selector words that are roles, not literal branch names or globs.
 ROLE_SELECTORS = {'default', 'current'}
@@ -119,6 +123,11 @@ class BranchState(BaseModel):
     # one nothing has checked out — the distinction invariant 9 turns on. An execute-time gate
     # and a hint target, never a decision input: decide() is invariant to it.
     worktree: str | None = None
+    # Whether that worktree's own tree has changes, which is the tree ff_worktree writes into.
+    # `dirty` above is this checkout's and says nothing about it — the two are routinely opposite,
+    # since the whole point of a worktree is to leave the main checkout alone. Another
+    # execute-time gate, invisible to decide() like the rest.
+    worktree_dirty: bool = False
 
 
 class Policy(BaseModel):

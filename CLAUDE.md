@@ -62,8 +62,9 @@ invisible to `decide()`.
 A gate the reporter can evaluate without executing must still be *shown*, though, or the report
 promises an action `apply` never makes. Four are, all composed by `blocking_refusal()` so a caller
 cannot consult three and miss the fourth: `protection_refusal()` (static config),
-`checkout_refusal()` (which branch is current), `worktree_refusal()` (a linked worktree holds it)
-and `dirty_refusal()` (one `git status` per repo). All live in `execute.py` beside the guards they
+`checkout_refusal()` (which branch is current), `worktree_refusal()` (what a linked worktree means
+for this action — it forbids the ref-writers, `ff_worktree` requires one, and its own tree must be
+clean) and `dirty_refusal()` (one `git status` per repo). All live in `execute.py` beside the guards they
 mirror, all feed `BranchRow.blocked`, and the mirror tests assert each agrees with `execute()` for
 every action on the menu — a mirror that drifts is worse than none, because the arrow is the only
 part of a row anyone acts on. `checkout_refusal` was the one missing: `mirror`'s
@@ -210,13 +211,37 @@ time — and refuses rather than forces. Guaranteed independent of any policy:
 Any new `Action` must be added to the `Action` enum, mapped in `_MUTATORS`, and given a mutator
 that re-checks its own preconditions live. Never add an unsafe primitive to the menu.
 
-**Rules name intents, not mechanisms.** `pull_ff` (`merge --ff-only`) needs the branch checked
-out and `ff_ref` (`update-ref`) needs it not checked out, so a rule naming either one is refused
-for half of all checkout states — which is what `default:behind = pull_ff` and `*:behind = ff_ref`
-silently did in both built-ins. `fast_forward` dispatches to whichever applies; the mechanisms stay
-on the menu as explicit escape hatches. `TestBuiltinsNameIntentNotMechanism` locks this: no
-built-in may ever decide `pull_ff` or `ff_ref`. Any future action with the same
-current/non-current split needs the same treatment.
+**Rules name intents, not mechanisms.** There is one mechanism per place a branch can be checked
+out, so a rule naming one is refused every time the branch is somewhere else — which is what
+`default:behind = pull_ff` and `*:behind = ff_ref` silently did in both built-ins.
+
+| Checked out | Mechanism | Runs |
+| --- | --- | --- |
+| here | `pull_ff` | `git merge --ff-only <upstream>` |
+| in a linked worktree | `ff_worktree` | `git -C <worktree> merge --ff-only <upstream>` |
+| nowhere | `ff_ref` | `git update-ref refs/heads/<branch> <upstream>` |
+
+`fast_forward` dispatches to whichever applies, reading git rather than `state.worktree` so a
+worktree added or removed since classify time cannot pick the wrong one. The mechanisms stay on
+the menu as explicit escape hatches. `TestBuiltinsNameIntentNotMechanism` locks this against
+`MECHANISM_ACTIONS` rather than a list of members, so a mechanism added later is covered without
+anyone remembering the test — which is how `ff_worktree` arrived. Any future action splitting on
+where the branch is checked out needs the same treatment.
+
+**`ff_worktree` adds a location, not a primitive.** It is the same argv `pull_ff` runs, in the
+worktree that holds the branch, with the same strict-ancestry check. That is the opposite of what
+invariant 9 forbids: `update-ref` writes the ref from outside and leaves the worktree's index
+behind, while a merge inside it moves ref, index and tree together. Its dirty guard is
+`worktree_is_dirty`, against the tree it actually writes — `BranchState.dirty` is the main
+checkout's and says nothing about it. The two are routinely opposite, which is the whole point of
+a worktree, and syncer's own registry is the proof: `~/dotfiles` carried 16 uncommitted files
+while all four of its worktrees were clean.
+
+This is the shape `worktree new` leaves behind. It runs `git worktree add <path> -b <slug>
+origin/<default>`, and git's default `branch.autoSetupMerge` makes the new branch track
+`origin/main`. So every worktree branch with no commits of its own reads as `N behind` and drifts
+further every time main moves. Nothing is wrong with such a branch — advancing it is what you
+would do by hand before starting work.
 
 ## Config: two files, deliberately split
 
@@ -395,9 +420,14 @@ under the row it belongs to. Its rules:
   repo rather than the branch: the tree behind `DIRTY_TREE` is the repo's own, so the worktree's
   path sent the reader to run `status` somewhere it prints nothing, directly under a line telling
   them their tree was dirty.
-- **A refusal is not one errand**, so `_refusal_remedy` takes the action. `WORKTREE_CHECKOUT` on a
-  fast-forward means run the merge inside the worktree; on a `delete_local` it means dispose of
+- **A refusal is not one errand**, so `_refusal_remedy` takes the action. `WORKTREE_CHECKOUT` on
+  `ff_ref` means run the merge inside the worktree; on a `delete_local` it means dispose of
   the worktree first, and `merge --ff-only` on a branch whose remote is gone advances nothing.
+- **Three refusals name three different trees, and each points somewhere else.** `DIRTY_TREE` is
+  the repo's own, so its `status` runs there. `WORKTREE_DIRTY` is the worktree's, so its `status`
+  runs there instead — and it says only that, because syncer never tells anyone what to do with
+  uncommitted work. `NO_WORKTREE` is in `NO_REMEDY`: it is syncer describing its own dispatch, and
+  the branch state underneath is what the reader needs.
 - **`_tracks_own_remote` decides the wording**, because `diverged` means two different things. A
   branch tracking `origin/main` is your work on a base that moved; one tracking `origin/<itself>`
   is two machines disagreeing. The report showed both as `N ahead, N behind`.

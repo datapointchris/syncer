@@ -631,27 +631,73 @@ class TestWorktreeCheckout:
         # longer pointed at, which a bare HEAD check would not have caught.
         assert _git(worktree, 'status', '--porcelain').stdout == ''
 
-    def test_fast_forward_inherits_the_refusal(self, cloned_repo, tmp_path):
-        """The intent dispatches to _ff_ref for a non-current branch, so it must not be a way
-        round the guard the mechanism enforces."""
+    def test_fast_forward_dispatches_into_the_worktree_instead_of_refusing(self, cloned_repo, tmp_path):
+        """The intent takes the mechanism that fits where the branch is checked out, and for a
+        linked worktree that is a merge inside it. The ref moving is the easy half — the half
+        that matters is the index and tree moving with it, which is exactly what update-ref
+        failed to do and why writing the ref from outside is still forbidden."""
         repo, worktree = _worktree_behind(cloned_repo, tmp_path)
         state = _state_for(repo, 'wt-branch')
+        assert state.primary == PrimaryState.BEHIND
+
+        outcome = execute(Action.FAST_FORWARD, state, repo, POLICY)
+
+        assert outcome.status == 'done'
+        upstream = _git(cloned_repo, 'rev-parse', 'origin/wt-branch').stdout.strip()
+        assert _git(worktree, 'rev-parse', 'HEAD').stdout.strip() == upstream
+        assert _git(worktree, 'status', '--porcelain').stdout == ''
+        assert (worktree / 'remote.txt').exists()  # the new commit's file is really on disk
+
+    def test_the_report_predicts_the_ff_ref_refusal_and_not_the_intent(self, cloned_repo, tmp_path):
+        """The mirror splits where the dispatch does. Writing the ref from outside is still
+        refused; the intent is not, because it no longer takes that route."""
+        repo, _ = _worktree_behind(cloned_repo, tmp_path)
+        state = _state_for(repo, 'wt-branch')
+        assert state.worktree is not None
+        assert state.worktree_dirty is False
+        assert worktree_refusal(Action.FF_REF, state) is Refusal.WORKTREE_CHECKOUT
+        assert worktree_refusal(Action.FAST_FORWARD, state) is None
+
+    def test_a_dirty_worktree_refuses_and_the_report_predicts_it(self, cloned_repo, tmp_path):
+        """The one gate between a worktree-held branch and an ordinary fast-forward. It is the
+        worktree's own tree — the main checkout's dirtiness has no bearing either way, which is
+        the whole reason a worktree exists."""
+        repo, worktree = _worktree_behind(cloned_repo, tmp_path)
+        (worktree / 'scratch.txt').write_text('work in progress\n')
+        state = _state_for(repo, 'wt-branch')
         before = _git(worktree, 'rev-parse', 'HEAD').stdout.strip()
+
+        assert state.worktree_dirty is True
+        assert worktree_refusal(Action.FAST_FORWARD, state) is Refusal.WORKTREE_DIRTY
 
         outcome = execute(Action.FAST_FORWARD, state, repo, POLICY)
 
         assert outcome.status == 'refused'
-        assert outcome.reason is Refusal.WORKTREE_CHECKOUT
+        assert outcome.reason is Refusal.WORKTREE_DIRTY
         assert _git(worktree, 'rev-parse', 'HEAD').stdout.strip() == before
+        assert (worktree / 'scratch.txt').read_text() == 'work in progress\n'
 
-    def test_the_report_predicts_the_refusal(self, cloned_repo, tmp_path):
-        """The mirror, for the same reason dirty_refusal has one: `1 behind → fast_forward` on a
-        branch apply will always refuse is an arrow nobody can act on."""
+    def test_ff_worktree_refuses_a_branch_no_worktree_holds(self, cloned_repo, tmp_path):
+        """The mechanism's own side of the split, so naming it in a rule cannot reach a branch
+        it does not cover — the reason rules name the intent."""
         repo, _ = _worktree_behind(cloned_repo, tmp_path)
+        state = _state_for(repo, 'main')
+        assert state.worktree is None
+        assert worktree_refusal(Action.FF_WORKTREE, state) is Refusal.NO_WORKTREE
+        assert execute(Action.FF_WORKTREE, state, repo, POLICY).reason is Refusal.NO_WORKTREE
+
+    def test_a_dirty_main_checkout_does_not_block_the_worktree(self, cloned_repo, tmp_path):
+        """The inverse of the guard above, and the case that makes it worth having: syncer's own
+        repo had 16 uncommitted files in the main checkout while every worktree was clean."""
+        repo, worktree = _worktree_behind(cloned_repo, tmp_path)
+        (cloned_repo / 'README.md').write_text('# uncommitted, in the main checkout\n')
         state = _state_for(repo, 'wt-branch')
-        assert state.worktree is not None
-        assert worktree_refusal(Action.FF_REF, state) is Refusal.WORKTREE_CHECKOUT
-        assert worktree_refusal(Action.FAST_FORWARD, state) is Refusal.WORKTREE_CHECKOUT
+        assert repo.is_dirty
+        assert state.worktree_dirty is False
+
+        assert dirty_refusal(Action.FF_WORKTREE, state, dirty=True) is None
+        assert execute(Action.FAST_FORWARD, state, repo, POLICY).status == 'done'
+        assert _git(worktree, 'status', '--porcelain').stdout == ''
 
     def test_an_ordinary_non_current_branch_still_fast_forwards(self, cloned_repo, tmp_path):
         """The guard must cost nothing where no worktree is involved — otherwise it would refuse
@@ -926,12 +972,30 @@ class TestActionDocs:
         _git(path, 'branch', '--set-upstream-to=origin/main', 'stale')
         return _make_repo(path), 'stale'
 
-    # Every state, plus the one checkout variant that changes which mechanism can act.
-    CASES = (*(state for state in PrimaryState if state is not PrimaryState.DETACHED), 'behind-noncurrent')
+    def _behind_worktree(self, tmp_path: Path, tag: str) -> tuple[Repo, str]:
+        """The same branch, checked out in a clean linked worktree — the only shape ff_worktree
+        can act on. This is what `worktree new` leaves behind on any branch you have not
+        committed to yet: made off origin/main, tracking it, drifting as main moves."""
+        path = self._clone(tmp_path, tag)
+        before = self._advance_origin(path, tag)
+        _git(path, 'branch', 'parked', before)
+        _git(path, 'branch', '--set-upstream-to=origin/main', 'parked')
+        _git(path, 'worktree', 'add', str(tmp_path / f'wt-{tag}'), 'parked')
+        return _make_repo(path), 'parked'
+
+    # Every state, plus the checkout variants that change which mechanism can act. There is one
+    # per place a branch can be checked out, so this list grows with the dispatch.
+    CASES = (
+        *(state for state in PrimaryState if state is not PrimaryState.DETACHED),
+        'behind-noncurrent',
+        'behind-worktree',
+    )
+
+    _VARIANTS = {'behind-noncurrent': _behind_noncurrent, 'behind-worktree': _behind_worktree}
 
     def _build(self, case, tmp_path: Path, tag: str) -> tuple[Repo, str, PrimaryState]:
-        if case == 'behind-noncurrent':
-            repo, branch = self._behind_noncurrent(tmp_path, tag)
+        if case in self._VARIANTS:
+            repo, branch = self._VARIANTS[case](self, tmp_path, tag)
             return repo, branch, PrimaryState.BEHIND
         repo, branch = self._case(case, tmp_path, tag)
         return repo, branch, case

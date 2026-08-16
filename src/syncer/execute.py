@@ -60,6 +60,8 @@ class Refusal(StrEnum):
     NOT_CURRENT = 'not_current'
     IS_CURRENT = 'is_current'
     WORKTREE_CHECKOUT = 'worktree_checkout'
+    NO_WORKTREE = 'no_worktree'
+    WORKTREE_DIRTY = 'worktree_dirty'
     NO_UPSTREAM = 'no_upstream'
     HAS_UPSTREAM = 'has_upstream'
     DIRTY_TREE = 'dirty_tree'
@@ -83,6 +85,8 @@ REFUSAL_TEXT: dict[Refusal, str] = {
     Refusal.NOT_CURRENT: '{verb} requires the branch to be current',
     Refusal.IS_CURRENT: 'ff_ref is for non-current branches; use pull_ff',
     Refusal.WORKTREE_CHECKOUT: 'branch is checked out in another worktree',
+    Refusal.NO_WORKTREE: 'ff_worktree is for a branch a linked worktree holds; use fast_forward',
+    Refusal.WORKTREE_DIRTY: 'the worktree holding this branch has uncommitted changes',
     Refusal.NO_UPSTREAM: 'branch has no upstream',
     Refusal.HAS_UPSTREAM: 'branch already has an upstream',
     Refusal.DIRTY_TREE: 'working tree is dirty',
@@ -182,15 +186,52 @@ def _ff_ref(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     return Outcome(branch=state.branch, action=Action.FF_REF, status='failed', message=err)
 
 
+def _ff_worktree(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
+    """Fast-forward a branch a linked worktree holds, by merging inside that worktree.
+
+    Invariant 9 forbids writing such a branch's ref from *outside*, because update-ref moves the
+    ref while the worktree's index stays where it was. Running the merge in the worktree is the
+    opposite operation: git moves ref, index and tree together, exactly as it does for _pull_ff
+    on the current branch. So this adds a location, not a primitive — same argv, same strict
+    ancestry check, and a dirty guard against the tree it actually writes into.
+
+    The worktree is resolved live rather than read off the state: one that has been removed since
+    classify time must refuse, and worktree_for answering None when git could not be asked lands
+    on the same refusal, which is the direction that declines to act.
+    """
+    worktree = repo.worktree_for(state.branch)
+    if worktree is None:
+        return _refused(state, Action.FF_WORKTREE, Refusal.NO_WORKTREE)
+    if repo.worktree_is_dirty(worktree):  # invariant 2, against the tree this actually writes
+        return _refused(state, Action.FF_WORKTREE, Refusal.WORKTREE_DIRTY)
+    if not state.upstream:
+        return _refused(state, Action.FF_WORKTREE, Refusal.NO_UPSTREAM)
+    if not _is_strictly_behind(repo, state.branch, state.upstream):  # invariant 3
+        return _refused(state, Action.FF_WORKTREE, Refusal.NOT_STRICTLY_BEHIND)
+    ok, err = repo.merge_ff_only_in(worktree, state.upstream)
+    if ok:
+        return Outcome(branch=state.branch, action=Action.FF_WORKTREE, status='done', message=f'fast-forwarded in {worktree}')
+    return Outcome(branch=state.branch, action=Action.FF_WORKTREE, status='failed', message=err)
+
+
 def _fast_forward(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     """Advance a branch to its upstream by whichever mechanism its checkout state allows.
 
-    merge --ff-only needs the branch checked out; update-ref needs it not checked out. A rule
-    naming either mechanism is therefore refused every time the branch sits on the other side
-    of that split, which is why policies name this intent instead. Both delegates re-verify
-    strict ancestry (and dirtiness, where it applies) themselves, so this adds no new primitive.
+    Three places a branch can be checked out, three mechanisms: here (merge), in a linked
+    worktree (merge, there), or nowhere (update-ref). A rule naming any one of them is refused
+    every time the branch is somewhere else, which is why policies name this intent instead.
+    Every delegate re-verifies strict ancestry and its own dirtiness, so this adds no primitive.
+
+    Dispatch reads git rather than `state.worktree`, per invariant 6 — a worktree added or
+    removed since classify time would otherwise pick a mechanism that is now the wrong one. A
+    failed `git worktree list` lands on _ff_ref, whose own guard refuses what it cannot verify.
     """
-    delegate = _pull_ff if state.is_current else _ff_ref
+    if state.is_current:
+        delegate = _pull_ff
+    elif repo.worktree_for(state.branch) is not None:
+        delegate = _ff_worktree
+    else:
+        delegate = _ff_ref
     return delegate(state, repo, policy).model_copy(update={'action': Action.FAST_FORWARD})
 
 
@@ -275,6 +316,7 @@ def _delete_local(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
 _MUTATORS: dict[Action, Callable[[BranchState, Repo, Policy], Outcome]] = {
     Action.FAST_FORWARD: _fast_forward,
     Action.PULL_FF: _pull_ff,
+    Action.FF_WORKTREE: _ff_worktree,
     Action.FF_REF: _ff_ref,
     Action.PUSH: _push,
     Action.REBASE_PUSH: _rebase_push,
@@ -344,9 +386,15 @@ ACTION_DOCS: dict[Action, ActionDoc] = {
         applies_to=frozenset(PrimaryState),
     ),
     Action.FAST_FORWARD: ActionDoc(
-        summary='advance a branch to its upstream',
-        runs='git merge --ff-only <upstream>  (current)  ·  git update-ref (not current)',
-        refuses=(Refusal.NO_UPSTREAM, Refusal.DIRTY_TREE, Refusal.NOT_STRICTLY_BEHIND, Refusal.WORKTREE_CHECKOUT),
+        summary='advance a branch to its upstream, wherever it is checked out',
+        runs='git merge --ff-only <upstream>  (here, or in the worktree)  ·  git update-ref (checked out nowhere)',
+        refuses=(
+            Refusal.NO_UPSTREAM,
+            Refusal.DIRTY_TREE,
+            Refusal.WORKTREE_DIRTY,
+            Refusal.NOT_STRICTLY_BEHIND,
+            Refusal.WORKTREE_CHECKOUT,
+        ),
         never='creates a merge commit, or moves a branch the upstream is not strictly ahead of',
         applies_to=frozenset({PrimaryState.BEHIND}),
     ),
@@ -355,6 +403,13 @@ ACTION_DOCS: dict[Action, ActionDoc] = {
         runs='git merge --ff-only <upstream>',
         refuses=(Refusal.NOT_CURRENT, Refusal.NO_UPSTREAM, Refusal.DIRTY_TREE, Refusal.NOT_STRICTLY_BEHIND),
         never='creates a merge commit — --ff-only means git refuses rather than merging',
+        applies_to=frozenset({PrimaryState.BEHIND}),
+    ),
+    Action.FF_WORKTREE: ActionDoc(
+        summary='fast-forward a branch a linked worktree holds, inside it (mechanism)',
+        runs='git -C <worktree> merge --ff-only <upstream>',
+        refuses=(Refusal.NO_WORKTREE, Refusal.WORKTREE_DIRTY, Refusal.NO_UPSTREAM, Refusal.NOT_STRICTLY_BEHIND),
+        never='writes the ref from outside the worktree, which would leave that index describing a commit it no longer points at',
         applies_to=frozenset({PrimaryState.BEHIND}),
     ),
     Action.FF_REF: ActionDoc(
@@ -430,9 +485,16 @@ def dirty_refusal(action: Action, state: BranchState, dirty: bool) -> Refusal | 
     """
     if not dirty or action not in MUTATING_ACTIONS:
         return None
-    # fast_forward dispatches on checkout state, so it inherits _ff_ref's indifference to the
-    # tree whenever the branch is not the current one.
-    if action in _TREE_INDEPENDENT or (action == Action.FAST_FORWARD and not state.is_current):
+    if action in _TREE_INDEPENDENT:
+        return None
+    # ff_worktree does write a tree, just never this one — `dirty` is the main checkout's, and the
+    # point of a worktree is that the two are independent. Its own tree is gated by
+    # worktree_refusal, which is the only gate that has measured it.
+    if action is Action.FF_WORKTREE:
+        return None
+    # fast_forward dispatches on checkout state, so off the current branch it inherits whichever
+    # of the two non-current mechanisms applies — and neither of them reads this tree.
+    if action == Action.FAST_FORWARD and not state.is_current:
         return None
     return Refusal.DIRTY_TREE
 
@@ -457,26 +519,30 @@ def checkout_refusal(action: Action, state: BranchState) -> Refusal | None:
 
 
 def worktree_refusal(action: Action, state: BranchState) -> Refusal | None:
-    """Why a linked worktree holding this branch refuses `action`, or None if it admits it.
+    """How the branch's worktree situation bears on `action`, or None if it admits it.
 
     The third gate the reporter can evaluate without executing, for the same reason as the other
-    two: `behind → fast_forward` on a branch a worktree owns is an arrow apply will never follow,
-    and an arrow nobody can act on is the part of a row that costs it its meaning.
+    two: an arrow apply will never follow is the part of a row that costs it its meaning.
 
-    The ref-writing actions are gated here. pull_ff needs the branch current, which no linked
-    worktree's branch is, so it is already refused for a different reason. Invariant 9 is still
-    enforced live inside _ff_ref and _delete_local against repo.held_by_worktree — this only
-    mirrors it.
+    Three answers, because a worktree is not one fact. It *forbids* the actions that write the ref
+    from outside — ff_ref and delete_local, which invariant 9 covers. It is *required* by
+    ff_worktree, which has nothing to merge into without one. And it carries a tree of its own,
+    which ff_worktree writes into and so must find clean; that is the only thing standing between
+    a worktree-held branch and an ordinary fast-forward.
 
     delete_local is here because git's own refusal is not a substitute for one of ours. git returns
     it as a failure carrying prose, so the outcome is `failed` rather than `refused`, nothing can
     join on the reason, and the reporter — which never runs git — cannot predict it at all. Three
     merged branches printed `→ delete_local` and would each have hit that.
     """
+    if action is Action.FF_WORKTREE and state.worktree is None:
+        return Refusal.NO_WORKTREE
     if state.worktree is None:
         return None
-    if action in (Action.FF_REF, Action.DELETE_LOCAL) or (action is Action.FAST_FORWARD and not state.is_current):
+    if action in (Action.FF_REF, Action.DELETE_LOCAL):
         return Refusal.WORKTREE_CHECKOUT
+    if action in (Action.FF_WORKTREE, Action.FAST_FORWARD) and state.worktree_dirty:
+        return Refusal.WORKTREE_DIRTY
     return None
 
 

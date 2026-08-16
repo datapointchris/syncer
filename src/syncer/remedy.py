@@ -129,6 +129,7 @@ NO_REMEDY = frozenset(
     {
         Refusal.NOT_CURRENT,
         Refusal.IS_CURRENT,
+        Refusal.NO_WORKTREE,
         Refusal.NO_UPSTREAM,
         Refusal.HAS_UPSTREAM,
         Refusal.NOT_STRICTLY_BEHIND,
@@ -181,6 +182,16 @@ def _refusal_remedy(reason: Refusal, state: BranchState, action: Action, repo_pa
         )
     if reason is Refusal.WORKTREE_CHECKOUT:
         return _worktree_checkout(state, action, repo_path)
+    if reason is Refusal.WORKTREE_DIRTY:
+        # Honesty rule 4 again, and rule 3 the other way from DIRTY_TREE: this tree really is the
+        # worktree's, and it is the one thing between the branch and an ordinary fast-forward.
+        return Remedy(
+            commands=(_git_in(state.worktree or repo_path, 'status', '--short'),),
+            notes=(
+                f'syncer would fast-forward {state.branch} in {state.worktree}, but will not merge into a tree with changes in it.',
+                'Deal with them however you like and the next run clears the branch.',
+            ),
+        )
     if reason is Refusal.PROTECTED:
         return Remedy(
             notes=(

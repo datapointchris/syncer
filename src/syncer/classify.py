@@ -53,10 +53,11 @@ def classify_branch(
     is_current = branch == current
     is_default = branch == default
     # dirty only gates the *current* branch — a non-current branch's tree isn't checked out here.
-    # A linked worktree's tree is not measured at all: `worktree` records only that one exists,
-    # which is enough for the guard, since syncer refuses to touch such a branch either way.
+    # A linked worktree has a tree of its own and ff_worktree writes into it, so it is measured
+    # separately; one `git status` per worktree-held branch, and only for those.
     dirty = dirty_current and is_current
     worktree = None if is_current else repo.worktree_for(branch)
+    worktree_dirty = worktree is not None and repo.worktree_is_dirty(worktree)
     upstream_short, gone = repo.branch_upstream(branch)
     target = merge_target or default
 
@@ -88,6 +89,7 @@ def classify_branch(
         upstream=upstream_short or None,
         merged_into_target=merged_into_target,
         worktree=worktree,
+        worktree_dirty=worktree_dirty,
     )
 
 

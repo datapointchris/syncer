@@ -155,11 +155,12 @@ watch_remote = ["develop", "dev", "uat", "prod"]
 #   selector   exact branch name  >  glob  >  role (default > current)  >  "*"
 #   state      synced | ahead | behind | diverged | no_upstream | gone | detached
 #   action     skip | report | fast_forward | push | rebase_push | set_upstream_push
-#              | delete_local | prompt | pull_ff | ff_ref
+#              | delete_local | prompt | pull_ff | ff_worktree | ff_ref
 #
-# Name intents, not mechanisms: fast_forward dispatches to pull_ff (merge --ff-only, which needs
-# the branch checked out) or ff_ref (update-ref, which needs it not checked out). A rule naming
-# either mechanism directly is refused for half of all checkout states.
+# Name intents, not mechanisms: fast_forward dispatches on where the branch is checked out, to
+# pull_ff (merge --ff-only, here), ff_worktree (the same merge, inside the linked worktree that
+# holds it) or ff_ref (update-ref, for a branch checked out nowhere). A rule naming a mechanism
+# directly is refused every time the branch is somewhere that mechanism does not cover.
 [policies.laptop.rules]
 "main:diverged"       = "rebase_push"
 "release/*:ahead"     = "report"

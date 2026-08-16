@@ -570,6 +570,28 @@ class Repo:
         result = self._git('merge', '--ff-only', upstream)
         return result.returncode == 0, result.stderr.strip()
 
+    def merge_ff_only_in(self, worktree: str, upstream: str) -> tuple[bool, str]:
+        """The same fast-forward, run inside the linked worktree that holds the branch.
+
+        `-C` rather than a second cwd, so the recorded argv names the directory it ran in — a
+        failure summary saying `merge --ff-only` with no location is unreadable on a repo with
+        several worktrees. Everything else is identical to merge_ff_only, deliberately: git moves
+        the index and the tree with the ref here, which is the whole difference from update_ref.
+        """
+        result = self._git('-C', worktree, 'merge', '--ff-only', upstream)
+        return result.returncode == 0, result.stderr.strip()
+
+    def worktree_is_dirty(self, worktree: str) -> bool:
+        """True when a linked worktree's tree has changes *or* git could not tell us.
+
+        The same polarity as is_dirty, for the same reason: this gates a write into that tree.
+        A worktree whose directory has been removed but whose registration survives answers True
+        here, which is the refusing direction and the one that is right — the tree cannot be
+        measured, so it cannot be advanced.
+        """
+        result = self._git('-C', worktree, 'status', '--porcelain')
+        return result.returncode != 0 or bool(result.stdout.strip())
+
     def update_ref(self, branch: str, target: str) -> tuple[bool, str]:
         """Advance a (non-current) local branch ref to `target` without a checkout."""
         result = self._git('update-ref', f'refs/heads/{branch}', target)
