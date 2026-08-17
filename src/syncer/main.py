@@ -225,6 +225,18 @@ def issues(
             console.print()
             continue
 
+        if not (path / '.git').exists():
+            # A directory with no repo in it. Skipping it silently printed 'registry matches the
+            # filesystem' for a machine mid-setup, where every path is in this state — the same
+            # unmeasured all-clear the line at the bottom was rewritten to stop.
+            console.print(_status_line(ICON_WARN, label, 'not cloned', 'yellow'))
+            console.print('    a directory is here but holds no repo — syncer apply clones into it')
+            issues_found += 1
+            console.print()
+            continue
+
+        # A linked worktree keeps its .git as a file. Every check below reads a clone's origin,
+        # which is the owning repo's rather than this path's.
         if not (path / '.git').is_dir():
             continue
 
@@ -315,7 +327,7 @@ def doctor(
     config and registry paths with the reason each was chosen, whether the remotes can actually
     be reached, and how many repos are cloned. Read-only, and never writes a config.
 
-    Exits 1 if any check fails, so [bold]syncer doctor && syncer --apply[/bold] stops on a box
+    Exits 1 if any check fails, so [bold]syncer doctor && syncer apply[/bold] stops on a box
     that was never going to work.
     """
     checks = run_doctor(repos_file)

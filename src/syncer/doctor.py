@@ -262,11 +262,14 @@ def _repos_on_disk(config: SyncerConfig, reachable: bool) -> Check:
             'the registry lists no repos yet',
             hints=['add them by hand, or scan a directory you already have: syncer config scan ~/code'],
         )
-    missing = [repo for repo in active if not Path(repo.path).expanduser().exists()]
+    # Keyed on `.git`, not on the path: setting a machine up seeds gitignored files into repo
+    # paths before anything is cloned, so a directory standing there is not a clone. Counting one
+    # as present is a clean bill of health for a box that holds no repos at all.
+    missing = [repo for repo in active if not (Path(repo.path).expanduser() / '.git').exists()]
     if not missing:
         return Check('clones', Status.OK, f'all {len(active)} repos present')
     summary = f'{len(active) - len(missing)} of {len(active)} repos present, {len(missing)} missing'
-    hints = ['clone them: syncer --apply'] if reachable else ['fix the reachability failure above first — cloning will fail the same way']
+    hints = ['clone them: syncer apply'] if reachable else ['fix the reachability failure above first — cloning will fail the same way']
     return Check('clones', Status.WARN, summary, detail=[repo.name for repo in missing[:6]], hints=hints)
 
 
@@ -365,7 +368,7 @@ def doctor_exit_code(checks: list[Check]) -> int:
 
     WARN stays 0 deliberately: an un-cloned repo set and a registry you have not filled in yet
     are states you can be in on purpose, while a registry that will not load or a host that
-    cannot be reached means the next command is going to fail. `syncer doctor && syncer --apply`
+    cannot be reached means the next command is going to fail. `syncer doctor && syncer apply`
     has to stop for the second and not the first.
     """
     return 1 if any(check.status is Status.FAIL for check in checks) else 0

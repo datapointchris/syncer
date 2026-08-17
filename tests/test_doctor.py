@@ -165,12 +165,26 @@ class TestClonesAndPolicy:
         [clones] = _named(run_doctor(), 'clones')
         assert clones.status is Status.WARN
         assert '0 of 3' in clones.summary
-        assert 'syncer --apply' in ' '.join(clones.hints)
+        assert 'syncer apply' in ' '.join(clones.hints)
+
+    def test_a_seeded_directory_does_not_count_as_a_clone(self, isolated, tmp_path):
+        """A restore drops gitignored files at a repo path before the repo exists. Keying on the
+        path made doctor report every repo present on a box that held none of them."""
+        bare = _bare_repo(tmp_path, 'api')
+        seeded = tmp_path / 'api'
+        seeded.mkdir()
+        (seeded / 'local.env').write_text('SECRET\n')
+        _write_registry(isolated, repos=[{'name': 'api', 'path': str(seeded), 'clone_url': str(bare)}])
+
+        [clones] = _named(run_doctor(), 'clones')
+
+        assert clones.status is Status.WARN
+        assert '0 of 1' in clones.summary
 
     def test_it_does_not_suggest_cloning_when_the_host_is_unreachable(self, isolated, tmp_path):
         _write_registry(isolated, repos=[{'name': 'api', 'path': str(tmp_path / 'api'), 'clone_url': str(tmp_path / 'gone.git')}])
         [clones] = _named(run_doctor(), 'clones')
-        assert 'syncer --apply' not in ' '.join(clones.hints)
+        assert 'syncer apply' not in ' '.join(clones.hints)
 
     def test_an_unresolvable_default_policy_fails(self, isolated):
         (isolated / 'config.toml').write_text('default_policy = "nonexistent"\n')

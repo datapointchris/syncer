@@ -95,6 +95,25 @@ class TestIssuesMasterCheck:
         assert 'Registry matches the filesystem' in result.stdout
         assert 'healthy' not in result.stdout
 
+    def test_a_path_holding_no_repo_is_reported(self, tmp_path, monkeypatch):
+        """Setting a machine up seeds gitignored files into repo paths before anything is cloned.
+        Skipping those printed 'registry matches the filesystem' for a box holding no repos."""
+        seeded = tmp_path / 'seeded'
+        seeded.mkdir()
+        (seeded / 'local.env').write_text('SECRET\n')
+        registry = tmp_path / 'seeded-repos.json'
+        registry.write_text(
+            json.dumps(
+                {'owner': 'demo', 'host': 'https://github.com', 'search_paths': [], 'repos': [{'name': 'seeded', 'path': str(seeded)}]}
+            )
+        )
+
+        result = self._run_issues(registry, monkeypatch, tmp_path)
+
+        assert result.exit_code == 1
+        assert 'not cloned' in result.stdout
+        assert 'Registry matches the filesystem' not in result.stdout
+
 
 class TestExitCodesAndJson:
     """Every run used to exit 0 however many repos failed, so nothing could be scripted around
