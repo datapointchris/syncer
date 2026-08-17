@@ -1,6 +1,27 @@
 # CHANGELOG
 
 
+## v11.3.1 (2026-08-17)
+
+### Bug Fixes
+
+- Report a registry path that holds no repo as uncloned
+  ([`fc05960`](https://github.com/datapointchris/syncer/commit/fc0596000b97750bd74e4b3ecc7282300c8ee880))
+
+`issues` and `doctor` both read "the path exists" as "the repo is cloned". Setting a machine up puts
+  gitignored files at repo paths before anything is cloned, so both printed a clean bill of health
+  for a box holding no repos: `issues` said the registry matched the filesystem, and doctor said all
+  N repos were present.
+
+Both now key on `.git`. `issues` reports the path as not cloned and names `syncer apply` as what
+  fills it, rather than skipping it silently. A linked worktree keeps its `.git` as a file and still
+  counts as present, since apply will not clone over it.
+
+The clone hint and two docstrings named `syncer --apply`, which has not been an invocation since
+  writing became a verb. One test asserted that string and another asserted its absence, so the
+  second was passing on a string that could no longer appear.
+
+
 ## v11.3.0 (2026-08-17)
 
 ### Chores
