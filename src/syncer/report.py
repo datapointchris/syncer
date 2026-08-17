@@ -479,6 +479,16 @@ def _crashed_report(repo_config: RepoConfig, exc: Exception) -> RepoBranchReport
     )
 
 
+def _occupied_note(path: Path) -> str:
+    """What is at stake, since a bare `would clone` against an occupied path reads as an oversight."""
+    try:
+        entries = len(list(path.iterdir()))
+    except OSError:
+        return 'something is already here — apply clones into it and keeps what it holds'
+    noun = 'entry' if entries == 1 else 'entries'
+    return f'a directory holding {entries} {noun} is already here — apply clones into it and keeps them'
+
+
 def _build_repo_report(
     repo_config: RepoConfig,
     config: SyncerConfig,
@@ -530,7 +540,15 @@ def _build_repo_report(
             expected_url=repo.url,
         )
 
-    if not repo.exists:
+    # A directory standing where a repo belongs is a repo waiting to be cloned, not a broken one:
+    # setting a machine up seeds its gitignored files before the clones exist, and `git clone`
+    # declines a non-empty destination outright.
+    occupied = repo.exists and not repo.is_git_repo
+    if occupied and (path / '.git').exists():
+        # Git state syncer will not write into — a linked worktree's .git file, or one it cannot
+        # read. Reserved for that, so `not_git` now means something syncer has no clone for.
+        return lifecycle('not_git') if include_lifecycle else None
+    if not repo.is_git_repo:
         if not include_lifecycle:
             return None
         found = find_repo_in_search_paths(repo.name, search_paths, claimed_paths)
@@ -542,10 +560,13 @@ def _build_repo_report(
             trip = breaker.trip_for(repo.url)
             if trip is not None:
                 return _skipped_report(repo_config, trip, repo.url)
-            cloned, err = repo.clone()
+            cloned, err = repo.clone_into_existing() if occupied else repo.clone()
             if cloned:
                 breaker.record_success(repo.url)
-                return lifecycle('cloned', f'cloned to {path}')
+                # Which mechanism ran: a clone into an occupied directory can come out dirty on
+                # files that were already there, and a plain one never can.
+                landed = f'cloned into the existing directory at {path}' if occupied else f'cloned to {path}'
+                return lifecycle('cloned', landed)
             if repo.failures:
                 breaker.record_failure(repo.url, repo.failures[-1])
             # Name the URL as well as the error: a wrong url_template or an empty registry
@@ -553,9 +574,7 @@ def _build_repo_report(
             # explains ('repository not found' reads as a permissions problem).
             detail = f'{repo.url}\n{err}' if err else f'{repo.url}\ngit clone failed with no output'
             return lifecycle('clone_failed', detail)
-        return lifecycle('would_clone')
-    if not repo.is_git_repo:
-        return lifecycle('not_git') if include_lifecycle else None
+        return lifecycle('would_clone', _occupied_note(path) if occupied else None)
     remotes = repo.remotes()
     if remotes is None:
         return _failed_report(repo, label, repo_config, 'cannot read this repo (git failed)')

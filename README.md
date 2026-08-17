@@ -70,6 +70,8 @@ syncer version           # print installed version
 
 The repo-level view and `--per-branch` share the same policy engine and concurrency; the difference is that the repo-level one also handles repo lifecycle (clone missing repos, flag moved/untracked/no-remote repos), records a run in the history (`syncer stats`), and warns about repos left dirty for days.
 
+**A repo whose path already holds files is still cloned.** Setting a machine up puts the gitignored files it cannot rebuild (`.env`, `.planning/`) in place before the repos exist, and `git clone` declines a non-empty destination outright — so those paths used to report `not a git repository` and stop. `apply` builds the repo around what is there instead, and git refuses the whole checkout rather than write over any file already present, so nothing existing is replaced and nothing is deleted. A file the repo neither tracks nor ignores stays put and leaves the fresh clone dirty, which syncer reports like any other dirty tree. A path already holding a `.git` — a linked worktree keeps its own as a file — is reported and left alone.
+
 ### Exit codes
 
 | Code | Meaning |

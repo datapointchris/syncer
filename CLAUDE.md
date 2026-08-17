@@ -147,6 +147,32 @@ which is why the CLI exposes it as an option on both verbs rather than a fourth 
 There is no second sync path — the old default-branch `sync_repos` loop was deleted, not kept
 alongside. If you're tempted to special-case the default run, add it behind `include_lifecycle`.
 
+### A directory where a repo belongs is a repo waiting to be cloned
+
+`git clone` declines a non-empty destination outright, so a path holding anything at all reported
+`not a git repository` — ERROR, exit 1, no next step named. That is the state every repo path is
+in on a machine being set up, because the restore that puts back the gitignored files a machine
+cannot rebuild (`.env`, `.planning/`) runs before anything is cloned. syncer stopped at the one
+moment it was most needed, on a registry that was entirely correct.
+
+`Repo.clone_into_existing` builds the repo around what is there — `init`, `remote add`, `fetch`,
+`checkout` of the remote's default — and the mechanism is chosen for one property: **checkout will
+not write over a file already present, and aborts whole rather than file by file.** git holds that
+even when the existing content is identical, so no path in the resulting index predates the
+checkout. That is what makes the failure path clean, since removing the `.git` a refusal built
+cannot then orphan a file. Nothing else is ever deleted.
+
+Three consequences, none of them readable from the code:
+
+- **A file the repo neither tracks nor ignores is kept, and the fresh clone is dirty.** Requiring
+  a clean tree was the alternative, and reverting to it is the only thing in the design that would
+  have deleted a user's file. A dirty tree is already reported and already refused for mutation.
+- **`not_git` is now reserved for a path already holding git state.** A linked worktree keeps its
+  `.git` as a *file*, so `is_git_repo` reads False for one — and `git init` there succeeds against
+  the repo that owns it through the gitdir link. The status means git state syncer will not write
+  into, rather than a directory it had no mechanism for.
+- **`check` says `would clone` at WARNING, and names the entry count**, so a box mid-setup exits 0.
+
 ## Safety invariants (execute.py)
 
 `apply` is safe by construction. `execute()` re-verifies **every** precondition live,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import os
 import re
+import shutil
 import subprocess
 import threading
 from dataclasses import dataclass
@@ -223,15 +224,18 @@ class Repo:
         # Thread-confined: report.py builds one Repo per worker task, so a plain list is safe.
         self.failures: list[GitFailure] = []
 
-    def _git(self, *args: str, probe: bool = False) -> subprocess.CompletedProcess[str]:
+    def _git(self, *args: str, probe: bool = False, timeout: int | None = None) -> subprocess.CompletedProcess[str]:
         """Run git in this repo, recording a non-zero exit unless it is a probe.
 
         Recording is the default so a git call added later is visible without anyone
         remembering to opt in — the same direction PROTECTED_ALLOWED takes. `probe=True` is for
         the handful of calls that ask a yes/no question, where non-zero *is* the answer and
         recording it would bury the real failures in noise.
+
+        `timeout` is for the one call that does a clone's work from inside a repo: the first
+        fetch of a full history. Everything else is sized by git_timeout.
         """
-        result = run_command(['git', *args], cwd=self.path, timeout=self.timeout)
+        result = run_command(['git', *args], cwd=self.path, timeout=timeout or self.timeout)
         if result.returncode != 0 and not probe:
             self.failures.append(GitFailure(argv=args, returncode=result.returncode, stderr=result.stderr.strip()))
         return result
@@ -648,6 +652,57 @@ class Repo:
         if result.returncode != 0:
             self.failures.append(GitFailure(argv=argv, returncode=result.returncode, stderr=result.stderr.strip()))
         return result.returncode == 0, result.stderr.strip()
+
+    def clone_into_existing(self) -> tuple[bool, str]:
+        """Clone into a directory that already holds files. Returns (ok, stderr), like clone().
+
+        `git clone` refuses a non-empty destination outright, so the repo arrives as init + fetch
+        + checkout instead. Checkout is what keeps the guarantee that refusal was standing in
+        for: it will not write over a file already there, not even one whose content is
+        identical, and it aborts whole rather than file by file. Nothing here deletes — the only
+        thing removed is the `.git` a failed attempt built.
+        """
+        git_dir = self.path / '.git'
+        if git_dir.exists():
+            # A linked worktree keeps its .git as a *file*, so is_git_repo reads False for one.
+            # `git init` there succeeds and reinitialises the repo that owns it through the
+            # gitdir link, after which remote add and checkout would run against that repo.
+            return False, f'{git_dir} already exists'
+        ok, err = self._adopt_directory()
+        if ok:
+            return True, ''
+        if git_dir.exists():
+            shutil.rmtree(git_dir, ignore_errors=True)
+        if git_dir.exists():
+            # Named because syncer made it: a half-adopted directory reads as a repo next run,
+            # and every branch under it would be classified against refs nothing fetched.
+            return False, f'{err}\ncould not remove the partial clone at {git_dir}'
+        return False, err
+
+    def _adopt_directory(self) -> tuple[bool, str]:
+        """The steps of clone_into_existing, so one caller owns removing .git on every failure."""
+        argv = ('init', '--quiet', str(self.path))
+        init = run_command(['git', *argv], timeout=self.timeout)
+        if init.returncode != 0:
+            self.failures.append(GitFailure(argv=argv, returncode=init.returncode, stderr=init.stderr.strip()))
+            return False, init.stderr.strip()
+        added = self._git('remote', 'add', 'origin', self.url)
+        if added.returncode != 0:
+            return False, added.stderr.strip()
+        # A first fetch downloads what a clone downloads, so it gets a clone's ceiling.
+        fetched = self._git('fetch', '--quiet', 'origin', timeout=self.timeout * CLONE_TIMEOUT_MULTIPLIER)
+        if fetched.returncode != 0:
+            return False, fetched.stderr.strip()
+        self.set_head_auto()
+        branch = self.default_branch
+        if branch is None:
+            return False, f'fetched {self.url} but could not read which branch is its default'
+        # HEAD is unborn, so this creates the branch from origin/<branch>, sets it tracking and
+        # populates the tree — and refuses the whole checkout if any tracked path is occupied.
+        checkout = self._git('checkout', branch)
+        if checkout.returncode != 0:
+            return False, checkout.stderr.strip()
+        return True, ''
 
 
 def find_repo_in_search_paths(name: str, search_paths: list[Path], claimed_paths: set[Path] | None = None) -> Path | None:

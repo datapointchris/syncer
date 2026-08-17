@@ -950,3 +950,125 @@ class TestAskpassIsNeverLaunched:
             timeout=20,
         )
         assert marker.exists() is True
+
+
+@pytest.fixture
+def seeded_origin(tmp_path):
+    """A bare origin tracking README.md and a .gitignore covering `*.env` and `.planning/`.
+
+    That is the shape a restore tool leaves behind on a new machine: the files it puts at a repo
+    path before the repo exists are exactly the ones the repo ignores.
+    """
+    bare = tmp_path / 'origin.git'
+    subprocess.run(['git', 'init', '--bare', '-b', 'main', str(bare)], capture_output=True)
+    seed = tmp_path / 'seed'
+    subprocess.run(['git', 'clone', str(bare), str(seed)], capture_output=True)
+    _git(seed, 'config', 'user.email', 'test@test.com')
+    _git(seed, 'config', 'user.name', 'Test')
+    (seed / 'README.md').write_text('# Test\n')
+    (seed / '.gitignore').write_text('*.env\n.planning/\n')
+    _git(seed, 'add', 'README.md', '.gitignore')
+    _git(seed, 'commit', '-m', 'init')
+    _git(seed, 'push', '-u', 'origin', 'main')
+    return bare
+
+
+def _occupied(tmp_path: Path, **files: str) -> Path:
+    target = tmp_path / 'target'
+    target.mkdir()
+    for name, content in files.items():
+        path = target / name.replace('__', '/')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+    return target
+
+
+class TestCloneIntoExisting:
+    """A directory standing where a repo belongs, holding files that arrived before the clone."""
+
+    def _repo(self, target: Path, origin: Path) -> Repo:
+        return Repo(name='target', path=target, owner='user', host='https://github.com', url=str(origin))
+
+    def test_clones_around_files_the_repo_ignores(self, tmp_path, seeded_origin):
+        target = _occupied(tmp_path, **{'local.env': 'SECRET\n', '.planning__status.md': 'notes\n'})
+        repo = self._repo(target, seeded_origin)
+
+        ok, err = repo.clone_into_existing()
+
+        assert (ok, err) == (True, '')
+        assert (target / 'README.md').read_text() == '# Test\n'
+        assert (target / 'local.env').read_text() == 'SECRET\n'
+        assert (target / '.planning' / 'status.md').read_text() == 'notes\n'
+        # Indistinguishable from a fresh clone: clean tree, tracking upstream.
+        assert repo.is_dirty is False
+        assert repo.current_branch == 'main'
+        assert repo.branch_upstream('main') == ('origin/main', False)
+
+    def test_a_tracked_path_already_occupied_is_refused_whole(self, tmp_path, seeded_origin):
+        """git checkout declines the whole operation rather than overwriting one file, which is
+        the guarantee `git clone` was standing in for when it declined the directory outright."""
+        target = _occupied(tmp_path, **{'README.md': 'MINE\n'})
+
+        ok, err = self._repo(target, seeded_origin).clone_into_existing()
+
+        assert ok is False
+        assert 'README.md' in err
+        assert (target / 'README.md').read_text() == 'MINE\n'
+        # The directory is left as it was found, so the next run reads it the same way this one did.
+        assert (target / '.git').exists() is False
+        assert sorted(p.name for p in target.iterdir()) == ['README.md']
+
+    def test_identical_content_is_refused_too(self, tmp_path, seeded_origin):
+        """The refusal is on the path, not the content. Relied on by the revert above: every file
+        a checkout wrote is one it created, so removing .git cannot orphan a pre-existing file."""
+        target = _occupied(tmp_path, **{'README.md': '# Test\n'})
+
+        ok, _ = self._repo(target, seeded_origin).clone_into_existing()
+
+        assert ok is False
+        assert (target / '.git').exists() is False
+
+    def test_a_file_the_repo_neither_tracks_nor_ignores_is_kept(self, tmp_path, seeded_origin):
+        """Kept, not deleted and not refused: the clone lands and the leftover shows as dirty,
+        which is the vocabulary syncer already reports and already refuses to mutate."""
+        target = _occupied(tmp_path, **{'scratch.txt': 'mine\n'})
+        repo = self._repo(target, seeded_origin)
+
+        ok, _ = repo.clone_into_existing()
+
+        assert ok is True
+        assert (target / 'scratch.txt').read_text() == 'mine\n'
+        assert repo.is_dirty is True
+
+    def test_never_writes_where_git_state_already_lives(self, tmp_path, seeded_origin):
+        """A linked worktree keeps its .git as a file, so `is_git_repo` reads False for one.
+        Running `git init` there would point the path at another repo's gitdir."""
+        target = _occupied(tmp_path, **{'.git': 'gitdir: /somewhere/else\n'})
+
+        ok, err = self._repo(target, seeded_origin).clone_into_existing()
+
+        assert ok is False
+        assert 'already exists' in err
+        assert (target / '.git').read_text() == 'gitdir: /somewhere/else\n'
+
+    def test_follows_the_remotes_default_branch_not_the_local_init_default(self, tmp_path, seeded_origin):
+        """`git init` names the first branch from local config, which has nothing to do with
+        what the remote calls its default."""
+        target = _occupied(tmp_path, **{'local.env': 'SECRET\n'})
+        subprocess.run(['git', 'branch', '-m', 'main', 'trunk'], cwd=seeded_origin, capture_output=True)
+        repo = self._repo(target, seeded_origin)
+
+        ok, _ = repo.clone_into_existing()
+
+        assert ok is True
+        assert repo.current_branch == 'trunk'
+
+    def test_an_unreachable_remote_leaves_the_directory_alone(self, tmp_path):
+        target = _occupied(tmp_path, **{'local.env': 'SECRET\n'})
+
+        ok, err = self._repo(target, tmp_path / 'no-such-repo.git').clone_into_existing()
+
+        assert ok is False
+        assert err
+        assert (target / '.git').exists() is False
+        assert sorted(p.name for p in target.iterdir()) == ['local.env']

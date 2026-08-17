@@ -399,12 +399,19 @@ def _setup_demo_repos(base: Path) -> SyncerConfig:
     _git(repo, 'add', '.')
     _git(repo, 'stash', 'push', '-m', 'saving more work')
 
-    # 6. Not a git repo
+    # 6. A directory standing where a repo belongs, holding files that arrived before the clone
+    #    did — what a restore tool leaves on a machine being set up. apply clones into it.
+    seeded = make_repo('seeded-directory')
+    shutil.rmtree(seeded)
+    seeded.mkdir()
+    (seeded / 'local.env').write_text('SECRET=demo\n')
+
+    # 7. Git state syncer will not write into: a linked worktree keeps its .git as a file.
     not_git = base / 'repos' / 'not-a-repo'
     not_git.mkdir(parents=True)
-    (not_git / 'file.txt').write_text('just a directory\n')
+    (not_git / '.git').write_text('gitdir: /somewhere/else\n')
 
-    # 7. No remote
+    # 8. No remote
     no_remote = base / 'repos' / 'no-remote-repo'
     no_remote.mkdir(parents=True)
     subprocess.run(['git', 'init', str(no_remote)], capture_output=True)  # nosec B607
@@ -414,12 +421,20 @@ def _setup_demo_repos(base: Path) -> SyncerConfig:
     _git(no_remote, 'add', '.')
     _git(no_remote, 'commit', '-m', 'init')
 
-    # 8. Missing repo (not yet cloned)
+    # 9. Missing repo (not yet cloned)
     missing_path = base / 'repos' / 'missing-repo'
     # Don't create the directory — it simulates a repo that needs cloning
 
     repos_dir = base / 'repos'
-    existing = [RepoConfig(name=d.name, path=str(d)) for d in sorted(repos_dir.iterdir()) if d.is_dir()]
+
+    def entry(path: Path) -> RepoConfig:
+        # Name the local bare each fixture was built from. Without it every row carries an
+        # origin-mismatch warning against github.com, which is the fixture talking over the
+        # state the row exists to show.
+        bare = base / 'remotes' / f'{path.name}.git'
+        return RepoConfig(name=path.name, path=str(path), clone_url=str(bare) if bare.exists() else None)
+
+    existing = [entry(d) for d in sorted(repos_dir.iterdir()) if d.is_dir()]
     existing.append(RepoConfig(name='missing-repo', path=str(missing_path)))
     return SyncerConfig(
         owner='demo',

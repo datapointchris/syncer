@@ -144,6 +144,62 @@ class TestBuildRepoReport:
         assert str(tmp_path / 'no-such-repo.git') in report.lifecycle_detail
         assert len(report.lifecycle_detail.splitlines()) > 1  # the URL, then git's own words
 
+    def _occupied_config(self, tmp_path: Path, origin: Path, **files: str) -> SyncerConfig:
+        """A registry entry whose path already holds files and no repo — a new box where a
+        restore tool seeded gitignored config before anything was cloned."""
+        target = tmp_path / 'target'
+        target.mkdir()
+        for name, content in files.items():
+            (target / name).write_text(content)
+        return SyncerConfig(
+            owner='demo',
+            host='https://github.com',
+            search_paths=[],
+            repos=[RepoConfig(name='target', path=str(target), clone_url=str(origin))],
+        )
+
+    def test_an_occupied_path_is_work_to_do_not_an_error(self, tmp_path):
+        """`not a git repository` stopped a new box at the one moment syncer was most needed: it
+        exits 1 and names no next step, for a repo apply clones without help."""
+        _make_cloned_repo(tmp_path, 'alpha')
+        config = self._occupied_config(tmp_path, tmp_path / 'alpha.git', **{'local.env': 'SECRET\n'})
+
+        report = _build(config.repos[0], config)
+
+        assert report is not None
+        assert report.lifecycle == 'would_clone'
+        assert report.lifecycle_detail is not None
+        assert '1 entry' in report.lifecycle_detail
+
+    def test_apply_clones_into_an_occupied_path(self, tmp_path):
+        _make_cloned_repo(tmp_path, 'alpha')
+        config = self._occupied_config(tmp_path, tmp_path / 'alpha.git', **{'local.env': 'SECRET\n'})
+
+        report = _build(config.repos[0], config, apply=True)
+
+        assert report is not None
+        assert report.lifecycle == 'cloned'
+        assert (tmp_path / 'target' / 'README.md').exists()
+        assert (tmp_path / 'target' / 'local.env').read_text() == 'SECRET\n'
+
+    def test_a_path_carrying_git_state_stays_an_error(self, tmp_path):
+        """A linked worktree's .git is a file, so is_git_repo reads False for one. Cloning into
+        it would point the path at another repo's gitdir, so it is reported and left alone."""
+        _make_cloned_repo(tmp_path, 'alpha')
+        config = self._occupied_config(tmp_path, tmp_path / 'alpha.git', **{'.git': 'gitdir: /elsewhere\n'})
+
+        report = _build(config.repos[0], config, apply=True)
+
+        assert report is not None
+        assert report.lifecycle == 'not_git'
+        assert (tmp_path / 'target' / '.git').read_text() == 'gitdir: /elsewhere\n'
+
+    def test_the_branches_view_still_skips_an_occupied_path(self, tmp_path):
+        _make_cloned_repo(tmp_path, 'alpha')
+        config = self._occupied_config(tmp_path, tmp_path / 'alpha.git', **{'local.env': 'SECRET\n'})
+
+        assert _build(config.repos[0], config, include_lifecycle=False) is None
+
     def test_apply_attaches_outcomes(self, tmp_path):
         repo_path = _make_cloned_repo(tmp_path, 'beta')
         _git(repo_path, 'commit', '--allow-empty', '-m', 'unpushed')
