@@ -1,6 +1,48 @@
 # CHANGELOG
 
 
+## v11.3.0 (2026-08-17)
+
+### Chores
+
+- **pyproject**: Raise assertion verbosity instead of test verbosity
+  ([`682b6df`](https://github.com/datapointchris/syncer/commit/682b6dffec0df11588f2f07b990bd5d164a3fae5))
+
+A failing assertion truncated its diff and printed "use -vv to show", so the reader re-ran the whole
+  suite to see it. addopts = "-vv" answered that by raising test-list verbosity as well, which is a
+  different question: a green run printed a line per test and said nothing. verbosity_assertions
+  raises only the half that was wanted.
+
+Written by the forge pyproject die.
+
+### Features
+
+- **clone**: Build the repo in place when its path already holds files
+  ([`537b505`](https://github.com/datapointchris/syncer/commit/537b505660e6d6c58ab317c1dbcd274872ec300d))
+
+`git clone` declines a non-empty destination outright, so any repo path holding a file reported `not
+  a git repository` and exited 1 with no next step named. That is the state every path is in while a
+  machine is being set up: the restore that puts back the gitignored files a machine cannot rebuild
+  (.env, .planning/) runs before anything has been cloned.
+
+`apply` now builds the repo around what is there — init, remote add, fetch, checkout of the remote's
+  default. Checkout carries the guarantee the blanket refusal was standing in for: it will not write
+  over a file already present, not even one whose content is identical, and it aborts whole rather
+  than file by file. No path in the resulting index therefore predates it, so removing the .git a
+  refusal built cannot orphan a file. Nothing else is ever deleted.
+
+A file the repo neither tracks nor ignores is kept, and leaves the fresh clone dirty — a state
+  syncer already reports and already refuses to mutate. Requiring a clean tree instead would have
+  made the revert delete a user's file, which is the one thing this must not do.
+
+`not_git` is reserved for a path already holding git state. A linked worktree keeps its .git as a
+  file, so is_git_repo reads False for one, and `git init` there succeeds against the repo that owns
+  it through the gitdir link.
+
+`check` reports `would clone` with the entry count at WARNING, so a box mid-setup exits 0 rather
+  than 1.
+
+
 ## v11.2.1 (2026-08-16)
 
 ### Bug Fixes
