@@ -1,6 +1,39 @@
 # CHANGELOG
 
 
+## v11.3.2 (2026-08-24)
+
+### Bug Fixes
+
+- **report**: Predict the refusal on deleting the branch you are standing on
+  ([`f33660e`](https://github.com/datapointchris/syncer/commit/f33660e1f6c9f2d6716d56ab1ff85ec0e81706b4))
+
+`mirror`'s `*:gone = delete_local` selects the current branch as well as any other, so a branch you
+  are standing on whose remote was deleted printed `gone → delete_local` and apply refused it every
+  time. checkout_refusal never modelled that case, which is the arrow-that-promises-nothing failure
+  the mirror gates exist to prevent.
+
+_delete_local now tests the checkout clause first, as _pull_ff and _ff_ref already do. Behind
+  NOT_GONE the guard is unreachable for any state the mirror can be handed, because decide() only
+  routes delete_local at a gone branch.
+
+CHECKOUT_REFUSALS names every refusal decided by which branch is checked out, which is what lets the
+  mirror test assert the direction it was missing: a mutator refusing on a checkout fact the
+  reporter never predicted. The test's docstring claimed both directions and ran one, over a fixture
+  on main that could not reach the guard at all.
+
+### Continuous Integration
+
+- Regenerate validate.yml at toolchain 16
+  ([`68125a9`](https://github.com/datapointchris/syncer/commit/68125a9cf65bcf2cbd53824f03689ca7a89d2785))
+
+Catches this repo up with the version manifest: StyLua pinned to a release rather than latest, a
+  reworded bats discovery note, and double quotes in the node block. Only the blocks this repo
+  declares are affected.
+
+Triggers and job structure are unchanged.
+
+
 ## v11.3.1 (2026-08-17)
 
 ### Bug Fixes
