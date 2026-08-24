@@ -109,6 +109,13 @@ REFUSAL_TEXT: dict[Refusal, str] = {
 # *documented* rather than reported and there is no actual value to show.
 _DOC_FIELDS = {'target': '<target>', 'verb': 'this action', 'pattern': '<glob>'}
 
+# Every refusal decided by which branch happens to be checked out, and so every one
+# checkout_refusal owes the reporter a prediction of. Naming the set is what turns the mirror test
+# into both directions: a mutator refusing with one of these and a mirror that stayed silent is an
+# arrow the report promised and apply declines. A checkout-shaped refusal added later belongs here,
+# and is a test failure until it is also predicted.
+CHECKOUT_REFUSALS = frozenset({Refusal.NOT_CURRENT, Refusal.IS_CURRENT, Refusal.DELETE_CURRENT})
+
 
 def describe_refusal(reason: Refusal) -> str:
     """A refusal's wording for reference output, with generic stand-ins for runtime values."""
@@ -289,10 +296,14 @@ def _set_upstream_push(state: BranchState, repo: Repo, policy: Policy) -> Outcom
 
 def _delete_local(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     # Full guard (invariant 5), every clause re-verified live.
-    if state.primary != 'gone':
-        return _refused(state, Action.DELETE_LOCAL, Refusal.NOT_GONE)
+    # The checkout clause runs first, as it does in _pull_ff and _ff_ref, so that
+    # checkout_refusal can predict it for every state rather than only for a gone branch. A gate
+    # the reporter cannot evaluate is a gate the arrow does not know about, which is how
+    # mirror's `*:gone = delete_local` printed a delete arrow on the branch you were standing on.
     if state.is_current:
         return _refused(state, Action.DELETE_LOCAL, Refusal.DELETE_CURRENT)
+    if state.primary != 'gone':
+        return _refused(state, Action.DELETE_LOCAL, Refusal.NOT_GONE)
     # Invariant 9, stated rather than inherited. git refuses this itself, but a refusal only git
     # knows about arrives as a `failed` outcome carrying prose, which nothing joins on and the
     # reporter cannot predict — so the row promised an arrow apply was never going to follow.
@@ -510,11 +521,17 @@ def checkout_refusal(action: Action, state: BranchState) -> Refusal | None:
 
     FAST_FORWARD is absent on purpose: it dispatches between the two mechanisms precisely so that
     neither side of the split refuses it.
+
+    DELETE_LOCAL is here for the same reason REBASE_PUSH is. `mirror`'s `*:gone = delete_local`
+    selects the current branch too, so a branch you are standing on whose remote was deleted
+    printed a delete arrow that execute always refused.
     """
     if action in (Action.PULL_FF, Action.REBASE_PUSH) and not state.is_current:
         return Refusal.NOT_CURRENT
     if action is Action.FF_REF and state.is_current:
         return Refusal.IS_CURRENT
+    if action is Action.DELETE_LOCAL and state.is_current:
+        return Refusal.DELETE_CURRENT
     return None
 
 

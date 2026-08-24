@@ -6,6 +6,7 @@ import pytest
 
 from syncer.classify import classify_branch
 from syncer.execute import ACTION_DOCS
+from syncer.execute import CHECKOUT_REFUSALS
 from syncer.execute import MUTATING_ACTIONS
 from syncer.execute import REFUSAL_TEXT
 from syncer.execute import Outcome
@@ -773,6 +774,27 @@ class TestWorktreeCheckout:
         assert 'wt-gone' not in repo.local_branches()
 
 
+def _current_and_gone(cloned_repo: Path, tmp_path: Path) -> tuple[Repo, BranchState]:
+    """A branch whose remote was deleted, still checked out here. Its own clone, so the caller's
+    checkout stays on main and the other states in a battery keep their meaning.
+
+    This is the only shape that reaches DELETE_CURRENT. On any branch that is not gone, NOT_GONE
+    answers first, so a fixture on `main` walks past the guard without ever testing it.
+    """
+    origin = _git(cloned_repo, 'remote', 'get-url', 'origin').stdout.strip()
+    second = tmp_path / 'gone-clone'
+    subprocess.run(['git', 'clone', origin, str(second)], capture_output=True)
+    _git(second, 'config', 'user.email', 'test@test.com')
+    _git(second, 'config', 'user.name', 'Test')
+    _git(second, 'checkout', '-b', 'feature/gone')
+    _git(second, 'push', '-u', 'origin', 'feature/gone')
+    _git(second, 'push', 'origin', '--delete', 'feature/gone')
+
+    repo = _make_repo(second)
+    repo.fetch_prune()
+    return repo, _state_for(repo, 'feature/gone')
+
+
 class TestCheckoutRefusal:
     """The static current/non-current gate, mirrored for the report. Absent it, mirror's
     `*:diverged = rebase_push` printed a rebase arrow on every non-current diverged branch and
@@ -798,15 +820,51 @@ class TestCheckoutRefusal:
         assert checkout_refusal(Action.FAST_FORWARD, current) is None
         assert checkout_refusal(Action.FAST_FORWARD, current.model_copy(update={'is_current': False})) is None
 
-    def test_the_mirror_agrees_with_execute_for_every_action(self, cloned_repo):
-        """Both directions, as the dirty mirror does: a gate that over-predicts puts a refusal on
-        a row apply would have cleared."""
-        repo = _make_repo(cloned_repo)
-        for state in (_state_for(repo, 'main'), _state_for(repo, 'main').model_copy(update={'is_current': False})):
+    def test_delete_local_is_predicted_refused_on_the_current_branch(self, cloned_repo, tmp_path):
+        """`mirror`'s `*:gone = delete_local` selects the branch you are standing on too.
+
+        The mirror was silent here, so a current branch whose remote had been deleted printed
+        `gone → delete_local` and apply refused every time — the arrow that promises an action
+        apply never makes, which is the failure this whole gate exists to prevent.
+        """
+        repo, state = _current_and_gone(cloned_repo, tmp_path)
+
+        assert state.is_current
+        assert state.primary == 'gone'
+        assert checkout_refusal(Action.DELETE_LOCAL, state) is Refusal.DELETE_CURRENT
+        assert execute(Action.DELETE_LOCAL, state, repo, POLICY).reason is Refusal.DELETE_CURRENT
+        assert 'feature/gone' in repo.local_branches()
+
+    def test_the_mirror_agrees_with_execute_for_every_action(self, cloned_repo, tmp_path):
+        """Both directions, as the dirty mirror does.
+
+        Over-predicting puts a refusal on a row apply would have cleared. Under-predicting is the
+        worse half and is what the second assertion catches: the report draws an arrow, apply
+        declines, and the only part of a row anyone acts on was wrong. CHECKOUT_REFUSALS is what
+        makes that direction expressible — a mutator refusing with one of those is a fact about
+        which branch is checked out, so the mirror owed the reporter a prediction of it.
+
+        The gone-and-current repo is in the battery because it is the state DELETE_CURRENT needs
+        and no other fixture reaches it. Without it the guard is unreachable behind NOT_GONE, and
+        the loop passes over a branch that was never the shape in question.
+        """
+        plain = _make_repo(cloned_repo)
+        gone_repo, gone_state = _current_and_gone(cloned_repo, tmp_path)
+        batteries = [
+            (plain, _state_for(plain, 'main')),
+            (plain, _state_for(plain, 'main').model_copy(update={'is_current': False})),
+            (gone_repo, gone_state),
+            (gone_repo, gone_state.model_copy(update={'is_current': False})),
+        ]
+
+        for repo, state in batteries:
             for action in MUTATING_ACTIONS:
                 predicted = checkout_refusal(action, state)
+                reason = execute(action, state, repo, POLICY).reason
                 if predicted is not None:
-                    assert execute(action, state, repo, POLICY).reason is predicted, action
+                    assert reason is predicted, f'{action} over-predicted'
+                if reason in CHECKOUT_REFUSALS:
+                    assert predicted is reason, f'{action} refused on checkout with no prediction'
 
 
 # ---------- protected branches (invariant 8) ---------- #

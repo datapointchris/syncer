@@ -72,6 +72,16 @@ part of a row anyone acts on. `checkout_refusal` was the one missing: `mirror`'s
 all of them. A gate that can only be discovered mid-write (a rebase conflict, unreadable counts)
 stays out of `blocked` deliberately.
 
+**The checkout mirror is checked in both directions, and `CHECKOUT_REFUSALS` is what makes the
+second one expressible.** Over-predicting puts a refusal on a row `apply` would have cleared;
+under-predicting draws an arrow `apply` declines, which is the worse half and the one a
+one-directional test cannot see. So the set names every refusal decided by which branch is checked
+out — `NOT_CURRENT`, `IS_CURRENT`, `DELETE_CURRENT` — and a mutator returning one of them with the
+mirror silent is a test failure. That is why every mutator gated on the checkout tests it **first**:
+`_delete_local` answering `NOT_GONE` before `DELETE_CURRENT` would make the guard unreachable for
+any state the mirror can be handed, since `decide()` only ever routes `delete_local` at a gone
+branch.
+
 `blocked` is a `Refusal` key, never prose — `blocked_message` carries the wording, exactly the
 `Outcome.reason`/`Outcome.message` split and for the same reason: severity and the remedy join on
 the key, and nothing joins on a sentence.
