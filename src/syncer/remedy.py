@@ -160,8 +160,8 @@ def _worktree_checkout(state: BranchState, action: Action, repo_path: str) -> Re
             ),
             notes=(
                 f'{state.branch} is merged, but the worktree at {state.worktree} still holds the ref, which git will not delete.',
-                'Neither command can lose work: `worktree remove` refuses a tree with modified or untracked files,',
-                'and -d refuses a branch whose work is unmerged.',
+                'Neither command can lose work: `git worktree remove` refuses a tree with modified or untracked files,',
+                'and `git branch -d` refuses a branch whose work is unmerged.',
             ),
         )
     return Remedy(
