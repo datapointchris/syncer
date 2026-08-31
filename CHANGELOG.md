@@ -1,6 +1,46 @@
 # CHANGELOG
 
 
+## v11.3.3 (2026-08-31)
+
+### Bug Fixes
+
+- **remedy**: Name git in the worktree-delete note's commands
+  ([`ae54743`](https://github.com/datapointchris/syncer/commit/ae54743c21ef45a0d53d23c0efe77301a1b83089))
+
+The note read `worktree remove` and `-d`, neither of which is a command as spelled. The argv above
+  it is correct; the prose beside it is what gets typed.
+
+### Chores
+
+- Sync the generated configs to toolchain 18
+  ([`1638b07`](https://github.com/datapointchris/syncer/commit/1638b07f340e3cf9a1cbbc23499cec932435517c))
+
+Both stamped files come from the fleet's version declaration: the pre-commit config and the
+  generated workflow. Nothing here is a repo decision.
+
+Stamp 18 carries the refcheck hook at v0.6.0, a codespell exclude widened to go.mod, and — on a
+  private repo — runs-on naming the self-hosted pool with the actionlint config that declares the
+  label.
+
+- Sync the generated configs to toolchain 19
+  ([`050d269`](https://github.com/datapointchris/syncer/commit/050d269efc75fa35668e71a013aed9613140e755))
+
+Both stamped files come from the fleet's version declaration: the pre-commit config and the
+  generated workflow. Nothing here is a repo decision.
+
+Stamp 19 passes --allow-parallel-runners to golangci-lint. A repo with two Go components runs two
+  Lint jobs at once, and on a single self-hosted box the second one dies on the shared cache lock
+  before linting anything.
+
+- **precommit**: Drop the commit-branding hook
+  ([`fbfd764`](https://github.com/datapointchris/syncer/commit/fbfd764612450aac982eece0615a2effe0a8ce29))
+
+Claude Code suppresses its own commit and PR attribution through its attribution setting, which
+  resolves an empty string to no trailer at all. A hook that strips the trailer afterwards has
+  nothing left to remove.
+
+
 ## v11.3.2 (2026-08-24)
 
 ### Bug Fixes

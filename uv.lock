@@ -480,7 +480,7 @@ wheels = [
 
 [[package]]
 name = "syncer"
-version = "11.3.2"
+version = "11.3.3"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },
