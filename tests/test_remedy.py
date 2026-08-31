@@ -57,7 +57,7 @@ class TestNothingSuggestedWhereSyncerActs:
         """syncer has no action that clears a dirty tree and no standing to choose between commit
         and stash, so the remedy names the tree and stops."""
         remedy = remedy_for(_state(PrimaryState.SYNCED), Action.SKIP, REPO, Refusal.DIRTY_TREE, None)
-        assert remedy.commands == (f'git -C {REPO} status --short',)
+        assert remedy.commands == (f'cd {REPO}', 'git status --short')
         assert not any(word in _text(remedy) for word in ('stash', 'commit', 'reset'))
 
 
@@ -69,41 +69,41 @@ class TestDivergedNamesTheRightBase:
     def test_a_branch_tracking_a_base_rebases_and_needs_no_force(self):
         state = _state(PrimaryState.DIVERGED, upstream='origin/main', worktree=WORKTREE)
         remedy = remedy_for(state, Action.REPORT, REPO, None, None)
-        assert remedy.commands == (f'git -C {WORKTREE} rebase origin/main',)
+        assert remedy.commands == (f'cd {WORKTREE}', 'git rebase origin/main')
         assert 'tracks origin/main, not origin/feature' in _text(remedy)
 
     def test_a_branch_tracking_its_own_remote_rebases_then_pushes_plainly(self):
         remedy = remedy_for(_state(PrimaryState.DIVERGED), Action.REPORT, REPO, None, None)
-        assert remedy.commands == (f'git -C {REPO} rebase origin/feature', f'git -C {REPO} push origin feature')
+        assert remedy.commands == (f'cd {REPO}', 'git rebase origin/feature', 'git push origin feature')
         assert 'no force needed' in _text(remedy)
 
     def test_the_command_runs_where_the_branch_actually_is(self):
-        """Honesty rule 3. `git -C <repo> rebase` in the main checkout rebases whatever *it* has
-        checked out, which is a different branch entirely."""
+        """Honesty rule 3. A rebase run in the main checkout rebases whatever *it* has checked
+        out, which is a different branch entirely."""
         state = _state(PrimaryState.DIVERGED, upstream='origin/main', worktree=WORKTREE)
-        assert all(WORKTREE in command for command in remedy_for(state, Action.REPORT, REPO, None, None).commands)
+        assert remedy_for(state, Action.REPORT, REPO, None, None).commands[0] == f'cd {WORKTREE}'
 
 
 class TestStateRemedies:
     def test_no_upstream_publishes_and_sets_one(self):
         state = _state(PrimaryState.NO_UPSTREAM, upstream=None)
-        assert remedy_for(state, Action.REPORT, REPO, None, None).commands == (f'git -C {REPO} push -u origin feature',)
+        assert remedy_for(state, Action.REPORT, REPO, None, None).commands == (f'cd {REPO}', 'git push -u origin feature')
 
     def test_gone_uses_lowercase_d(self):
         """syncer's own -D is safe only behind a guard proving the target holds the work. Run by
         hand there is no such guard, and -d is git's version of the same check."""
         remedy = remedy_for(_state(PrimaryState.GONE), Action.REPORT, REPO, None, None)
-        assert remedy.commands == (f'git -C {REPO} branch -d feature',)
+        assert remedy.commands == (f'cd {REPO}', 'git branch -d feature')
 
     def test_ahead_on_a_base_upstream_explains_the_retarget(self):
         state = _state(PrimaryState.AHEAD, upstream='origin/main')
         remedy = remedy_for(state, Action.REPORT, REPO, None, None)
-        assert remedy.commands == (f'git -C {REPO} push -u origin feature',)
+        assert remedy.commands == (f'cd {REPO}', 'git push -u origin feature')
         assert 'under its own name' in _text(remedy)
 
     def test_detached_returns_to_a_branch(self):
         state = _state(PrimaryState.DETACHED, branch='(detached)', upstream=None, is_current=True)
-        assert remedy_for(state, Action.REPORT, REPO, None, None).commands == (f'git -C {REPO} switch -',)
+        assert remedy_for(state, Action.REPORT, REPO, None, None).commands == (f'cd {REPO}', 'git switch -')
 
 
 class TestPolicyNote:
@@ -147,7 +147,7 @@ class TestRefusalRemedies:
     def test_a_worktree_refusal_points_at_the_worktree(self):
         state = _state(PrimaryState.BEHIND, worktree=WORKTREE)
         remedy = remedy_for(state, Action.FAST_FORWARD, REPO, Refusal.WORKTREE_CHECKOUT, None)
-        assert remedy.commands == (f'git -C {WORKTREE} merge --ff-only origin/feature',)
+        assert remedy.commands == (f'cd {WORKTREE}', 'git merge --ff-only origin/feature')
         assert WORKTREE in _text(remedy)
 
     def test_a_worktree_refusal_on_a_delete_disposes_of_the_worktree_first(self):
@@ -156,8 +156,9 @@ class TestRefusalRemedies:
         state = _state(PrimaryState.GONE, worktree=WORKTREE)
         remedy = remedy_for(state, Action.DELETE_LOCAL, REPO, Refusal.WORKTREE_CHECKOUT, None)
         assert remedy.commands == (
-            f'git -C {REPO} worktree remove {WORKTREE}',
-            f'git -C {REPO} branch -d feature',
+            f'cd {REPO}',
+            f'git worktree remove {WORKTREE}',
+            'git branch -d feature',
         )
 
     def test_a_dirty_refusal_names_the_repo_even_when_the_branch_is_elsewhere(self):
@@ -166,7 +167,7 @@ class TestRefusalRemedies:
         under a line telling them their tree was dirty."""
         state = _state(PrimaryState.GONE, worktree=WORKTREE)
         remedy = remedy_for(state, Action.DELETE_LOCAL, REPO, Refusal.DIRTY_TREE, None)
-        assert remedy.commands == (f'git -C {REPO} status --short',)
+        assert remedy.commands == (f'cd {REPO}', 'git status --short')
 
     def test_protection_names_the_file_to_edit_and_offers_no_command(self):
         remedy = remedy_for(_state(PrimaryState.AHEAD), Action.PUSH, REPO, Refusal.PROTECTED, None)
@@ -184,7 +185,7 @@ class TestRefusalRemedies:
         branch underneath it is still diverged, and that is what the reader needs."""
         state = _state(PrimaryState.DIVERGED, upstream='origin/main', worktree=WORKTREE)
         remedy = remedy_for(state, Action.REBASE_PUSH, REPO, Refusal.NOT_CURRENT, None)
-        assert remedy.commands == (f'git -C {WORKTREE} rebase origin/main',)
+        assert remedy.commands == (f'cd {WORKTREE}', 'git rebase origin/main')
 
 
 class TestHonestyRules:
@@ -217,10 +218,11 @@ class TestHonestyRules:
         state = _state(PrimaryState.BEHIND, worktree=WORKTREE)
         assert not any(_refusal_remedy(reason, state, Action.REPORT, REPO) for reason in NO_REMEDY)
 
-    def test_every_command_names_a_directory(self):
+    def test_every_remedy_opens_with_the_directory_it_runs_in(self):
         """Honesty rule 3, structurally: a bare `git rebase` is right only if you happen to be
         standing in the repo, and the report is read from somewhere else."""
         for primary in PrimaryState:
-            remedy = remedy_for(_state(primary, upstream='origin/main'), Action.REPORT, REPO, None, None)
-            for command in remedy.commands:
-                assert command.startswith('git -C /'), command
+            for reason in (None, *Refusal):
+                for action in Action:
+                    commands = remedy_for(_state(primary, worktree=WORKTREE), action, REPO, reason, None).commands
+                    assert not commands or commands[0].startswith('cd /'), (primary, action, reason, commands)

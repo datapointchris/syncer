@@ -463,12 +463,12 @@ class TestRemedyRendering:
     about a repo."""
 
     def _remedy(self):
-        return Remedy(commands=('git -C /repo rebase origin/main',), notes=('feature tracks origin/main.',))
+        return Remedy(commands=('cd /repo', 'git rebase origin/main'), notes=('feature tracks origin/main.',))
 
     def test_commands_and_notes_both_render(self, capsys):
         render_remedy(self._remedy())
         out = capsys.readouterr().out
-        assert 'git -C /repo rebase origin/main' in out
+        assert 'git rebase origin/main' in out
         assert 'feature tracks origin/main.' in out
 
     def test_it_goes_to_stdout_with_its_row(self, capsys):
@@ -484,12 +484,12 @@ class TestRemedyRendering:
     def test_a_command_is_never_wrapped(self, capsys):
         """A wrapped command cannot be double-clicked, which is the only thing it is there for."""
         long_path = '/home/u/' + 'nested/' * 20 + 'repo'
-        render_remedy(Remedy(commands=(f'git -C {long_path} rebase origin/main',)))
+        render_remedy(Remedy(commands=(f'cd {long_path}', 'git rebase origin/main')))
         out = capsys.readouterr().out
-        assert f'git -C {long_path} rebase origin/main' in out
+        assert f'cd {long_path}' in out
 
     def test_a_branch_name_with_brackets_survives_rich_markup(self, capsys):
-        render_remedy(Remedy(commands=('git -C /repo branch -d fix[1]',)))
+        render_remedy(Remedy(commands=('cd /repo', 'git branch -d fix[1]')))
         assert 'fix[1]' in capsys.readouterr().out
 
     def test_paths_under_home_are_written_the_way_the_row_header_writes_them(self, capsys):
@@ -499,18 +499,19 @@ class TestRemedyRendering:
         home = str(Path.home())
         render_remedy(
             Remedy(
-                commands=(f'git -C {home}/dotfiles worktree remove {home}/.worktrees/dotfiles/x',),
+                commands=(f'cd {home}/dotfiles', f'git worktree remove {home}/.worktrees/dotfiles/x'),
                 notes=(f'x is checked out at {home}/.worktrees/dotfiles/x.',),
             )
         )
         out = capsys.readouterr().out
-        assert 'git -C ~/dotfiles worktree remove ~/.worktrees/dotfiles/x' in out
+        assert 'cd ~/dotfiles' in out
+        assert 'git worktree remove ~/.worktrees/dotfiles/x' in out
         assert 'x is checked out at ~/.worktrees/dotfiles/x.' in out
         assert home not in out
 
     def test_a_path_outside_home_is_left_alone(self, capsys):
-        render_remedy(Remedy(commands=('git -C /srv/repos/thing status --short',)))
-        assert 'git -C /srv/repos/thing status --short' in capsys.readouterr().out
+        render_remedy(Remedy(commands=('cd /srv/repos/thing', 'git status --short')))
+        assert 'cd /srv/repos/thing' in capsys.readouterr().out
 
 
 class TestProtectedBranchReporting:

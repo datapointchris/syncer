@@ -835,8 +835,8 @@ def shorten_home(text: str) -> str:
 
     The registry stores `~/dotfiles` and the header prints that, while a remedy is built from the
     expanded path — so one block spelled the same directory two ways, and the longer spelling put
-    `git -C <repo> worktree remove <worktree>` past 90 columns. soft_wrap keeps Rich from breaking
-    it, but nothing keeps the terminal from doing so, and a command that wraps is one that gets
+    `git worktree remove <worktree>` past 90 columns. soft_wrap keeps Rich from breaking it, but
+    nothing keeps the terminal from doing so, and a command that wraps is one that gets
     half-copied. That is not hypothetical: it cost a leading `git`, and the shell then found a
     different `worktree` on PATH and reported the subcommand as invalid.
 
