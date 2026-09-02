@@ -722,10 +722,9 @@ only shows up on the machine running the older version.
 
 - One test module per source module under `tests/`. The exhaustive policy truth table is
   `test_policy.py`; the master→main incident is regression-locked in the suite.
-- Released via python-semantic-release off conventional commits. `CHANGELOG.md` is
-  **generated at release time** — never hand-edit it; unreleased commits are absent until the
-  next version is cut. Per global rules, `refactor` does **not** trigger a release here, so use it
-  only for genuine refactors.
+- Released via python-semantic-release off conventional commits. The GitHub release body carries
+  the notes for each version; there is no changelog file. Per global rules, `refactor` does **not**
+  trigger a release here, so use it only for genuine refactors.
 
 ## Planning
 

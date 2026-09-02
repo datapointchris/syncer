@@ -26,3 +26,7 @@ jobs:
       - uses: python-semantic-release/python-semantic-release@v9
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          # The GitHub release body is the changelog. python-semantic-release
+          # builds those notes from the same commits, and by a path independent
+          # of the changelog file, so no CHANGELOG.md is written or tracked.
+          changelog: "false"
