@@ -295,7 +295,7 @@ class TestGetReposFilePath:
 
     def test_defaults_into_the_xdg_config_dir(self, tool_config, tmp_path, monkeypatch):
         """A fresh machine gets a working default rather than an error naming someone else's
-        directory layout. The old behaviour globbed ~/.config/syncer/*.json — picking up any
+        directory layout. The old behavior globbed ~/.config/syncer/*.json — picking up any
         stray JSON — and otherwise hard-exited."""
         monkeypatch.setattr('syncer.config.DEFAULT_REPOS_FILE', tmp_path / 'syncer' / 'repos.json')
         # tool_config is not written, so nothing names a registry
@@ -405,11 +405,11 @@ class TestXDGPaths:
     variable rather than a hardcoded ~/.config — a machine that relocates its config or state
     home is otherwise silently ignored."""
 
-    def test_config_home_honours_the_environment(self, tmp_path, monkeypatch):
+    def test_config_home_honors_the_environment(self, tmp_path, monkeypatch):
         monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'cfg'))
         assert xdg_config_home() == tmp_path / 'cfg'
 
-    def test_state_home_honours_the_environment(self, tmp_path, monkeypatch):
+    def test_state_home_honors_the_environment(self, tmp_path, monkeypatch):
         monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'st'))
         assert xdg_state_home() == tmp_path / 'st'
 

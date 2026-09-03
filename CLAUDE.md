@@ -92,7 +92,7 @@ the key, and nothing joins on a sentence.
 branch state is, and conflating the two is what made a 75-repo report unreadable: 32 repos were
 counted as needing attention, 30 of them rendered as a green tick reading `synced, dirty → skip`,
 and the one repo syncer could actually fix (`1 behind`) was painted the same yellow as the ones
-needing hands. The count came from `_row_severity`; the icon and colour came from the primary
+needing hands. The count came from `_row_severity`; the icon and color came from the primary
 state alone. Two notions of "needs attention" in one report means neither gets trusted.
 
 - **`OPERATION` applies in `check`, not just `apply`** — an action is decided and nothing would
@@ -101,7 +101,7 @@ state alone. Two notions of "needs attention" in one report means neither gets t
   will never resolve, and it refuses every mutator that touches the tree.
 - **`_row_severity` is checked before the state's own severity**, so `MUTATING_ACTIONS` (derived
   from `_MUTATORS`, never listed twice) is what defines "syncer will handle this".
-- **Icon from the state, colour from the severity.** Only the benign tick can understate a
+- **Icon from the state, color from the severity.** Only the benign tick can understate a
   severity, so it is the only icon `_SEVERITY_ICON` substitutes.
 - **The action arrow renders only for a mutating action, on both surfaces.** `skip`/`report`/`prompt`
   all mean "syncer changes nothing", which the row conveys by existing — `→ skip` after every clean
@@ -623,7 +623,7 @@ a pipe that is one line per refresh.
 Ctrl-C ends the run, not the current call. `abort_running_commands()` terminates every live git
 process and short-circuits every later one; without it, `ThreadPoolExecutor.shutdown` waits for
 running tasks and an interrupt during a fetch storm sits there for the remainder of `git_timeout`.
-Cancelling the queue alone is not enough — both halves are needed. Nothing is rendered and **no
+Canceling the queue alone is not enough — both halves are needed. Nothing is rendered and **no
 run event is written**, because a sweep covering some unknown fraction of the registry is not a
 measurement and `stats` would read one back as if it were. Exit code 130.
 
@@ -687,7 +687,7 @@ under a change nobody has made yet. It carries `hint_lines` for the same reason 
 
 The default run appends one `SyncRunEvent` per run to `STATE_DIR/<registry-stem>-events.jsonl`
 (`$XDG_STATE_HOME/syncer`, since history is state: nobody authors it, and deleting it changes
-behaviour rather than costing a recompute); `syncer stats -c <registry>` reads the matching stream
+behavior rather than costing a recompute); `syncer stats -c <registry>` reads the matching stream
 back. **One stream per registry**, keyed on the registry file, because two registries are two
 working sets: a shared file makes `stats` a blend of both, and `find_stale_repos` scopes to the
 paths in the most recent run, so alternating a personal and a work run would make each set's

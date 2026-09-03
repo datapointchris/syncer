@@ -343,7 +343,7 @@ class TestIsFork:
             assert repo.is_fork is False
         popen.assert_not_called()
 
-    def test_github_ssh_url_is_recognised(self, git_repo):
+    def test_github_ssh_url_is_recognized(self, git_repo):
         assert _make_repo(git_repo, url='git@github.com:datapointchris/syncer.git').is_github is True
 
 
@@ -500,7 +500,7 @@ class TestFailureRecording:
         """default_branch probes several refs by design; recording those would bury the real
         failures under noise on every repo whose origin/HEAD was never set."""
         repo = _make_repo(git_repo)
-        # Not asserting the name: `git init` honours init.defaultBranch, so this is 'main' on a
+        # Not asserting the name: `git init` honors init.defaultBranch, so this is 'main' on a
         # configured machine and 'master' on a stock CI runner.
         assert repo.default_branch is not None
         assert repo.failures == []
@@ -589,7 +589,7 @@ class TestLinkedWorktrees:
         assert repo.held_by_worktree('side') is True
         assert repo.held_by_worktree('nonexistent') is False
 
-    def test_a_symlinked_repo_path_is_still_recognised_as_its_own(self, git_repo, tmp_path):
+    def test_a_symlinked_repo_path_is_still_recognized_as_its_own(self, git_repo, tmp_path):
         """`git worktree list` prints fully resolved paths while a registry entry is whatever was
         typed, so a plain == would read the main checkout as a linked worktree of itself on any
         machine whose home or /tmp is a symlink."""

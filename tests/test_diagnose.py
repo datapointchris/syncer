@@ -77,11 +77,11 @@ class TestClassifyFailure:
         both = 'git@host: Permission denied (publickey).\nHost key verification failed.'
         assert classify_failure(_failure(both)) is Cause.HOST_KEY
 
-    def test_a_timeout_is_recognised_by_its_returncode_not_its_text(self):
+    def test_a_timeout_is_recognized_by_its_returncode_not_its_text(self):
         failure = _failure('timed out after 120s', returncode=TIMEOUT_RETURNCODE)
         assert classify_failure(failure) is Cause.TIMEOUT
 
-    def test_unrecognised_output_gets_no_cause(self):
+    def test_unrecognized_output_gets_no_cause(self):
         """Honesty rule 1: no fallback bucket. A confident wrong explanation sends someone to
         fix the wrong thing, which is worse than admitting we do not know."""
         assert classify_failure(_failure('error: something nobody has seen before')) is None
@@ -183,7 +183,7 @@ class TestGroupFailures:
 
 class TestTheAskpassClosureIsDiagnosable:
     """syncer closes the askpass chain as well as the terminal prompt, and git words that failure
-    differently. Unrecognised, the commonest auth failure this tool produces would carry no cause,
+    differently. Unrecognized, the commonest auth failure this tool produces would carry no cause,
     no hint, and would never trip the host breaker."""
 
     def test_password_refusal_is_auth(self):

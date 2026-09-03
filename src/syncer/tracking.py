@@ -110,7 +110,7 @@ class RepoSnapshot(BaseModel):
     # every older syncer choke on a stream a newer one wrote — adding one status member was
     # enough to make the previous release refuse to read its own history file. An append-only
     # record read across versions has to tolerate values it does not know; stats.py already
-    # falls through to the raw string for anything it does not recognise.
+    # falls through to the raw string for anything it does not recognize.
     status: str
     branch: str | None = None
     uncommitted: int = 0

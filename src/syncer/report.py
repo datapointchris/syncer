@@ -101,8 +101,8 @@ class Severity(IntEnum):
     rows needing hands land at the bottom, nearest the prompt.
 
     The axis is deliberately *ownership*, not git state: a branch that is `behind` is not a
-    problem, it is queued work syncer performs for you under `apply`, and colouring it like a
-    diverged tree trains you to ignore the colour. OPERATION is that band — an action is
+    problem, it is queued work syncer performs for you under `apply`, and coloring it like a
+    diverged tree trains you to ignore the color. OPERATION is that band — an action is
     decided and nothing would refuse it — and it applies in `check` as much as in `apply`.
     """
 
@@ -122,9 +122,9 @@ LIFECYCLE_STYLE = {
     'no_remote': (ICON_ERR, 'red', 'no remote', Severity.ERROR),
 }
 
-# Icon says *what* the branch is; colour says *who has to act* (below). Splitting the two is
+# Icon says *what* the branch is; color says *who has to act* (below). Splitting the two is
 # what fixes a dirty-but-synced row rendering as a green tick indistinguishable from a clean
-# one — it kept its icon and colour from the primary state alone, while the count in the summary
+# one — it kept its icon and color from the primary state alone, while the count in the summary
 # line and the sort position both came from the severity that knew better.
 _STATE_ICON = {
     PrimaryState.SYNCED: ICON_OK,
@@ -270,14 +270,14 @@ def _row_severity(row: BranchRow) -> Severity:
 
 
 def _row_style(row: BranchRow) -> tuple[str, str]:
-    """Icon and colour for a row: icon from the branch state, colour from who has to act."""
+    """Icon and color for a row: icon from the branch state, color from who has to act."""
     severity = _row_severity(row)
     icon = _STATE_ICON.get(row.state.primary, ICON_WARN)
     return _SEVERITY_ICON.get(severity, icon) if icon == ICON_OK else icon, _SEVERITY_COLOR[severity]
 
 
 def _branch_prefix(row: BranchRow, uncommitted: int = 0, stashes: int = 0) -> str:
-    """The coloured state part of a line (icon, branch, flags, detail), without the action arrow."""
+    """The colored state part of a line (icon, branch, flags, detail), without the action arrow."""
     state = row.state
     icon, color = _row_style(row)
 

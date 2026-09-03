@@ -40,7 +40,7 @@ TOOL_CONFIG_PATH = CONFIG_DIR / 'config.toml'
 DEFAULT_REPOS_FILE = CONFIG_DIR / 'repos.json'
 
 # Run history is state, not data: it persists across runs, nobody authors it, and deleting it
-# changes behaviour (stale-repo warnings restart) rather than merely costing a recompute.
+# changes behavior (stale-repo warnings restart) rather than merely costing a recompute.
 STATE_DIR = xdg_state_home() / 'syncer'
 
 # Where run history lived before the state move. Swept by migrate_legacy_events().
@@ -215,7 +215,7 @@ class RepoConfig(BaseModel):
     name: str
     path: str
     # Required by standards/data.md, 'A registry field that selects what tools act
-    # on is required, never defaulted' — but modelled as optional, because this model
+    # on is required, never defaulted' — but modeled as optional, because this model
     # also parses the exemplar registry, whose entries have no lifecycle and carry no
     # status. Absent means undeclared rather than active: inventing a value here is
     # what let three readers disagree about which repos exist. `syncer config validate`
@@ -231,7 +231,7 @@ class RepoConfig(BaseModel):
     # one repo in a registry that does not follow the host's own convention.
     clone_url: str | None = None
     # Declared build surface (components, sql_dialect), owned and consumed by a separate tool.
-    # syncer neither reads nor validates the shape; it is modelled only so the
+    # syncer neither reads nor validates the shape; it is modeled only so the
     # registry schema documents what is actually in the file. Kept as a dict so
     # that tool can extend it without touching syncer.
     toolchain: dict[str, Any] | None = None

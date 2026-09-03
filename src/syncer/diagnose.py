@@ -4,7 +4,7 @@ Kept separate from the reporter so the pattern table can be exercised against re
 stderr with no fixtures at all, and so the honesty rules below are testable statements rather
 than intentions:
 
-1. **Never invent a diagnosis.** An unrecognised stderr yields no cause and no guess. A wrong
+1. **Never invent a diagnosis.** An unrecognized stderr yields no cause and no guess. A wrong
    confident explanation is worse than none, because it sends someone to fix the wrong thing.
 2. **Derive the remedy from the URL, not from a vendor assumption.** `gh auth login` is only
    ever suggested when the host really is github.com; a corporate Bitbucket or an internal
@@ -109,7 +109,7 @@ def remote_host(url: str) -> str:
     """The host of a clone URL, however it is spelled. '' for a local filesystem path.
 
     normalize_remote_url already folds https, scp-style SSH and ssh://host:port to `host/path`,
-    so this only has to strip the path — and recognise that a filesystem path has no host to
+    so this only has to strip the path — and recognize that a filesystem path has no host to
     name, which is what an SSH alias with no dots (`work-git`) would otherwise be mistaken for.
     """
     if url.startswith(('.', '/', '~')):

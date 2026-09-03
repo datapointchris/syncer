@@ -93,7 +93,7 @@ class HostBreaker:
     def record_failure(self, url: str, failure: GitFailure) -> None:
         """Note a failure against this host, under the cause its own output names.
 
-        An unrecognised stderr is recorded as nothing at all — diagnose refuses to guess a cause,
+        An unrecognized stderr is recorded as nothing at all — diagnose refuses to guess a cause,
         and a breaker that trips on 'something went wrong' would skip repos over a message no one
         has read.
         """

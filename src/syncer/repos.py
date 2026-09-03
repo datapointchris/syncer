@@ -665,7 +665,7 @@ class Repo:
         git_dir = self.path / '.git'
         if git_dir.exists():
             # A linked worktree keeps its .git as a *file*, so is_git_repo reads False for one.
-            # `git init` there succeeds and reinitialises the repo that owns it through the
+            # `git init` there succeeds and reinitializes the repo that owns it through the
             # gitdir link, after which remote add and checkout would run against that repo.
             return False, f'{git_dir} already exists'
         ok, err = self._adopt_directory()

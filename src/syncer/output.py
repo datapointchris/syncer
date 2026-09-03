@@ -21,7 +21,7 @@ from typing import Any
 
 from rich.console import Console
 
-# highlight=False globally: Rich's automatic highlighting colours anything that looks like a
+# highlight=False globally: Rich's automatic highlighting colors anything that looks like a
 # number or a path, which turns a report of branch names and commit counts into confetti.
 console = Console(highlight=False)
 err_console = Console(stderr=True, highlight=False)

@@ -308,7 +308,7 @@ class TestFailureSummary:
         assert 'bitbucket.corp' in out
         assert 'gh auth login' not in out
 
-    def test_an_unrecognised_failure_gets_no_invented_cause(self, capsys):
+    def test_an_unrecognized_failure_gets_no_invented_cause(self, capsys):
         render_failure_summary([self._report('api', 'https://git.corp/p/api.git', 'error: novel thing')])
         out = capsys.readouterr().err
         assert 'error: novel thing' in out  # raw output always survives
@@ -366,7 +366,7 @@ class TestSeverityIsOwnershipNotGitState:
     30 of them exactly like the 43 that did not.
 
     The count and the sort came from _row_severity, which knows a dirty tree is a warning; the
-    icon and colour came from the primary state alone, which says 'synced'. Two notions of
+    icon and color came from the primary state alone, which says 'synced'. Two notions of
     'needs attention' in one report means the reader trusts neither.
     """
 
@@ -384,9 +384,9 @@ class TestSeverityIsOwnershipNotGitState:
         # as 'dirty', and the number is already read for the event snapshot.
         assert '4 uncommitted' in dirty
 
-    def test_an_action_syncer_will_run_is_not_coloured_like_a_problem(self):
+    def test_an_action_syncer_will_run_is_not_colored_like_a_problem(self):
         """`behind` is queued work, not damage. Painting it the same yellow as a dirty tree is
-        what made the colour unreadable — the one repo syncer could fix looked like the worst."""
+        what made the color unreadable — the one repo syncer could fix looked like the worst."""
         row = self._row(PrimaryState.BEHIND, action=Action.FAST_FORWARD, behind=1)
         assert _row_severity(row) == Severity.OPERATION
         assert '[cyan]' in _branch_prefix(row)
@@ -821,7 +821,7 @@ class TestAHostThatFailedIsNotAskedAgain:
         _build(config.repos[0], config, breaker=recorder)
         assert [url for url, _ in recorder.failures] == [str(tmp_path / 'alpha.git')]
 
-    def test_skipped_repos_are_summarised_under_the_failure_that_closed_the_host(self, capsys):
+    def test_skipped_repos_are_summarized_under_the_failure_that_closed_the_host(self, capsys):
         trip = Trip(host='git.example.com', cause=Cause.AUTH)
         failed = RepoBranchReport(
             label='alpha',
@@ -875,7 +875,7 @@ class TestOneRepoCannotTakeTheRunDown:
 
 
 class TestAnInterruptEndsTheGitCalls:
-    """Cancelling the queue is only half of it: without ending the calls already running, the
+    """Canceling the queue is only half of it: without ending the calls already running, the
     pool's shutdown waits out every in-flight fetch and the Ctrl-C looks ignored for the length
     of git_timeout."""
 
