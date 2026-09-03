@@ -496,7 +496,7 @@ report-only, and both are deliberately kept out of `decide()` — there is nothi
 - **`watch_remote`** (`Policy`) — branches to report on with no local copy. A fetch brings down
   every remote branch but the pipeline only iterates local ones, so a long-lived branch never
   checked out is invisible. Opt-in and empty by default; **never affects severity**, since a repo
-  is not unhealthy for having branches you deliberately do not keep. Never materialise these as
+  is not unhealthy for having branches you deliberately do not keep. Never materialize these as
   local branches: a local copy you never check out is pinned at creation and silently serves
   stale history, while `origin/<branch>` is current after any fetch.
 

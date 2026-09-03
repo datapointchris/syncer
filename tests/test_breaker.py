@@ -107,7 +107,7 @@ class TestWhatNeverTrips:
         assert breaker.trip_for('~/mirrors/thing.git') is None
 
 
-class TestASuccessImmunisesTheHost:
+class TestASuccessImmunizesTheHost:
     """Whatever failed after a host answered, it was not the host being unreachable."""
 
     def test_a_success_before_the_failure_prevents_the_trip(self):

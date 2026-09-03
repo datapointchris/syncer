@@ -669,7 +669,7 @@ def gather_reports(
 
         def run_one(repo_config: RepoConfig) -> RepoBranchReport | None:
             # The bare name, not the report's label: a label is a path so the report says where
-            # the repo is, and four of those overflow one line into a single ellipsised entry —
+            # the repo is, and four of those overflow one line into a single ellipsized entry —
             # which loses the only thing the line is for, naming what is slow.
             token = progress.start(repo_config.name)
             report: RepoBranchReport | None = None

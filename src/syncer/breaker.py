@@ -83,7 +83,7 @@ class HostBreaker:
         self._flaky_threshold = flaky_threshold
 
     def record_success(self, url: str) -> None:
-        """Note that this host answered. Immunises it for the rest of the run."""
+        """Note that this host answered. Immunizes it for the rest of the run."""
         key = _key(url)
         if key is None:
             return
