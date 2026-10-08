@@ -94,6 +94,7 @@ select = [
     "B",    # flake8-bugbear
     "SIM",  # flake8-simplify
     "I",    # isort
+    "ICN",  # flake8-import-conventions
 ]
 ignore = [
     "SIM108",  # ternary operator — often less readable
@@ -105,6 +106,14 @@ force-single-line = true
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 
+[tool.ruff.lint.flake8-import-conventions]
+banned-from = ["datetime", "pyspark.sql.functions", "pyspark.sql.types"]
+
+[tool.ruff.lint.flake8-import-conventions.extend-aliases]
+datetime = "dt"
+sqlalchemy = "sa"
+"pyspark.sql.functions" = "sf"
+"pyspark.sql.types" = "st"
 [tool.semantic_release]
 version_toml = ["pyproject.toml:project.version"]
 commit_message = "build(release): {version}"
@@ -136,6 +145,11 @@ managed = [
     ["ruff", "lint", "select"],
     ["ruff", "lint", "ignore"],
     ["ruff", "lint", "isort", "force-single-line"],
+    ["ruff", "lint", "flake8-import-conventions", "banned-from"],
+    ["ruff", "lint", "flake8-import-conventions", "extend-aliases", "datetime"],
+    ["ruff", "lint", "flake8-import-conventions", "extend-aliases", "sqlalchemy"],
+    ["ruff", "lint", "flake8-import-conventions", "extend-aliases", "pyspark.sql.functions"],
+    ["ruff", "lint", "flake8-import-conventions", "extend-aliases", "pyspark.sql.types"],
     ["ruff", "lint", "per-file-ignores", "__init__.py"],
     ["mypy", "pretty"],
     ["mypy", "ignore_missing_imports"],
