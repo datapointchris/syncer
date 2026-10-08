@@ -1,6 +1,4 @@
-from datetime import UTC
-from datetime import datetime
-from datetime import timedelta
+import datetime as dt
 from pathlib import Path
 
 import pytest
@@ -23,12 +21,12 @@ def _make_snapshot(name: str = 'repo1', status: RepoStatus = 'synced', uncommitt
 
 def _make_event(
     repos: list[RepoSnapshot] | None = None,
-    timestamp: datetime | None = None,
+    timestamp: dt.datetime | None = None,
     config_name: str = 'default',
     **summary_overrides,
 ) -> SyncRunEvent:
     repos = repos or [_make_snapshot()]
-    ts = timestamp or datetime.now(UTC)
+    ts = timestamp or dt.datetime.now(dt.UTC)
     defaults = {'total': len(repos), 'synced': len(repos), 'pulled': 0, 'pushed': 0, 'issues': 0, 'duration_ms': 100}
     defaults.update(summary_overrides)
     return SyncRunEvent(timestamp=ts, config_name=config_name, repos=repos, summary=RunSummary(**defaults))
@@ -283,14 +281,14 @@ class TestFindStaleRepos:
         """Dirty for less than threshold days is not stale."""
         event = _make_event(
             repos=[_make_snapshot(uncommitted=3, status='issues')],
-            timestamp=datetime.now(UTC) - timedelta(days=1),
+            timestamp=dt.datetime.now(dt.UTC) - dt.timedelta(days=1),
         )
         assert find_stale_repos([event], threshold_days=3) == []
 
     def test_stale_detected(self):
         """Dirty across runs for > threshold days is stale."""
-        old = datetime.now(UTC) - timedelta(days=5)
-        recent = datetime.now(UTC) - timedelta(hours=1)
+        old = dt.datetime.now(dt.UTC) - dt.timedelta(days=5)
+        recent = dt.datetime.now(dt.UTC) - dt.timedelta(hours=1)
         snap = _make_snapshot(name='dirty', uncommitted=3, status='issues')
         events = [
             _make_event(repos=[snap], timestamp=old),
@@ -303,9 +301,9 @@ class TestFindStaleRepos:
 
     def test_clean_run_resets_staleness(self):
         """If a repo becomes clean in a later run, it's no longer stale."""
-        day1 = datetime.now(UTC) - timedelta(days=10)
-        day5 = datetime.now(UTC) - timedelta(days=5)
-        day6 = datetime.now(UTC) - timedelta(days=4)
+        day1 = dt.datetime.now(dt.UTC) - dt.timedelta(days=10)
+        day5 = dt.datetime.now(dt.UTC) - dt.timedelta(days=5)
+        day6 = dt.datetime.now(dt.UTC) - dt.timedelta(days=4)
         dirty = _make_snapshot(name='repo', uncommitted=2, status='issues')
         clean = _make_snapshot(name='repo')
         events = [
@@ -318,8 +316,8 @@ class TestFindStaleRepos:
         assert len(stale) == 0
 
     def test_multiple_stale_sorted_by_days(self):
-        old = datetime.now(UTC) - timedelta(days=10)
-        newer = datetime.now(UTC) - timedelta(days=4)
+        old = dt.datetime.now(dt.UTC) - dt.timedelta(days=10)
+        newer = dt.datetime.now(dt.UTC) - dt.timedelta(days=4)
         snap1 = _make_snapshot(name='older', uncommitted=1, status='issues')
         snap2 = _make_snapshot(name='newer', uncommitted=2, status='issues')
         events = [
@@ -334,8 +332,8 @@ class TestFindStaleRepos:
 
     def test_renamed_repo_path_not_stale(self):
         """A repo path that was dirty but no longer appears in the latest event is ignored."""
-        old = datetime.now(UTC) - timedelta(days=10)
-        recent = datetime.now(UTC) - timedelta(hours=1)
+        old = dt.datetime.now(dt.UTC) - dt.timedelta(days=10)
+        recent = dt.datetime.now(dt.UTC) - dt.timedelta(hours=1)
         old_snap = RepoSnapshot(name='myrepo', path='~/code/old-dir/myrepo', status='issues', uncommitted=1)
         new_snap = RepoSnapshot(name='myrepo', path='~/code/new-dir/myrepo', status='synced', uncommitted=0)
         events = [

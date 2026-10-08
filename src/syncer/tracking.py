@@ -1,8 +1,7 @@
 from __future__ import annotations
 
+import datetime as dt
 from contextlib import suppress
-from datetime import UTC
-from datetime import datetime
 from operator import itemgetter
 from pathlib import Path
 from typing import Literal
@@ -140,7 +139,7 @@ class RunSummary(BaseModel):
 
 
 class SyncRunEvent(BaseModel):
-    timestamp: datetime
+    timestamp: dt.datetime
     config_name: str
     dry_run: bool = False
     repos: list[RepoSnapshot]
@@ -186,7 +185,7 @@ def find_stale_repos(events: list[SyncRunEvent], threshold_days: int = 3) -> lis
     sorted_events = sorted(events, key=lambda e: e.timestamp)
 
     # For each repo, find the earliest consecutive run (from the end) with uncommitted > 0
-    repo_dirty_since: dict[str, datetime] = {}
+    repo_dirty_since: dict[str, dt.datetime] = {}
 
     for event in sorted_events:
         for snap in event.repos:
@@ -201,7 +200,7 @@ def find_stale_repos(events: list[SyncRunEvent], threshold_days: int = 3) -> lis
     # Old paths from renamed/removed repos would otherwise stay dirty forever.
     current_paths = {snap.path for snap in sorted_events[-1].repos}
 
-    now = datetime.now(UTC)
+    now = dt.datetime.now(dt.UTC)
     stale = []
     for path, since in repo_dirty_since.items():
         if path not in current_paths:

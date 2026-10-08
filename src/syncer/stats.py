@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC
-from datetime import datetime
+import datetime as dt
 from operator import itemgetter
 from pathlib import Path
 
@@ -17,9 +16,9 @@ from syncer.tracking import read_events
 BLOCK_FULL = '\u2588'
 
 
-def _time_ago(dt: datetime) -> str:
-    now = datetime.now(UTC)
-    delta = now - dt
+def _time_ago(moment: dt.datetime) -> str:
+    now = dt.datetime.now(dt.UTC)
+    delta = now - moment
     minutes = int(delta.total_seconds() / 60)
     if minutes < 1:
         return 'just now'
@@ -53,7 +52,7 @@ def _show_summary(events: list[SyncRunEvent]) -> None:
     console.print('  [bold]Summary (last 30 days)[/bold]')
     console.print('  ' + '\u2500' * 42)
 
-    now = datetime.now(UTC)
+    now = dt.datetime.now(dt.UTC)
     recent = [e for e in events if (now - e.timestamp).days <= 30]
 
     if not recent:
@@ -122,10 +121,10 @@ def _show_repo_age(config: SyncerConfig) -> None:
         if not first:
             continue
         try:
-            dt = datetime.fromisoformat(first)
+            first_commit = dt.datetime.fromisoformat(first)
         except ValueError:
             continue
-        age_days = (datetime.now(UTC) - dt).days
+        age_days = (dt.datetime.now(dt.UTC) - first_commit).days
         if age_days >= 0:
             label = repo_config.path if repo_config.path.startswith('~') else repo_config.name
             rows.append((label, age_days))
@@ -147,7 +146,7 @@ def _show_repo_age(config: SyncerConfig) -> None:
 
 
 def _show_frequently_dirty(events: list[SyncRunEvent]) -> None:
-    now = datetime.now(UTC)
+    now = dt.datetime.now(dt.UTC)
     recent = [e for e in events if (now - e.timestamp).days <= 30]
     if not recent:
         return
@@ -219,11 +218,11 @@ def _show_all_repos(config: SyncerConfig, events: list[SyncRunEvent]) -> None:
     table.add_column('Last Active', justify='right')
     table.add_column('Status')
 
-    rows: list[tuple[str, str, str, str, datetime | None]] = []
+    rows: list[tuple[str, str, str, str, dt.datetime | None]] = []
     for repo_config in config.repos:
         path = Path(repo_config.path).expanduser()
         label = repo_config.path if repo_config.path.startswith('~') else repo_config.name
-        last_dt: datetime | None = None
+        last_dt: dt.datetime | None = None
 
         if path.exists() and (path / '.git').is_dir():
             owner = repo_config.owner or config.owner
@@ -232,7 +231,7 @@ def _show_all_repos(config: SyncerConfig, events: list[SyncRunEvent]) -> None:
             last_date = repo.last_commit_date
             if last_date:
                 try:
-                    last_dt = datetime.fromisoformat(last_date)
+                    last_dt = dt.datetime.fromisoformat(last_date)
                     last_active = _time_ago(last_dt)
                 except ValueError:
                     last_active = last_date
@@ -246,7 +245,7 @@ def _show_all_repos(config: SyncerConfig, events: list[SyncRunEvent]) -> None:
         status_style = 'green' if status == 'synced' else 'yellow' if status != '-' else 'dim'
         rows.append((label, commits, last_active, f'[{status_style}]{status}[/{status_style}]', last_dt))
 
-    rows.sort(key=lambda r: r[4] or datetime.min.replace(tzinfo=UTC), reverse=True)
+    rows.sort(key=lambda r: r[4] or dt.datetime.min.replace(tzinfo=dt.UTC), reverse=True)
     for label, commits, last_active, status_text, _ in rows:
         table.add_row(label, commits, last_active, status_text)
 

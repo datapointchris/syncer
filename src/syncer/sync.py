@@ -8,10 +8,9 @@ per-branch event emission, and stale-repo warnings.
 
 from __future__ import annotations
 
+import datetime as dt
 import time
 from collections import Counter
-from datetime import UTC
-from datetime import datetime
 from pathlib import Path
 
 from syncer.config import SyncerConfig
@@ -206,7 +205,7 @@ def run_sync(
 
     summary.duration_ms = int((time.monotonic() - start) * 1000)
     event = SyncRunEvent(
-        timestamp=datetime.now(UTC),
+        timestamp=dt.datetime.now(dt.UTC),
         config_name=config.owner,
         dry_run=not apply,
         repos=snapshots,

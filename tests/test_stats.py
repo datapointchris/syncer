@@ -1,6 +1,4 @@
-from datetime import UTC
-from datetime import datetime
-from datetime import timedelta
+import datetime as dt
 from unittest.mock import patch
 
 from rich.console import Console
@@ -23,7 +21,7 @@ def _make_snapshot(name='repo1', status='synced', uncommitted=0, **kwargs):
 
 def _make_event(repos=None, timestamp=None, config_name='default', **summary_overrides):
     repos = repos or [_make_snapshot()]
-    ts = timestamp or datetime.now(UTC)
+    ts = timestamp or dt.datetime.now(dt.UTC)
     defaults = {'total': len(repos), 'synced': len(repos), 'pulled': 0, 'pushed': 0, 'issues': 0, 'duration_ms': 100}
     defaults.update(summary_overrides)
     return SyncRunEvent(timestamp=ts, config_name=config_name, repos=repos, summary=RunSummary(**defaults))
@@ -31,22 +29,22 @@ def _make_event(repos=None, timestamp=None, config_name='default', **summary_ove
 
 class TestTimeAgo:
     def test_just_now(self):
-        assert _time_ago(datetime.now(UTC)) == 'just now'
+        assert _time_ago(dt.datetime.now(dt.UTC)) == 'just now'
 
     def test_minutes(self):
-        assert _time_ago(datetime.now(UTC) - timedelta(minutes=30)) == '30m ago'
+        assert _time_ago(dt.datetime.now(dt.UTC) - dt.timedelta(minutes=30)) == '30m ago'
 
     def test_hours(self):
-        assert _time_ago(datetime.now(UTC) - timedelta(hours=3)) == '3h ago'
+        assert _time_ago(dt.datetime.now(dt.UTC) - dt.timedelta(hours=3)) == '3h ago'
 
     def test_days(self):
-        assert _time_ago(datetime.now(UTC) - timedelta(days=5)) == '5d ago'
+        assert _time_ago(dt.datetime.now(dt.UTC) - dt.timedelta(days=5)) == '5d ago'
 
     def test_months(self):
-        assert _time_ago(datetime.now(UTC) - timedelta(days=60)) == '2mo ago'
+        assert _time_ago(dt.datetime.now(dt.UTC) - dt.timedelta(days=60)) == '2mo ago'
 
     def test_years(self):
-        assert _time_ago(datetime.now(UTC) - timedelta(days=400)) == '1y ago'
+        assert _time_ago(dt.datetime.now(dt.UTC) - dt.timedelta(days=400)) == '1y ago'
 
 
 class TestShowStats:
@@ -68,7 +66,7 @@ class TestShowStats:
                     _make_snapshot(),
                     _make_snapshot(name='dirty', status='issues', uncommitted=3),
                 ],
-                timestamp=datetime.now(UTC) - timedelta(days=2),
+                timestamp=dt.datetime.now(dt.UTC) - dt.timedelta(days=2),
                 issues=1,
             ),
             _make_event(
@@ -76,7 +74,7 @@ class TestShowStats:
                     _make_snapshot(),
                     _make_snapshot(name='dirty', status='issues', uncommitted=2),
                 ],
-                timestamp=datetime.now(UTC) - timedelta(hours=1),
+                timestamp=dt.datetime.now(dt.UTC) - dt.timedelta(hours=1),
                 issues=1,
             ),
         ]
@@ -95,7 +93,7 @@ class TestShowStats:
 
     def test_summary_shows_correct_counts(self, tmp_path):
         """Verify summary section math."""
-        events = [_make_event(timestamp=datetime.now(UTC) - timedelta(days=i), issues=i % 3) for i in range(5)]
+        events = [_make_event(timestamp=dt.datetime.now(dt.UTC) - dt.timedelta(days=i), issues=i % 3) for i in range(5)]
         config = SyncerConfig(owner='test', host='https://github.com', repos=[])
         output_file = tmp_path / 'output.txt'
         console = Console(file=open(output_file, 'w'), width=120)  # noqa: SIM115
@@ -110,8 +108,8 @@ class TestShowStats:
     def test_recent_runs_shows_latest_first(self, tmp_path):
         """Recent runs should be reverse chronological."""
         events = [
-            _make_event(timestamp=datetime(2025, 1, 10, tzinfo=UTC), issues=2),
-            _make_event(timestamp=datetime(2025, 1, 12, tzinfo=UTC)),
+            _make_event(timestamp=dt.datetime(2025, 1, 10, tzinfo=dt.UTC), issues=2),
+            _make_event(timestamp=dt.datetime(2025, 1, 12, tzinfo=dt.UTC)),
         ]
         config = SyncerConfig(owner='test', host='https://github.com', repos=[])
         output_file = tmp_path / 'output.txt'
@@ -140,8 +138,8 @@ class TestShowStats:
                 RepoConfig(name='new-repo', path=str(tmp_path / 'new-repo')),
             ],
         )
-        old_date = (datetime.now(UTC) - timedelta(days=90)).isoformat()
-        new_date = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+        old_date = (dt.datetime.now(dt.UTC) - dt.timedelta(days=90)).isoformat()
+        new_date = (dt.datetime.now(dt.UTC) - dt.timedelta(days=1)).isoformat()
 
         output_file = tmp_path / 'output.txt'
         console = Console(file=open(output_file, 'w'), width=120)  # noqa: SIM115
@@ -296,9 +294,9 @@ class TestShowRepoAge:
                 m.name = name
                 m.is_fork = False
                 if name == 'old':
-                    m.first_commit_date = (datetime.now(UTC) - timedelta(days=500)).isoformat()
+                    m.first_commit_date = (dt.datetime.now(dt.UTC) - dt.timedelta(days=500)).isoformat()
                 else:
-                    m.first_commit_date = (datetime.now(UTC) - timedelta(days=30)).isoformat()
+                    m.first_commit_date = (dt.datetime.now(dt.UTC) - dt.timedelta(days=30)).isoformat()
                 return m
 
             MockRepo.side_effect = make_repo
