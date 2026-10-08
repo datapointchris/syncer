@@ -114,6 +114,7 @@ datetime = "dt"
 sqlalchemy = "sa"
 "pyspark.sql.functions" = "sf"
 "pyspark.sql.types" = "st"
+
 [tool.semantic_release]
 version_toml = ["pyproject.toml:project.version"]
 commit_message = "build(release): {version}"
