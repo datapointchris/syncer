@@ -30,11 +30,13 @@ from syncer.report import _branch_prefix
 from syncer.report import _build_repo_report
 from syncer.report import _row_severity
 from syncer.report import build_branch_rows
+from syncer.report import exit_code_for
 from syncer.report import gather_reports
 from syncer.report import hidden_count
 from syncer.report import render_failure_summary
 from syncer.report import render_hidden_note
 from syncer.report import render_remedy
+from syncer.report import render_report
 from syncer.report import report_branches
 from syncer.report import report_severity
 from syncer.report import visible_reports
@@ -677,6 +679,26 @@ class TestWatchedRemoteBranches:
         deliberately do not keep."""
         report = self._watched(tmp_path, ['develop'], 'develop')
         assert report_severity(report) == Severity.SYNCED
+
+
+class TestTagFetchFindings:
+    """A tag the fetch would not overwrite is said beside a measured repo. It never fails the run,
+    or every release of a repo that moves a major tag would turn a scheduled sync red."""
+
+    def test_a_moved_tag_is_shown_by_default_and_fails_nothing(self, capsys):
+        report = RepoBranchReport(label='~/r', path='~/r', name='r', policy_name='standard', moved_tags=['v1'])
+        assert report_severity(report) == Severity.SYNCED
+        assert exit_code_for([report]) == 0
+        assert visible_reports([report], verbose=False) == [report]
+        render_report(report, apply=True)
+        assert 'tag v1' in capsys.readouterr().out
+
+    def test_a_refused_tag_fetch_is_shown_with_what_git_said(self, capsys):
+        report = RepoBranchReport(label='~/r', path='~/r', name='r', policy_name='standard', tag_fetch_error='error: cannot lock ref')
+        assert exit_code_for([report]) == 0
+        assert visible_reports([report], verbose=False) == [report]
+        render_report(report, apply=False)
+        assert 'cannot lock ref' in capsys.readouterr().out
 
 
 def _config_matching_origin(paths: list[Path]) -> SyncerConfig:

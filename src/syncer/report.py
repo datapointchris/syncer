@@ -207,6 +207,9 @@ class RepoBranchReport:
     # local branch to sync, so this never affects severity — a repo is not unhealthy for having
     # branches you deliberately do not keep locally.
     remote_only: list[tuple[str, str]] = field(default_factory=list)
+    # From the tag fetch, which runs after the branches were measured, so neither affects severity.
+    moved_tags: list[str] = field(default_factory=list)
+    tag_fetch_error: str | None = None
     # Repo-level counts captured for event snapshots (0 for lifecycle reports).
     uncommitted: int = 0
     stashes: int = 0
@@ -617,6 +620,8 @@ def _build_repo_report(
         origin_mismatch=origin_mismatch(repo),
         expected_url=repo.url,
         remote_only=_watched_remote_branches(repo, policy),
+        moved_tags=list(repo.moved_tags),
+        tag_fetch_error=repo.tag_fetch_error,
     )
 
 
@@ -707,11 +712,17 @@ def needs_attention(report: RepoBranchReport) -> bool:
     """Whether this repo has anything to say. The default view renders only these.
 
     Severity is the test, so the rule is the same one the sort and the summary line already use:
-    anything above SYNCED is either work syncer will do or work you have to. The exception is a
-    watched remote-only branch, which deliberately never affects severity — it is opt-in, and a
-    branch someone asked to be told about should not need a flag to appear.
+    anything above SYNCED is either work syncer will do or work you have to. The exceptions are a
+    watched remote-only branch and the tag fetch's findings, which deliberately never affect
+    severity — a branch someone asked to be told about, or a tag syncer would not overwrite,
+    should not need a flag to appear.
     """
-    return report_severity(report) > Severity.SYNCED or bool(report.remote_only)
+    return (
+        report_severity(report) > Severity.SYNCED
+        or bool(report.remote_only)
+        or bool(report.moved_tags)
+        or report.tag_fetch_error is not None
+    )
 
 
 def visible_reports(reports: list[RepoBranchReport], verbose: bool) -> list[RepoBranchReport]:
@@ -749,6 +760,8 @@ def _branch_json(report: RepoBranchReport) -> dict:
         'error': report.error,
         'error_detail': report.error_detail,
         'origin_mismatch': report.origin_mismatch,
+        'moved_tags': report.moved_tags,
+        'tag_fetch_error': report.tag_fetch_error,
         'skipped': {'host': report.skipped.host, 'cause': report.skipped.cause.value} if report.skipped else None,
         'branches': [
             {
@@ -903,6 +916,12 @@ def render_report(report: RepoBranchReport, apply: bool) -> None:
     for branch, age in report.remote_only:
         # No local copy, so nothing to sync — browse it with `git log origin/<branch>`.
         console.print(f'  [blue]{ICON_DOT}  origin/{branch} — remote only, last commit {age}[/blue]')
+    for tag in report.moved_tags:
+        console.print(f'  [blue]{ICON_DOT}  tag {escape(tag)} — origin moved it, and syncer never overwrites a local tag[/blue]')
+    if report.tag_fetch_error:
+        console.print(f'  [blue]{ICON_DOT}  tags not fetched[/blue]')
+        for line in report.tag_fetch_error.splitlines():
+            console.print(f'    {escape(line)}', soft_wrap=True)
     console.print()
 
 

@@ -148,6 +148,8 @@ Both views classify every branch (per-branch `ahead`/`behind`/`gone`/`no_upstrea
 
 `apply` is safe by construction: it enforces hard invariants no policy can override — never `--force`, never mutate a dirty working tree, fast-forward only under strict ancestry, `rebase_push` aborts cleanly on conflict, and any precondition that fails at write time is refused (never forced) rather than mutated.
 
+Tags are fetched after the branches, and never decide whether a repo was measured. A tag the remote moved, such as a reusable workflow's `v1`, is left where it is locally and named under the repo. So is any other reason the tag fetch was refused. Neither changes the exit code.
+
 Repos are fetched and processed **concurrently** (default 16 at a time, `-j` to tune), so a single run over many repos takes roughly as long as the slowest repo rather than the sum. A small random jitter staggers the initial fetches so they don't hit the remote all at once. Output is sorted by attention, so anything needing action lands nearest the prompt.
 
 While it runs, a live line on stderr shows how far in it is, which repos are being fetched right now, and how long each has been going — so a slow host is visible as it happens rather than after the fact. It is a terminal affordance: nothing is drawn into a pipe, a log, or `--json`. Ctrl-C ends the git calls immediately and exits 130 without writing a run to the history, because a sweep that covered some unknown fraction of the registry is not a measurement.

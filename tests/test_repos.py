@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
+from syncer.classify import refresh_remote
 from syncer.diagnose import Cause
 from syncer.diagnose import classify_failure
 from syncer.output import ALL_ICONS
@@ -16,6 +17,7 @@ from syncer.output import ICON_ERR
 from syncer.output import ICON_OK
 from syncer.output import _display_width
 from syncer.output import _status_line
+from syncer.policy import STANDARD_POLICY
 from syncer.repos import ABORTED_RETURNCODE
 from syncer.repos import TIMEOUT_RETURNCODE
 from syncer.repos import GitFailure
@@ -510,14 +512,17 @@ class TestFailureRecording:
         repo.local_branches()
         assert repo.failures == []
 
-    def test_a_rejected_tag_fetch_carries_its_reason(self, tmp_path):
-        """A recorded failure with empty stderr is the undiagnosable state GitFailure exists to
-        prevent, and `--quiet` produced exactly that: a tag-clobber fetch exits 1 with zero bytes
-        on stderr, so the repo reported `fetch failed` with no detail and nothing to act on.
 
-        Built with real git rather than a mock, because the whole finding is about which stream
-        git writes to under which flags — a mocked CompletedProcess would assert our own guess.
-        """
+class TestTagFetch:
+    """The branches are fetched without tags, and the tags after, so a tag git refuses is a note
+    beside a measured repo rather than a repo nobody measured.
+
+    Built with real git rather than a mock, because the finding is about which refspec git refuses
+    under which config and which stream it says so on — a mocked CompletedProcess would assert our
+    own guess.
+    """
+
+    def _upstream_and_clone(self, tmp_path: Path) -> tuple[Path, Path]:
         # --initial-branch, because the bare's HEAD is what a later clone checks out: left to
         # init.defaultBranch it said `master` on CI while the branch pushed below was `main`, so
         # the clone checked out nothing and had no HEAD for its tag to point at.
@@ -546,6 +551,12 @@ class TestFailureRecording:
         # and absent on CI, which is why the run there fetched clean.
         _git(local, 'config', 'fetch.prune', 'true')
         _git(local, 'config', 'fetch.pruneTags', 'true')
+        return upstream, local
+
+    def test_a_tag_origin_moved_is_named_and_the_branches_are_still_measured(self, tmp_path):
+        """The tag is named from git's stderr, which `--quiet` empties: a tag-clobber fetch exits 1
+        with zero bytes there, and nothing would say which tag."""
+        upstream, local = self._upstream_and_clone(tmp_path)
 
         # The tag now means a different commit on each side, which is what git refuses to resolve.
         (upstream / 'README.md').write_text('two\n')
@@ -563,10 +574,28 @@ class TestFailureRecording:
         assert local_tag and upstream_tag
         assert local_tag != upstream_tag
 
-        failure = _make_repo(local).fetch_prune()
-        assert failure is not None
-        assert 'would clobber existing tag' in failure.stderr
-        assert 'v1.0.0' in failure.stderr
+        repo = _make_repo(local)
+        assert refresh_remote(repo, STANDARD_POLICY) is None
+        assert repo.failures == []
+        assert repo.moved_tags == ['v1.0.0']
+        assert _rev(local, 'v1.0.0') == local_tag
+        assert _rev(local, 'origin/main') == _rev(upstream, 'main')
+
+    def test_any_other_refusal_of_the_tag_fetch_is_kept_as_git_said_it(self, tmp_path):
+        """A refusal naming no moved tag still reaches the reader. A stale lock is the
+        deterministic case: it refuses one new tag and no branch."""
+        upstream, local = self._upstream_and_clone(tmp_path)
+        _git(upstream, 'tag', 'v2.0.0')
+        _git(upstream, 'push', 'origin', 'v2.0.0')
+        assert _rev(upstream, 'v2.0.0')
+        (local / '.git' / 'refs' / 'tags' / 'v2.0.0.lock').touch()
+
+        repo = _make_repo(local)
+        assert refresh_remote(repo, STANDARD_POLICY) is None
+        assert repo.failures == []
+        assert repo.moved_tags == []
+        assert repo.tag_fetch_error is not None
+        assert 'cannot lock ref' in repo.tag_fetch_error
 
 
 class TestLinkedWorktrees:

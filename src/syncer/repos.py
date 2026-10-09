@@ -24,6 +24,11 @@ TIMEOUT_RETURNCODE = 124
 # leaves every branch state below it measured against refs nobody refreshed. Its stderr matches no
 # diagnosis, so it can never be mistaken for a fact about the remote.
 ABORTED_RETURNCODE = 130
+# The measuring fetch touches no tag. `--no-prune-tags` drops the tag refspec `fetch.pruneTags`
+# adds, which is the one that refuses a tag origin moved; `--no-tags` drops auto-follow and tagOpt.
+BRANCHES_ONLY = ('--no-tags', '--no-prune-tags')
+# git's line for a tag it refused to overwrite: ` ! [rejected]   v1   -> v1  (would clobber existing tag)`.
+MOVED_TAG = re.compile(r'^\s*!\s+\[rejected\]\s+(\S+)\s+->\s+\S+\s+\(would clobber existing tag\)', re.MULTILINE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,6 +228,9 @@ class Repo:
         self.timeout = timeout
         # Thread-confined: report.py builds one Repo per worker task, so a plain list is safe.
         self.failures: list[GitFailure] = []
+        # What fetch_tags found. Never a failure: the branches were measured without tags.
+        self.moved_tags: list[str] = []
+        self.tag_fetch_error: str | None = None
 
     def _git(self, *args: str, probe: bool = False, timeout: int | None = None) -> subprocess.CompletedProcess[str]:
         """Run git in this repo, recording a non-zero exit unless it is a probe.
@@ -544,14 +552,31 @@ class Repo:
         a tag exits 1 with *zero bytes* of stderr under `--quiet`, so the repo reported `fetch
         failed` with no detail line and nothing to act on. A recorded failure whose stderr is
         empty is the undiagnosable state `GitFailure` exists to prevent.
+
+        No tag is fetched here. A tag origin moved is refused, and a refusal exiting 1 would mark
+        every branch unmeasured when every one of them was fetched; fetch_tags takes the tags after.
         """
-        result = self._git('fetch')
+        result = self._git('fetch', *BRANCHES_ONLY)
         return None if result.returncode == 0 else self.failures[-1]
 
     def fetch_prune(self) -> GitFailure | None:
         """fetch --prune, so a deleted upstream branch classifies as gone rather than synced."""
-        result = self._git('fetch', '--prune')
+        result = self._git('fetch', '--prune', *BRANCHES_ONLY)
         return None if result.returncode == 0 else self.failures[-1]
+
+    def fetch_tags(self, prune: bool) -> None:
+        """The fetch git's own config describes, run after the measuring one, for its tags.
+
+        A probe, because its failure is not a measurement: a tag origin moved is named in
+        `moved_tags`, and any other refusal is kept whole in `tag_fetch_error`. Neither is forced,
+        so a local tag is never overwritten.
+        """
+        result = self._git('fetch', *(('--prune',) if prune else ()), probe=True)
+        if result.returncode == 0:
+            return
+        self.moved_tags = MOVED_TAG.findall(result.stderr)
+        if not self.moved_tags:
+            self.tag_fetch_error = result.stderr.strip() or f'git fetch exited {result.returncode}'
 
     def set_head_auto(self) -> None:
         """Repoint origin/HEAD to the remote's real default (fixes stale ref after a

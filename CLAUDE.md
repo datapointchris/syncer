@@ -9,7 +9,7 @@ The decision logic is a pure function, so it is exhaustively testable without to
 
 | Stage | Module | Purity | Owns |
 | --- | --- | --- | --- |
-| Classify | `classify.py` | impure (git reads) | Turns real repo state into `BranchState` objects. Runs the read-side remediation (`fetch --prune` + `git remote set-head origin --auto`) so a renamed default resolves before anything is classified. |
+| Classify | `classify.py` | impure (git reads) | Turns real repo state into `BranchState` objects. Runs the read-side remediation (`fetch --prune` without tags, a best-effort tag fetch, then `git remote set-head origin --auto`) so a renamed default resolves before anything is classified. |
 | Decide | `policy.py` | **pure** | `decide(state, policy) -> Action`. No git, no FS. A `BranchState` × a `Policy` maps to one action off a pre-vetted safe menu. Also holds the built-in policies. |
 | Execute | `execute.py` | impure (git writes) | The only place that mutates. Enforces the hard invariants (below) and refuses rather than forces. |
 | Report | `report.py` | impure (concurrency + render) | Runs classify→decide→(execute) per repo on a thread pool, sorts by attention, renders. |
@@ -35,6 +35,13 @@ report fully in sync. Three rules follow:
   is a claim about a branch, and none can be made. There is deliberately no
   `PrimaryState.UNKNOWN` — every policy's rule for it would be `report`, and a state name cannot
   carry git's stderr.
+- **The measuring fetch touches no tag.** It runs with `--no-tags --no-prune-tags`, because the
+  tag refspec `fetch.pruneTags` adds refuses a tag origin moved, and that refusal exits 1 after
+  every branch was fetched. A repo that moves a major tag on each release, such as a reusable
+  workflow's `v1`, would otherwise read as unmeasured on every box after every release. `fetch_tags` then runs
+  the fetch git's config describes as a probe. A moved tag lands in `moved_tags`, any other
+  refusal in `tag_fetch_error`, and both render like `remote_only`: shown by default, never a
+  severity, never the exit code. Neither is forced, so a local tag is never overwritten.
 - **Unknown resolves toward refusal.** `ahead_behind` returns `None` rather than `(0, 0)`;
   `remotes()` returns `None` (cannot ask) distinctly from `[]` (none configured). Every
   `execute.py` guard treats "cannot verify" as "do not proceed".

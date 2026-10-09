@@ -114,6 +114,7 @@ def refresh_remote(repo: Repo, policy: Policy) -> GitFailure | None:
     failure = repo.fetch_prune() if policy.prune else repo.fetch()
     if failure is not None:
         return failure
+    repo.fetch_tags(prune=policy.prune)
     repo.set_head_auto()
     return None
 
