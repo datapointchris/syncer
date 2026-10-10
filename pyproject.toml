@@ -3,7 +3,7 @@ name = "syncer"
 version = "11.3.5"
 description = "CLI tool for checking if local git repos are fully synced before switching machines"
 authors = [{ name = "Chris Birch", email = "datapointchris@gmail.com" }]
-license = { text = "MIT" }
+license = "MIT"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
