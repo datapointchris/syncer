@@ -23,7 +23,7 @@ def isolated(tmp_path, monkeypatch):
     return config_dir
 
 
-def _bare_repo(tmp_path: Path, name: str) -> Path:
+def bare_repo(tmp_path: Path, name: str) -> Path:
     """A real local remote, so the reachability probe can succeed with no network."""
     bare = tmp_path / f'{name}.git'
     subprocess.run(['git', 'init', '--bare', '-b', 'main', str(bare)], capture_output=True)
@@ -38,13 +38,13 @@ def _bare_repo(tmp_path: Path, name: str) -> Path:
     return bare
 
 
-def _write_registry(config_dir: Path, **overrides) -> Path:
+def write_registry(config_dir: Path, **overrides) -> Path:
     registry = config_dir / 'repos.json'
     registry.write_text(json.dumps({'owner': 'me', 'host': 'https://github.com', 'search_paths': [], 'repos': [], **overrides}))
     return registry
 
 
-def _named(checks, name):
+def checks_named(checks, name):
     return [check for check in checks if check.name == name]
 
 
@@ -52,21 +52,21 @@ class TestPrerequisiteOrder:
     def test_a_missing_registry_stops_before_the_network(self, isolated):
         """Nothing below a registry that will not load can say anything useful."""
         checks = run_doctor()
-        assert _named(checks, 'registry')[0].status is Status.FAIL
-        assert _named(checks, 'reach') == []
+        assert checks_named(checks, 'registry')[0].status is Status.FAIL
+        assert checks_named(checks, 'reach') == []
 
     def test_paths_are_reported_even_when_everything_else_fails(self, isolated):
         """The line that would have made the work-box incident diagnosable: which files syncer
         is actually reading, and what chose them."""
         checks = run_doctor()
-        [paths] = _named(checks, 'paths')
+        [paths] = checks_named(checks, 'paths')
         assert paths.status is Status.OK
         assert any('registry' in line for line in paths.detail)
 
     def test_the_registry_path_carries_its_provenance(self, isolated):
         (isolated / 'config.toml').write_text('repos_registry = "/nowhere/repos.json"\n')
         checks = run_doctor()
-        [paths] = _named(checks, 'paths')
+        [paths] = checks_named(checks, 'paths')
         assert any('from repos_registry' in line for line in paths.detail)
 
     def test_a_broken_config_is_named_not_raised(self, isolated):
@@ -74,58 +74,58 @@ class TestPrerequisiteOrder:
         exists to explain."""
         (isolated / 'config.toml').write_text('[policies.bad.rules]\n"*:ahead" = "not-an-action"\n')
         checks = run_doctor()
-        [config_check] = _named(checks, 'config')
+        [config_check] = checks_named(checks, 'config')
         assert config_check.status is Status.FAIL
         assert any('not-an-action' in line for line in config_check.detail)
 
 
 class TestIdentity:
     def test_the_shipped_placeholders_are_caught(self, isolated):
-        _write_registry(
+        write_registry(
             isolated,
             owner='your-github-username',
             repos=[{'name': 'example-repo', 'path': '~/code/example-repo'}],
         )
         checks = run_doctor()
-        [identity] = _named(checks, 'identity')
+        [identity] = checks_named(checks, 'identity')
         assert identity.status is Status.FAIL
         assert 'example-repo' in identity.detail
 
     def test_placeholders_skip_the_network_probe(self, isolated):
         """Probing fake URLs reports a network problem for what is really an unedited config."""
-        _write_registry(isolated, owner='your-github-username', repos=[{'name': 'example-repo', 'path': '~/x'}])
+        write_registry(isolated, owner='your-github-username', repos=[{'name': 'example-repo', 'path': '~/x'}])
         checks = run_doctor()
-        assert _named(checks, 'reach')[0].status is Status.WARN
-        assert 'skipped' in _named(checks, 'reach')[0].summary
+        assert checks_named(checks, 'reach')[0].status is Status.WARN
+        assert 'skipped' in checks_named(checks, 'reach')[0].summary
 
     def test_an_empty_owner_is_only_a_problem_for_repos_that_use_it(self, isolated):
-        _write_registry(isolated, owner='', repos=[{'name': 'api', 'path': '~/code/api'}])
+        write_registry(isolated, owner='', repos=[{'name': 'api', 'path': '~/code/api'}])
         checks = run_doctor()
-        [urls] = _named(checks, 'urls')
+        [urls] = checks_named(checks, 'urls')
         assert urls.status is Status.FAIL
         assert any('//' in line for line in urls.detail)
 
     def test_an_all_third_party_registry_needs_no_owner(self, isolated):
         """The exemplar registry names an owner per entry, which is legitimate."""
-        _write_registry(isolated, owner='', repos=[{'name': 'vuetify', 'path': '~/refs/vuetify', 'owner': 'vuetifyjs'}])
-        assert _named(run_doctor(), 'urls')[0].status is Status.OK
+        write_registry(isolated, owner='', repos=[{'name': 'vuetify', 'path': '~/refs/vuetify', 'owner': 'vuetifyjs'}])
+        assert checks_named(run_doctor(), 'urls')[0].status is Status.OK
 
     def test_an_empty_registry_is_not_an_identity_failure(self, isolated):
         """A freshly scaffolded registry has no owner and no repos, and that is a legitimate
         state to be in — it must not report as broken."""
-        _write_registry(isolated, owner='')
-        assert _named(run_doctor(), 'urls')[0].status is Status.OK
+        write_registry(isolated, owner='')
+        assert checks_named(run_doctor(), 'urls')[0].status is Status.OK
 
 
 class TestReachability:
     def test_a_reachable_remote_passes(self, isolated, tmp_path):
-        bare = _bare_repo(tmp_path, 'api')
-        _write_registry(isolated, repos=[{'name': 'api', 'path': str(tmp_path / 'api'), 'clone_url': str(bare)}])
-        assert _named(run_doctor(), 'reach')[0].status is Status.OK
+        bare = bare_repo(tmp_path, 'api')
+        write_registry(isolated, repos=[{'name': 'api', 'path': str(tmp_path / 'api'), 'clone_url': str(bare)}])
+        assert checks_named(run_doctor(), 'reach')[0].status is Status.OK
 
     def test_an_unreachable_remote_fails_with_a_cause_and_a_hint(self, isolated, tmp_path):
-        _write_registry(isolated, repos=[{'name': 'api', 'path': str(tmp_path / 'api'), 'clone_url': str(tmp_path / 'gone.git')}])
-        [reach] = _named(run_doctor(), 'reach')
+        write_registry(isolated, repos=[{'name': 'api', 'path': str(tmp_path / 'api'), 'clone_url': str(tmp_path / 'gone.git')}])
+        [reach] = checks_named(run_doctor(), 'reach')
         assert reach.status is Status.FAIL
         assert reach.detail  # git's own words
         assert reach.hints  # and something to do about it
@@ -133,12 +133,12 @@ class TestReachability:
     def test_one_probe_per_host_not_per_repo(self, isolated, tmp_path):
         """Thirty repos on one host is one question, and thirty probes of it is thirty times the
         wait for the same answer."""
-        bare = _bare_repo(tmp_path, 'shared')
-        _write_registry(
+        bare = bare_repo(tmp_path, 'shared')
+        write_registry(
             isolated,
             repos=[{'name': f'r{i}', 'path': str(tmp_path / f'r{i}'), 'clone_url': str(bare)} for i in range(5)],
         )
-        assert len(_named(run_doctor(), 'reach')) == 1
+        assert len(checks_named(run_doctor(), 'reach')) == 1
 
     def test_gh_is_never_invoked(self, isolated, tmp_path, monkeypatch):
         """A remote may be Bitbucket or internal; doctor must not assume GitHub."""
@@ -150,19 +150,19 @@ class TestReachability:
             return real(args, **kwargs)
 
         monkeypatch.setattr('syncer.repos.subprocess.run', spy)
-        _write_registry(isolated, repos=[{'name': 'api', 'path': str(tmp_path / 'api'), 'clone_url': str(tmp_path / 'gone.git')}])
+        write_registry(isolated, repos=[{'name': 'api', 'path': str(tmp_path / 'api'), 'clone_url': str(tmp_path / 'gone.git')}])
         run_doctor()
         assert not any(args and args[0] == 'gh' for args in calls)
 
 
 class TestClonesAndPolicy:
     def test_missing_clones_are_one_fact_not_n_warnings(self, isolated, tmp_path):
-        bare = _bare_repo(tmp_path, 'api')
-        _write_registry(
+        bare = bare_repo(tmp_path, 'api')
+        write_registry(
             isolated,
             repos=[{'name': f'r{i}', 'path': str(tmp_path / f'nope{i}'), 'clone_url': str(bare)} for i in range(3)],
         )
-        [clones] = _named(run_doctor(), 'clones')
+        [clones] = checks_named(run_doctor(), 'clones')
         assert clones.status is Status.WARN
         assert '0 of 3' in clones.summary
         assert 'syncer apply' in ' '.join(clones.hints)
@@ -170,26 +170,26 @@ class TestClonesAndPolicy:
     def test_a_seeded_directory_does_not_count_as_a_clone(self, isolated, tmp_path):
         """A restore drops gitignored files at a repo path before the repo exists. Keying on the
         path made doctor report every repo present on a box that held none of them."""
-        bare = _bare_repo(tmp_path, 'api')
+        bare = bare_repo(tmp_path, 'api')
         seeded = tmp_path / 'api'
         seeded.mkdir()
         (seeded / 'local.env').write_text('SECRET\n')
-        _write_registry(isolated, repos=[{'name': 'api', 'path': str(seeded), 'clone_url': str(bare)}])
+        write_registry(isolated, repos=[{'name': 'api', 'path': str(seeded), 'clone_url': str(bare)}])
 
-        [clones] = _named(run_doctor(), 'clones')
+        [clones] = checks_named(run_doctor(), 'clones')
 
         assert clones.status is Status.WARN
         assert '0 of 1' in clones.summary
 
     def test_it_does_not_suggest_cloning_when_the_host_is_unreachable(self, isolated, tmp_path):
-        _write_registry(isolated, repos=[{'name': 'api', 'path': str(tmp_path / 'api'), 'clone_url': str(tmp_path / 'gone.git')}])
-        [clones] = _named(run_doctor(), 'clones')
+        write_registry(isolated, repos=[{'name': 'api', 'path': str(tmp_path / 'api'), 'clone_url': str(tmp_path / 'gone.git')}])
+        [clones] = checks_named(run_doctor(), 'clones')
         assert 'syncer apply' not in ' '.join(clones.hints)
 
     def test_an_unresolvable_default_policy_fails(self, isolated):
         (isolated / 'config.toml').write_text('default_policy = "nonexistent"\n')
-        _write_registry(isolated)
-        [policy] = _named(run_doctor(), 'policy')
+        write_registry(isolated)
+        [policy] = checks_named(run_doctor(), 'policy')
         assert policy.status is Status.FAIL
 
 
@@ -200,8 +200,8 @@ class TestExitCode:
     def test_warn_alone_exits_zero(self, isolated, tmp_path):
         """An un-cloned repo set is a state you can be in on purpose; a registry that will not
         load means the next command is going to fail."""
-        bare = _bare_repo(tmp_path, 'api')
-        _write_registry(isolated, repos=[{'name': 'api', 'path': str(tmp_path / 'nope'), 'clone_url': str(bare)}])
+        bare = bare_repo(tmp_path, 'api')
+        write_registry(isolated, repos=[{'name': 'api', 'path': str(tmp_path / 'nope'), 'clone_url': str(bare)}])
         checks = run_doctor()
         assert any(check.status is Status.WARN for check in checks)
         assert doctor_exit_code(checks) == 0

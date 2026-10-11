@@ -84,7 +84,7 @@ def origin_mismatch(repo: Repo) -> str | None:
     return actual
 
 
-def _same_dir(left: str | Path, right: str | Path) -> bool:
+def same_dir(left: str | Path, right: str | Path) -> bool:
     """Whether two paths name the same directory, symlinks and relative spellings folded out.
 
     `git worktree list` prints fully resolved paths while a registry entry is whatever the user
@@ -97,7 +97,7 @@ def _same_dir(left: str | Path, right: str | Path) -> bool:
         return Path(left) == Path(right)
 
 
-def _add_git_config(env: dict[str, str], key: str, value: str) -> None:
+def add_git_config(env: dict[str, str], key: str, value: str) -> None:
     """Append the environment form of `git -c key=value`, keeping any the caller already set.
 
     The env form rather than argv because every git call in the tool goes through run_command and
@@ -114,7 +114,7 @@ def _add_git_config(env: dict[str, str], key: str, value: str) -> None:
     env['GIT_CONFIG_COUNT'] = str(index + 1)
 
 
-def _noninteractive_env() -> dict[str, str]:
+def noninteractive_env() -> dict[str, str]:
     """Git environment that fails fast rather than blocking on a prompt or opening a window.
 
     Prompting is what concurrency turns into a hang: git asks for credentials on /dev/tty, which
@@ -148,16 +148,16 @@ def _noninteractive_env() -> dict[str, str]:
     ssh_command = env.get('GIT_SSH_COMMAND', 'ssh')
     env['GIT_SSH_COMMAND'] = f'{ssh_command} -o BatchMode=yes'
     env['GCM_INTERACTIVE'] = 'never'
-    _add_git_config(env, 'credential.interactive', 'false')
+    add_git_config(env, 'credential.interactive', 'false')
     return env
 
 
 # Every git process syncer currently has running, so a Ctrl-C can end them instead of waiting out
 # each one's timeout. Module-level because run_command is reached from every layer and threading a
 # handle down to it would put cancellation plumbing in signatures that are about repos.
-_active_lock = threading.Lock()
-_active_processes: set[subprocess.Popen[str]] = set()
-_aborted = threading.Event()
+active_lock = threading.Lock()
+active_processes: set[subprocess.Popen[str]] = set()
+aborted = threading.Event()
 
 
 def abort_running_commands() -> None:
@@ -167,9 +167,9 @@ def abort_running_commands() -> None:
     tasks, so an interrupt during a fetch storm sits there for the remainder of git_timeout — two
     minutes of a terminal that has already been told to stop.
     """
-    _aborted.set()
-    with _active_lock:
-        processes = list(_active_processes)
+    aborted.set()
+    with active_lock:
+        processes = list(active_processes)
     for process in processes:
         # The process can exit between the snapshot and the signal, and a race there is not worth
         # reporting: it is already gone, which is what was being asked for.
@@ -179,7 +179,7 @@ def abort_running_commands() -> None:
 
 def reset_abort() -> None:
     """Re-arm for a fresh run. A long-lived process (the test suite) reuses the module."""
-    _aborted.clear()
+    aborted.clear()
 
 
 def run_command(args: list[str], *, cwd: Path | None = None, timeout: int) -> subprocess.CompletedProcess[str]:
@@ -191,7 +191,7 @@ def run_command(args: list[str], *, cwd: Path | None = None, timeout: int) -> su
     Popen rather than subprocess.run so the handle is visible to abort_running_commands; run()
     owns its child privately, which is precisely what left a Ctrl-C with nothing to signal.
     """
-    if _aborted.is_set():
+    if aborted.is_set():
         return subprocess.CompletedProcess(args, returncode=ABORTED_RETURNCODE, stdout='', stderr='aborted')
     process = subprocess.Popen(  # nosec B603 B607
         args,
@@ -199,10 +199,10 @@ def run_command(args: list[str], *, cwd: Path | None = None, timeout: int) -> su
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        env=_noninteractive_env(),
+        env=noninteractive_env(),
     )
-    with _active_lock:
-        _active_processes.add(process)
+    with active_lock:
+        active_processes.add(process)
     try:
         stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -210,9 +210,9 @@ def run_command(args: list[str], *, cwd: Path | None = None, timeout: int) -> su
         process.communicate()
         return subprocess.CompletedProcess(args, returncode=TIMEOUT_RETURNCODE, stdout='', stderr=f'timed out after {timeout}s')
     finally:
-        with _active_lock:
-            _active_processes.discard(process)
-    if _aborted.is_set() and process.returncode != 0:
+        with active_lock:
+            active_processes.discard(process)
+    if aborted.is_set() and process.returncode != 0:
         # A killed git exits non-zero with whatever it had managed to say. Reporting that as a
         # repo problem would fill the run's failure summary with the consequences of the Ctrl-C.
         return subprocess.CompletedProcess(args, returncode=ABORTED_RETURNCODE, stdout=stdout, stderr='aborted')
@@ -371,7 +371,7 @@ class Repo:
 
         `git branch -f` and `git branch -D` both refuse a branch a worktree holds, so most of the
         menu inherits git's own protection. `update-ref` is plumbing and does not check, so
-        _ff_ref moved a live worktree's HEAD out from under it — leaving that tree's index
+        ff_ref moved a live worktree's HEAD out from under it — leaving that tree's index
         describing a commit it no longer points at, with files from the new commit staged as
         deletions, in a tree syncer never looked at and whose dirtiness it never measured.
 
@@ -388,7 +388,7 @@ class Repo:
             keyword, _, value = line.partition(' ')
             if keyword == 'worktree':
                 path = value
-            elif keyword == 'branch' and path and not _same_dir(path, self.path):
+            elif keyword == 'branch' and path and not same_dir(path, self.path):
                 found[value.removeprefix('refs/heads/')] = path
         return found
 
@@ -429,7 +429,7 @@ class Repo:
     def ahead_behind(self, branch: str, upstream: str) -> tuple[int, int] | None:
         """(ahead, behind) commit counts of `branch` vs `upstream`, or None if git could not say.
 
-        None rather than (0, 0): the counts feed _primary_from_counts, which reads (0, 0) as
+        None rather than (0, 0): the counts feed primary_from_counts, which reads (0, 0) as
         SYNCED — so a missing remote-tracking ref after a failed fetch used to make a repo that
         had never reached its remote report as fully in sync.
         """

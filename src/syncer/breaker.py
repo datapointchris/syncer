@@ -59,7 +59,7 @@ class Trip:
         return f'{self.host} ({self.cause.value.replace("_", " ")})'
 
 
-def _key(url: str) -> tuple[str, str] | None:
+def host_transport(url: str) -> tuple[str, str] | None:
     """(host, transport) for a URL, or None when there is no host to draw a conclusion about."""
     host = remote_host(url)
     if not host:
@@ -84,7 +84,7 @@ class HostBreaker:
 
     def record_success(self, url: str) -> None:
         """Note that this host answered. Immunizes it for the rest of the run."""
-        key = _key(url)
+        key = host_transport(url)
         if key is None:
             return
         with self._lock:
@@ -97,7 +97,7 @@ class HostBreaker:
         and a breaker that trips on 'something went wrong' would skip repos over a message no one
         has read.
         """
-        key = _key(url)
+        key = host_transport(url)
         cause = classify_failure(failure)
         if key is None or cause is None:
             return
@@ -106,7 +106,7 @@ class HostBreaker:
 
     def trip_for(self, url: str) -> Trip | None:
         """The reason this host is closed, or None if it is still worth asking."""
-        key = _key(url)
+        key = host_transport(url)
         if key is None:
             return None
         with self._lock:

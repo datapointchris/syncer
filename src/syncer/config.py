@@ -327,7 +327,7 @@ class ConfigError(Exception):
         self.problems = problems
 
 
-def _validation_problems(exc: ValidationError, prefix: str = '') -> list[str]:
+def validation_problems(exc: ValidationError, prefix: str = '') -> list[str]:
     """One line per pydantic error: the key path that failed, then why."""
     problems = []
     for err in exc.errors():
@@ -339,13 +339,13 @@ def _validation_problems(exc: ValidationError, prefix: str = '') -> list[str]:
     return problems
 
 
-def _report_config_error(path: Path, exc: ConfigError) -> None:
+def report_config_error(path: Path, exc: ConfigError) -> None:
     error(f'{path} is invalid:')
     for problem in exc.problems:
         hint(f'  {problem}')
 
 
-def _load_repos_file(path: Path, source: str | None = None) -> SyncerConfig:
+def load_repos_file(path: Path, source: str | None = None) -> SyncerConfig:
     """Load the repo registry from a JSON file.
 
     A missing registry names its own provenance, because the actionable fact is usually not that
@@ -362,10 +362,10 @@ def _load_repos_file(path: Path, source: str | None = None) -> SyncerConfig:
     try:
         config = parse_registry(json.loads(path.read_text()))
     except json.JSONDecodeError as exc:
-        _report_config_error(path, ConfigError([f'not valid JSON: {exc}']))
+        report_config_error(path, ConfigError([f'not valid JSON: {exc}']))
         sys.exit(1)
     except ConfigError as exc:
-        _report_config_error(path, exc)
+        report_config_error(path, exc)
         sys.exit(1)
     config.repos.sort(key=lambda r: r.path)
     return config
@@ -376,7 +376,7 @@ def parse_registry(raw: dict[str, Any]) -> SyncerConfig:
     try:
         return SyncerConfig(**raw)
     except ValidationError as exc:
-        raise ConfigError(_validation_problems(exc)) from exc
+        raise ConfigError(validation_problems(exc)) from exc
 
 
 # Keys a [policies.*] table may hold: every Policy field except the name (which is the table key)
@@ -384,10 +384,10 @@ def parse_registry(raw: dict[str, Any]) -> SyncerConfig:
 # explicitly because pydantic ignores unknown fields by default, so `extends = "standard"` would
 # otherwise be dropped in silence — and a policy that silently did not inherit reads as syncer
 # ignoring the whole block.
-_POLICY_BODY_KEYS = (set(Policy.model_fields) - {'name'}) | {'extend'}
+POLICY_BODY_KEYS = (set(Policy.model_fields) - {'name'}) | {'extend'}
 
 
-def _merged_policy_body(base: Policy | None, body: dict[str, Any]) -> dict[str, Any]:
+def merged_policy_body(base: Policy | None, body: dict[str, Any]) -> dict[str, Any]:
     """A [policies.X] table applied over its base: only the keys actually present override.
 
     `rules` merges cell by cell rather than replacing the table, which is what makes patching one
@@ -404,7 +404,7 @@ def _merged_policy_body(base: Policy | None, body: dict[str, Any]) -> dict[str, 
     return merged
 
 
-def _build_policies(raw_policies: dict[str, Any], bases: dict[str, str] | None = None) -> dict[str, Policy]:
+def build_policies(raw_policies: dict[str, Any], bases: dict[str, str] | None = None) -> dict[str, Policy]:
     """Resolve every [policies.*] table against the policy it patches or extends.
 
     A table named for a built-in patches that built-in; `extend` names a base for a table that
@@ -430,7 +430,7 @@ def _build_policies(raw_policies: dict[str, Any], bases: dict[str, str] | None =
         if name in in_progress:
             raise ConfigError([f'policies.{name}: extend cycle ({" -> ".join([*in_progress, name])})'])
 
-        unknown = sorted(set(body) - _POLICY_BODY_KEYS)
+        unknown = sorted(set(body) - POLICY_BODY_KEYS)
         if unknown:
             raise ConfigError([f'policies.{name}: unknown key {key!r}' for key in unknown])
 
@@ -450,9 +450,9 @@ def _build_policies(raw_policies: dict[str, Any], bases: dict[str, str] | None =
                     raise ConfigError([f'policies.{name}: extend — {line}' for line in exc.problems]) from exc
                 bases[name] = base_name
             try:
-                resolved[name] = Policy(name=name, **_merged_policy_body(base, body))
+                resolved[name] = Policy(name=name, **merged_policy_body(base, body))
             except ValidationError as exc:
-                raise ConfigError(_validation_problems(exc, prefix=f'policies.{name}')) from exc
+                raise ConfigError(validation_problems(exc, prefix=f'policies.{name}')) from exc
         finally:
             in_progress.pop()
         return resolved[name]
@@ -465,7 +465,7 @@ def _build_policies(raw_policies: dict[str, Any], bases: dict[str, str] | None =
 # Every key this file may carry. Declared rather than inferred from the model, because the
 # construction below reads each one by name and pydantic ignores what it is not handed —
 # so a key dropped from that call would silently become "unknown" rather than unread.
-_TOOL_CONFIG_KEYS = frozenset({'repos_registry', 'default_policy', 'policies', 'repo_overrides', 'git_timeout'})
+TOOL_CONFIG_KEYS = frozenset({'repos_registry', 'default_policy', 'policies', 'repo_overrides', 'git_timeout'})
 
 
 def parse_tool_config(raw: dict[str, Any]) -> ToolConfig:
@@ -482,13 +482,13 @@ def parse_tool_config(raw: dict[str, Any]) -> ToolConfig:
     as a machine that had declared nothing — syncer fell to its own data directory and reported an
     empty registry, which is indistinguishable from having one.
     """
-    unknown = sorted(set(raw) - _TOOL_CONFIG_KEYS)
+    unknown = sorted(set(raw) - TOOL_CONFIG_KEYS)
     if unknown:
-        known = ', '.join(sorted(_TOOL_CONFIG_KEYS))
+        known = ', '.join(sorted(TOOL_CONFIG_KEYS))
         raise ConfigError([f'unknown key {key!r}; known: {known}' for key in unknown])
 
     bases: dict[str, str] = {}
-    policies = _build_policies(raw.get('policies', {}), bases)
+    policies = build_policies(raw.get('policies', {}), bases)
 
     try:
         return ToolConfig(
@@ -500,7 +500,7 @@ def parse_tool_config(raw: dict[str, Any]) -> ToolConfig:
             git_timeout=raw.get('git_timeout', GIT_TIMEOUT_SECONDS),
         )
     except ValidationError as exc:
-        raise ConfigError(_validation_problems(exc)) from exc
+        raise ConfigError(validation_problems(exc)) from exc
 
 
 def read_tool_config() -> dict[str, Any]:
@@ -522,7 +522,7 @@ def load_tool_config() -> ToolConfig:
     try:
         return parse_tool_config(read_tool_config())
     except ConfigError as exc:
-        _report_config_error(TOOL_CONFIG_PATH, exc)
+        report_config_error(TOOL_CONFIG_PATH, exc)
         sys.exit(1)
 
 
@@ -580,7 +580,7 @@ def resolve_clone_url(repo_config: RepoConfig, config: SyncerConfig) -> str:
 def resolve_policies(tool_config: ToolConfig) -> dict[str, Policy]:
     """Built-in policies overlaid with the config's own, which are already merged onto their base.
 
-    The merge happened in _build_policies, so a `[policies.standard]` entry here is the built-in
+    The merge happened in build_policies, so a `[policies.standard]` entry here is the built-in
     with the file's cells applied — not a replacement for it.
     """
     merged = dict(BUILTIN_POLICIES)
@@ -659,7 +659,7 @@ def resolve_registry(repos_file: Path | None = None) -> tuple[SyncerConfig, Path
     the default. The path comes back because it is the registry's identity — what the per-registry
     event stream is keyed on."""
     location = registry_location(load_tool_config(), repos_file)
-    return _load_repos_file(location.path, location.source), location.path
+    return load_repos_file(location.path, location.source), location.path
 
 
 def resolve_config(repos_file: Path | None = None) -> SyncerConfig:

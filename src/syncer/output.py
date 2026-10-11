@@ -71,14 +71,14 @@ TALLY_COLOR = {
 ALL_ICONS = {ICON_OK, ICON_WARN, ICON_ERR, ICON_DOWNLOAD, ICON_PULL, ICON_PUSH, ICON_MOVE}
 
 
-def _display_width(text: str) -> int:
+def display_width(text: str) -> int:
     """Calculate display width accounting for double-width nerd font icons."""
     return sum(2 if ch in ALL_ICONS else 1 for ch in text)
 
 
-def _status_line(icon: str, name: str, msg: str, color: str, branch: str | None = None) -> str:
+def status_line(icon: str, name: str, msg: str, color: str, branch: str | None = None) -> str:
     prefix = f'{icon}  {name} '
-    prefix_w = _display_width(prefix)
+    prefix_w = display_width(prefix)
     if branch:
         # Displayed: {prefix}{padding} ({branch}) {msg}
         branch_w = len(f' ({branch}) ')

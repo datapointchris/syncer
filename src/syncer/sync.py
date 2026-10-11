@@ -50,7 +50,7 @@ from syncer.tracking import emit_event
 from syncer.tracking import find_stale_repos
 from syncer.tracking import read_events
 
-_LIFECYCLE_TO_STATUS: dict[str, RepoStatus] = {
+LIFECYCLE_TO_STATUS: dict[str, RepoStatus] = {
     'would_clone': 'missing',
     'cloned': 'cloned',
     'clone_failed': 'clone_failed',
@@ -58,13 +58,13 @@ _LIFECYCLE_TO_STATUS: dict[str, RepoStatus] = {
     'not_git': 'not_git',
     'no_remote': 'no_remote',
 }
-_ISSUE_STATUSES = {'issues', 'not_git', 'no_remote', 'path_mismatch', 'missing'}
-# Counted apart from _ISSUE_STATUSES: these are runs where syncer could not find out, which is
+ISSUE_STATUSES = {'issues', 'not_git', 'no_remote', 'path_mismatch', 'missing'}
+# Counted apart from ISSUE_STATUSES: these are runs where syncer could not find out, which is
 # a different thing from finding out that a repo needs attention.
-_FAILED_STATUSES = {'clone_failed', 'unverified'}
+FAILED_STATUSES = {'clone_failed', 'unverified'}
 
 
-def _operation_status(report: RepoBranchReport) -> RepoStatus:
+def operation_status(report: RepoBranchReport) -> RepoStatus:
     """Status for a repo at severity OPERATION — syncer owns the next move here.
 
     No completed action means nothing ran, i.e. a `check`: the actions are decided and
@@ -81,9 +81,9 @@ def _operation_status(report: RepoBranchReport) -> RepoStatus:
     return 'pulled'
 
 
-def _repo_status(report: RepoBranchReport) -> RepoStatus:
+def repo_status(report: RepoBranchReport) -> RepoStatus:
     if report.lifecycle:
-        return _LIFECYCLE_TO_STATUS[report.lifecycle]
+        return LIFECYCLE_TO_STATUS[report.lifecycle]
     if report.skipped or report.error:
         # is_unverified rather than a second copy of the rule: it keys on git having failed, not
         # on the report being empty, since an unknown policy also produces no rows and that is a
@@ -94,12 +94,12 @@ def _repo_status(report: RepoBranchReport) -> RepoStatus:
     if severity == Severity.SYNCED:
         return 'synced'
     if severity == Severity.OPERATION:
-        return _operation_status(report)
+        return operation_status(report)
     return 'issues'
 
 
-def _snapshot(report: RepoBranchReport) -> RepoSnapshot:
-    status = _repo_status(report)
+def snapshot(report: RepoBranchReport) -> RepoSnapshot:
+    status = repo_status(report)
     branches = [
         BranchSnapshot(
             branch=row.state.branch,
@@ -129,9 +129,9 @@ def _snapshot(report: RepoBranchReport) -> RepoSnapshot:
     )
 
 
-def _summary(snapshots: list[RepoSnapshot]) -> RunSummary:
+def run_summary(snapshots: list[RepoSnapshot]) -> RunSummary:
     counts = Counter(snap.status for snap in snapshots)
-    issues = sum(count for status, count in counts.items() if status in _ISSUE_STATUSES)
+    issues = sum(count for status, count in counts.items() if status in ISSUE_STATUSES)
     return RunSummary(
         total=len(snapshots),
         synced=counts['synced'],
@@ -141,12 +141,12 @@ def _summary(snapshots: list[RepoSnapshot]) -> RunSummary:
         pull_pushed=counts['pull_pushed'],
         pending=counts['pending'],
         issues=issues,
-        failed=sum(count for status, count in counts.items() if status in _FAILED_STATUSES),
+        failed=sum(count for status, count in counts.items() if status in FAILED_STATUSES),
         duration_ms=0,
     )
 
 
-def _print_summary_line(summary: RunSummary) -> None:
+def print_summary_line(summary: RunSummary) -> None:
     parts = [f'[green]{ICON_OK}  {summary.synced} synced[/green]']
     if summary.cloned:
         parts.append(f'[green]{ICON_DOWNLOAD}  {summary.cloned} cloned[/green]')
@@ -187,12 +187,12 @@ def run_sync(
     """Run the full sync and render it. Returns the reports so the caller can set an exit code."""
     start = time.monotonic()
     reports = gather_reports(config, tool_config, cli_policy, apply, jobs, jitter, include_lifecycle=True, show_progress=not as_json)
-    snapshots = [_snapshot(report) for report in reports]
-    summary = _summary(snapshots)
+    snapshots = [snapshot(report) for report in reports]
+    summary = run_summary(snapshots)
 
     if not as_json:
         console.print()
-        _print_summary_line(summary)
+        print_summary_line(summary)
         # The summary line is the count of everything; the rows below it are only the repos with
         # something to say. Which repos are synced is not information — how many are, is.
         visible = visible_reports(reports, verbose)

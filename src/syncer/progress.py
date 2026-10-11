@@ -48,12 +48,12 @@ BAR_WIDTH = 24
 
 
 @dataclass(frozen=True)
-class _Running:
+class Running:
     label: str
     started: float
 
 
-def _clock(seconds: float) -> str:
+def clock(seconds: float) -> str:
     minutes, secs = divmod(int(seconds), 60)
     return f'{minutes}:{secs:02d}'
 
@@ -71,7 +71,7 @@ class RunProgress:
         self.console = console or err_console
         self.enabled = enabled and total > 0 and self.console.is_terminal
         self._lock = threading.Lock()
-        self._running: dict[int, _Running] = {}
+        self._running: dict[int, Running] = {}
         self._tally: dict[Tally, int] = {}
         self._done = 0
         self._next_token = 0
@@ -99,7 +99,7 @@ class RunProgress:
             token = self._next_token
             self._next_token += 1
             if self.enabled:
-                self._running[token] = _Running(label=label, started=time.monotonic())
+                self._running[token] = Running(label=label, started=time.monotonic())
         return token
 
     def finish(self, token: int, tally: Tally | None = None) -> None:
@@ -119,7 +119,7 @@ class RunProgress:
                 text.append(f'{count} {TALLY_TEXT[tally]}  ', style=TALLY_COLOR[tally])
         return text
 
-    def _running_text(self, running: list[_Running], now: float) -> Text:
+    def _running_text(self, running: list[Running], now: float) -> Text:
         if not running:
             return Text('')
         shown = running[:MAX_RUNNING_SHOWN]
@@ -142,6 +142,6 @@ class RunProgress:
             Text(f'{done}/{self.total} repos', style='bold'),
             ProgressBar(total=max(self.total, 1), completed=done, width=BAR_WIDTH),
             self._tally_text(counts),
-            Text(_clock(now - self._started), style='blue'),
+            Text(clock(now - self._started), style='blue'),
         )
         return Group(header, self._running_text(running, now))

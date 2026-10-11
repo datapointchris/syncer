@@ -126,7 +126,7 @@ LIFECYCLE_STYLE = {
 # what fixes a dirty-but-synced row rendering as a green tick indistinguishable from a clean
 # one — it kept its icon and color from the primary state alone, while the count in the summary
 # line and the sort position both came from the severity that knew better.
-_STATE_ICON = {
+STATE_ICON = {
     PrimaryState.SYNCED: ICON_OK,
     PrimaryState.AHEAD: ICON_PUSH,
     PrimaryState.BEHIND: ICON_PULL,
@@ -136,7 +136,7 @@ _STATE_ICON = {
     PrimaryState.DETACHED: ICON_WARN,
 }
 
-_SEVERITY_COLOR = {
+SEVERITY_COLOR = {
     Severity.SYNCED: 'green',
     Severity.OPERATION: 'cyan',
     Severity.WARNING: 'yellow',
@@ -145,20 +145,20 @@ _SEVERITY_COLOR = {
 
 # Substituted when the state's own icon understates the severity — only the benign tick can,
 # since every other state icon already reads as "look at this".
-_SEVERITY_ICON = {
+SEVERITY_ICON = {
     Severity.WARNING: ICON_WARN,
     Severity.ERROR: ICON_ERR,
 }
 
-_STATE_LABEL = {
+STATE_LABEL = {
     PrimaryState.SYNCED: 'synced',
     PrimaryState.NO_UPSTREAM: 'no upstream',
     PrimaryState.GONE: 'gone (remote deleted)',
     PrimaryState.DETACHED: 'detached HEAD',
 }
 
-_WARNING_STATES = {PrimaryState.AHEAD, PrimaryState.BEHIND, PrimaryState.DIVERGED, PrimaryState.NO_UPSTREAM}
-_ERROR_STATES = {PrimaryState.GONE, PrimaryState.DETACHED}
+WARNING_STATES = {PrimaryState.AHEAD, PrimaryState.BEHIND, PrimaryState.DIVERGED, PrimaryState.NO_UPSTREAM}
+ERROR_STATES = {PrimaryState.GONE, PrimaryState.DETACHED}
 
 
 @dataclass
@@ -224,7 +224,7 @@ def is_unverified(report: RepoBranchReport) -> bool:
     """True when this repo's state could not be established, as opposed to established and untidy.
 
     The distinction the summary line draws in red rather than yellow, and the one place it is
-    decided. `_repo_status` and the live display both read it, so the count climbing during the
+    decided. `repo_status` and the live display both read it, so the count climbing during the
     run and the count sitting in the summary afterwards cannot disagree about which band a repo
     landed in. An unknown policy is deliberately *not* unverified: nothing was measured, but
     nothing failed either — that is a config problem, and git was never asked.
@@ -236,16 +236,16 @@ def is_unverified(report: RepoBranchReport) -> bool:
     return bool(report.error and report.failures)
 
 
-def _state_severity(state: BranchState) -> Severity:
+def state_severity(state: BranchState) -> Severity:
     """Severity of the branch state alone, before who-acts-on-it is considered."""
-    if state.primary in _ERROR_STATES:
+    if state.primary in ERROR_STATES:
         return Severity.ERROR
-    if state.primary in _WARNING_STATES:
+    if state.primary in WARNING_STATES:
         return Severity.WARNING
     return Severity.SYNCED
 
 
-def _row_severity(row: BranchRow) -> Severity:
+def row_severity(row: BranchRow) -> Severity:
     # An outcome (apply mode) reflects what actually happened, so it wins over the pre-execute state.
     if row.outcome is not None:
         # A protection refusal is the guard working as configured, not something that went
@@ -257,7 +257,7 @@ def _row_severity(row: BranchRow) -> Severity:
             return Severity.ERROR
         if row.outcome.status == 'done':
             return Severity.OPERATION
-    if row.state.primary in _ERROR_STATES:
+    if row.state.primary in ERROR_STATES:
         return Severity.ERROR
     # Before the action band, and regardless of the branch state: a dirty tree is the one thing
     # syncer will never resolve for you, and it refuses every mutator that touches the tree. A
@@ -269,20 +269,20 @@ def _row_severity(row: BranchRow) -> Severity:
     # this without you. It sorts above synced so you can see it, and below the rows needing hands.
     if row.action in MUTATING_ACTIONS and not row.blocked:
         return Severity.OPERATION
-    return _state_severity(row.state)
+    return state_severity(row.state)
 
 
-def _row_style(row: BranchRow) -> tuple[str, str]:
+def row_style(row: BranchRow) -> tuple[str, str]:
     """Icon and color for a row: icon from the branch state, color from who has to act."""
-    severity = _row_severity(row)
-    icon = _STATE_ICON.get(row.state.primary, ICON_WARN)
-    return _SEVERITY_ICON.get(severity, icon) if icon == ICON_OK else icon, _SEVERITY_COLOR[severity]
+    severity = row_severity(row)
+    icon = STATE_ICON.get(row.state.primary, ICON_WARN)
+    return SEVERITY_ICON.get(severity, icon) if icon == ICON_OK else icon, SEVERITY_COLOR[severity]
 
 
-def _branch_prefix(row: BranchRow, uncommitted: int = 0, stashes: int = 0) -> str:
+def branch_prefix(row: BranchRow, uncommitted: int = 0, stashes: int = 0) -> str:
     """The colored state part of a line (icon, branch, flags, detail), without the action arrow."""
     state = row.state
-    icon, color = _row_style(row)
+    icon, color = row_style(row)
 
     # For ahead/behind/diverged the commit counts carry the meaning; elsewhere use a label.
     counts = []
@@ -290,7 +290,7 @@ def _branch_prefix(row: BranchRow, uncommitted: int = 0, stashes: int = 0) -> st
         counts.append(f'{state.ahead} ahead')
     if state.behind:
         counts.append(f'{state.behind} behind')
-    detail_parts = counts or [_STATE_LABEL.get(state.primary, state.primary.value)]
+    detail_parts = counts or [STATE_LABEL.get(state.primary, state.primary.value)]
     # Named with its count rather than the bare word 'dirty': the count is the difference between
     # a stray generated file and a day's work, and it is already read for the event snapshot.
     if state.dirty:
@@ -311,14 +311,14 @@ def _branch_prefix(row: BranchRow, uncommitted: int = 0, stashes: int = 0) -> st
     return f'  [{color}]{icon}  {state.branch}{flag_str} — {detail}[/{color}]'
 
 
-def _branch_line(row: BranchRow, uncommitted: int = 0, stashes: int = 0) -> str:
+def branch_line(row: BranchRow, uncommitted: int = 0, stashes: int = 0) -> str:
     """A report-only row. The arrow appears only when syncer will actually do something.
 
     `skip`, `report` and `prompt` all mean "syncer changes nothing here", which the line already
     conveys by existing — printing `→ skip` after every clean repo spent a column on the least
     informative word in the vocabulary and made the arrow meaningless where it mattered.
     """
-    line = _branch_prefix(row, uncommitted, stashes)
+    line = branch_prefix(row, uncommitted, stashes)
     if row.action in MUTATING_ACTIONS:
         line = f'{line} [blue]→ {row.action.value}[/blue]'
     if not row.blocked:
@@ -326,7 +326,7 @@ def _branch_line(row: BranchRow, uncommitted: int = 0, stashes: int = 0) -> str:
     return f'{line} [yellow](would refuse: {row.blocked_message or row.blocked.value})[/yellow]'
 
 
-_OUTCOME_COLOR = {
+OUTCOME_COLOR = {
     'done': 'green',
     'refused': 'yellow',
     'failed': 'red',
@@ -335,16 +335,16 @@ _OUTCOME_COLOR = {
 }
 
 
-def _outcome_suffix(outcome: Outcome) -> str:
-    color = _OUTCOME_COLOR.get(outcome.status, 'blue')
+def outcome_suffix(outcome: Outcome) -> str:
+    color = OUTCOME_COLOR.get(outcome.status, 'blue')
     text = f'{outcome.action.value}: {outcome.status}'
     if outcome.message:
         text += f' ({outcome.message})'
     return f'[{color}]→ {text}[/{color}]'
 
 
-def _apply_line(row: BranchRow, uncommitted: int = 0, stashes: int = 0) -> str:
-    """An executed row, under the same rule `_branch_line` follows: say nothing when nothing happened.
+def apply_line(row: BranchRow, uncommitted: int = 0, stashes: int = 0) -> str:
+    """An executed row, under the same rule `branch_line` follows: say nothing when nothing happened.
 
     A non-mutating action can only produce `skipped` or `reported` — SKIP/REPORT/PROMPT are all in
     PROTECTED_ALLOWED, so none of them can be refused, and `blocked` is None for all three. So
@@ -357,8 +357,8 @@ def _apply_line(row: BranchRow, uncommitted: int = 0, stashes: int = 0) -> str:
     """
     outcome = row.outcome
     if outcome is None or (outcome.action not in MUTATING_ACTIONS and not outcome.message):
-        return _branch_line(row, uncommitted, stashes)
-    return f'{_branch_prefix(row, uncommitted, stashes)} {_outcome_suffix(outcome)}'
+        return branch_line(row, uncommitted, stashes)
+    return f'{branch_prefix(row, uncommitted, stashes)} {outcome_suffix(outcome)}'
 
 
 def report_severity(report: RepoBranchReport) -> Severity:
@@ -366,7 +366,7 @@ def report_severity(report: RepoBranchReport) -> Severity:
         return Severity.ERROR
     if report.lifecycle:
         return LIFECYCLE_STYLE[report.lifecycle][3]
-    branch_severity = max((_row_severity(row) for row in report.rows), default=Severity.SYNCED)
+    branch_severity = max((row_severity(row) for row in report.rows), default=Severity.SYNCED)
     if report.origin_mismatch:
         return max(branch_severity, Severity.WARNING)
     return branch_severity
@@ -387,7 +387,7 @@ def attention_tally(report: RepoBranchReport) -> Tally | None:
     return Tally.UNVERIFIED if is_unverified(report) else Tally.NEEDS_YOU
 
 
-def _watched_remote_branches(repo: Repo, policy: Policy) -> list[tuple[str, str]]:
+def watched_remote_branches(repo: Repo, policy: Policy) -> list[tuple[str, str]]:
     """Remote-only branches the policy asked to watch, with each one's age.
 
     Skipped entirely when watch_remote is empty, so the extra git calls cost nothing for the
@@ -422,7 +422,7 @@ def build_branch_rows(repo: Repo, policy: Policy, apply: bool, *, fetched: bool 
     return rows
 
 
-def _failed_report(repo: Repo, label: str, repo_config: RepoConfig, error: str, policy_name: str | None = None) -> RepoBranchReport:
+def failed_report(repo: Repo, label: str, repo_config: RepoConfig, error: str, policy_name: str | None = None) -> RepoBranchReport:
     """A repo whose state could not be established. Never carries branch rows.
 
     Rows are the thing being refused: a row is a claim about a branch, and the whole point is
@@ -448,15 +448,15 @@ def _failed_report(repo: Repo, label: str, repo_config: RepoConfig, error: str, 
     )
 
 
-def _label(repo_config: RepoConfig) -> str:
+def screen_label(repo_config: RepoConfig) -> str:
     """How a repo is named on screen: its path when that says where it is, else its name."""
     return repo_config.path if repo_config.path.startswith('~') else repo_config.name
 
 
-def _skipped_report(repo_config: RepoConfig, trip: Trip, url: str) -> RepoBranchReport:
+def skipped_report(repo_config: RepoConfig, trip: Trip, url: str) -> RepoBranchReport:
     """A repo syncer deliberately did not contact, because its host had already failed."""
     return RepoBranchReport(
-        label=_label(repo_config),
+        label=screen_label(repo_config),
         path=repo_config.path,
         name=repo_config.name,
         error=f'not checked — {trip.summary} failed earlier this run',
@@ -465,7 +465,7 @@ def _skipped_report(repo_config: RepoConfig, trip: Trip, url: str) -> RepoBranch
     )
 
 
-def _crashed_report(repo_config: RepoConfig, exc: Exception) -> RepoBranchReport:
+def crashed_report(repo_config: RepoConfig, exc: Exception) -> RepoBranchReport:
     """A repo whose processing raised, turned into an ordinary error report.
 
     One repo must never take the run down with it. Every future is collected before anything is
@@ -474,7 +474,7 @@ def _crashed_report(repo_config: RepoConfig, exc: Exception) -> RepoBranchReport
     That is the same failure as a dead fetch reporting `synced`, in the other direction.
     """
     return RepoBranchReport(
-        label=_label(repo_config),
+        label=screen_label(repo_config),
         path=repo_config.path,
         name=repo_config.name,
         error='syncer failed on this repo',
@@ -482,7 +482,7 @@ def _crashed_report(repo_config: RepoConfig, exc: Exception) -> RepoBranchReport
     )
 
 
-def _occupied_note(path: Path) -> str:
+def occupied_note(path: Path) -> str:
     """What is at stake, since a bare `would clone` against an occupied path reads as an oversight."""
     try:
         entries = len(list(path.iterdir()))
@@ -492,7 +492,7 @@ def _occupied_note(path: Path) -> str:
     return f'a directory holding {entries} {noun} is already here — apply clones into it and keeps them'
 
 
-def _build_repo_report(
+def build_repo_report(
     repo_config: RepoConfig,
     config: SyncerConfig,
     tool_config: ToolConfig,
@@ -519,7 +519,7 @@ def _build_repo_report(
         time.sleep(random.uniform(0, jitter))  # desync the initial burst of concurrent fetches
 
     path = Path(repo_config.path).expanduser()
-    label = _label(repo_config)
+    label = screen_label(repo_config)
     owner = repo_config.owner or config.owner
     repo = Repo(
         name=repo_config.name,
@@ -562,7 +562,7 @@ def _build_repo_report(
             # and asking git for one inside a directory that does not exist raises.
             trip = breaker.trip_for(repo.url)
             if trip is not None:
-                return _skipped_report(repo_config, trip, repo.url)
+                return skipped_report(repo_config, trip, repo.url)
             cloned, err = repo.clone_into_existing() if occupied else repo.clone()
             if cloned:
                 breaker.record_success(repo.url)
@@ -577,10 +577,10 @@ def _build_repo_report(
             # explains ('repository not found' reads as a permissions problem).
             detail = f'{repo.url}\n{err}' if err else f'{repo.url}\ngit clone failed with no output'
             return lifecycle('clone_failed', detail)
-        return lifecycle('would_clone', _occupied_note(path) if occupied else None)
+        return lifecycle('would_clone', occupied_note(path) if occupied else None)
     remotes = repo.remotes()
     if remotes is None:
-        return _failed_report(repo, label, repo_config, 'cannot read this repo (git failed)')
+        return failed_report(repo, label, repo_config, 'cannot read this repo (git failed)')
     if not remotes:
         return lifecycle('no_remote') if include_lifecycle else None
 
@@ -595,7 +595,7 @@ def _build_repo_report(
     # Keyed on where this clone really points, which is not always where the registry says.
     trip = breaker.trip_for(repo.contacted_url)
     if trip is not None:
-        return _skipped_report(repo_config, trip, repo.contacted_url)
+        return skipped_report(repo_config, trip, repo.contacted_url)
 
     # Before classifying, not after: every branch state is measured against remote-tracking
     # refs, so a dead fetch invalidates the whole report rather than degrading it. Returning
@@ -603,12 +603,12 @@ def _build_repo_report(
     fetch_failure = refresh_remote(repo, policy)
     if fetch_failure is not None:
         breaker.record_failure(repo.contacted_url, fetch_failure)
-        return _failed_report(repo, label, repo_config, 'fetch failed — sync state not verified against origin', policy_name)
+        return failed_report(repo, label, repo_config, 'fetch failed — sync state not verified against origin', policy_name)
     breaker.record_success(repo.contacted_url)
     try:
         rows = build_branch_rows(repo, policy, apply, fetched=True)
     except ClassifyError as exc:
-        return _failed_report(repo, label, repo_config, f'could not classify {exc.branch}', policy_name)
+        return failed_report(repo, label, repo_config, f'could not classify {exc.branch}', policy_name)
     return RepoBranchReport(
         label=label,
         path=repo_config.path,
@@ -619,7 +619,7 @@ def _build_repo_report(
         stashes=repo.stash_count,
         origin_mismatch=origin_mismatch(repo),
         expected_url=repo.url,
-        remote_only=_watched_remote_branches(repo, policy),
+        remote_only=watched_remote_branches(repo, policy),
         moved_tags=list(repo.moved_tags),
         tag_fetch_error=repo.tag_fetch_error,
     )
@@ -655,7 +655,7 @@ def gather_reports(
 
     breaker = HostBreaker()
     worker = partial(
-        _build_repo_report,
+        build_repo_report,
         config=config,
         tool_config=tool_config,
         policies=policies,
@@ -681,7 +681,7 @@ def gather_reports(
             try:
                 report = worker(repo_config)
             except Exception as exc:
-                report = _crashed_report(repo_config, exc)
+                report = crashed_report(repo_config, exc)
             finally:
                 progress.finish(token, attention_tally(report) if report is not None else None)
             return report
@@ -751,7 +751,7 @@ def render_hidden_note(hidden: int) -> None:
         console.print(f'[blue]  {hidden} repos not shown — [cyan]-v[/cyan] shows every repo[/blue]')
 
 
-def _branch_json(report: RepoBranchReport) -> dict:
+def branch_json(report: RepoBranchReport) -> dict:
     """One repo as plain data. Mirrors what render_report shows, including why it failed."""
     return {
         'name': report.name,
@@ -910,7 +910,7 @@ def render_report(report: RepoBranchReport, apply: bool) -> None:
             f'    [yellow]registry expects {escape(report.expected_url)} (fix the remote or repos.json by hand)[/yellow]',
             soft_wrap=True,
         )
-    render_row = _apply_line if apply else _branch_line
+    render_row = apply_line if apply else branch_line
     for row in report.rows:
         console.print(render_row(row, report.uncommitted, report.stashes))
         render_remedy(row.remedy)
@@ -940,7 +940,7 @@ def report_branches(
     # include_lifecycle defaults False; progress is a terminal affordance and would corrupt --json.
     reports = gather_reports(config, tool_config, cli_policy, apply, jobs, jitter, show_progress=not as_json)
     if as_json:
-        emit_json({'repos': [_branch_json(report) for report in reports]})
+        emit_json({'repos': [branch_json(report) for report in reports]})
         return reports
     console.print()
     visible = visible_reports(reports, verbose)

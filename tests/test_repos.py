@@ -15,24 +15,24 @@ from syncer.diagnose import classify_failure
 from syncer.output import ALL_ICONS
 from syncer.output import ICON_ERR
 from syncer.output import ICON_OK
-from syncer.output import _display_width
-from syncer.output import _status_line
+from syncer.output import display_width
+from syncer.output import status_line
 from syncer.policy import STANDARD_POLICY
 from syncer.repos import ABORTED_RETURNCODE
 from syncer.repos import TIMEOUT_RETURNCODE
 from syncer.repos import GitFailure
 from syncer.repos import Repo
-from syncer.repos import _noninteractive_env
 from syncer.repos import abort_running_commands
 from syncer.repos import find_repo_in_search_paths
 from syncer.repos import find_untracked_repos
+from syncer.repos import noninteractive_env
 from syncer.repos import normalize_remote_url
 from syncer.repos import origin_mismatch
 from syncer.repos import reset_abort
 from syncer.repos import run_command
 
 
-class _FakeProcess:
+class FakeProcess:
     """A git subprocess that never runs.
 
     run_command drives Popen directly rather than subprocess.run, because a Ctrl-C needs the
@@ -61,16 +61,16 @@ class _FakeProcess:
         self.killed = True
 
 
-def _patch_git(**kwargs):
+def patch_git(**kwargs):
     """Answer every git call in the block with a fresh canned process."""
-    return patch('syncer.repos.subprocess.Popen', side_effect=lambda *_args, **_kwargs: _FakeProcess(**kwargs))
+    return patch('syncer.repos.subprocess.Popen', side_effect=lambda *_args, **_kwargs: FakeProcess(**kwargs))
 
 
-def _git(path: Path, *args: str) -> None:
+def git(path: Path, *args: str) -> None:
     subprocess.run(['git', *args], cwd=path, capture_output=True, text=True)
 
 
-def _rev(path: Path, ref: str) -> str:
+def rev(path: Path, ref: str) -> str:
     """Resolve `ref`, or '' when it does not exist — so a setup that never built it compares
     unequal to a real object rather than blowing up somewhere less legible."""
     result = subprocess.run(['git', 'rev-parse', ref], cwd=path, capture_output=True, text=True)
@@ -101,58 +101,58 @@ def git_repo_with_remote(tmp_path):
 
     repo_path = tmp_path / 'test-repo'
     subprocess.run(['git', 'clone', str(bare), str(repo_path)], capture_output=True)
-    _git(repo_path, 'config', 'user.email', 'test@test.com')
-    _git(repo_path, 'config', 'user.name', 'Test')
+    git(repo_path, 'config', 'user.email', 'test@test.com')
+    git(repo_path, 'config', 'user.name', 'Test')
     (repo_path / 'README.md').write_text('# Test\n')
-    _git(repo_path, 'add', '.')
-    _git(repo_path, 'commit', '-m', 'init')
-    _git(repo_path, 'push')
+    git(repo_path, 'add', '.')
+    git(repo_path, 'commit', '-m', 'init')
+    git(repo_path, 'push')
     return repo_path
 
 
-def _make_repo(path: Path, **kwargs) -> Repo:
+def make_repo(path: Path, **kwargs) -> Repo:
     return Repo(name='test-repo', path=path, owner='user', host='https://github.com', **kwargs)
 
 
 class TestDisplayWidth:
     def test_plain_text(self):
-        assert _display_width('hello') == 5
+        assert display_width('hello') == 5
 
     def test_icon_counts_as_two(self):
-        assert _display_width(ICON_OK) == 2
+        assert display_width(ICON_OK) == 2
 
     def test_mixed_text_and_icon(self):
         text = f'{ICON_OK}  syncer '
-        assert _display_width(text) == 2 + len('  syncer ')
+        assert display_width(text) == 2 + len('  syncer ')
 
     def test_all_icons_are_double_width(self):
         for icon in ALL_ICONS:
-            assert _display_width(icon) == 2
+            assert display_width(icon) == 2
 
 
 class TestStatusLine:
     def test_without_branch(self):
-        line = _status_line(ICON_OK, 'myrepo', 'synced', 'green')
+        line = status_line(ICON_OK, 'myrepo', 'synced', 'green')
         assert 'myrepo' in line
         assert 'synced' in line
         assert '[green]' in line
         assert '_' in line
 
     def test_with_branch(self):
-        line = _status_line(ICON_OK, 'myrepo', 'synced', 'green', branch='main')
+        line = status_line(ICON_OK, 'myrepo', 'synced', 'green', branch='main')
         assert 'myrepo' in line
         assert 'synced' in line
         assert '(main)' in line
         assert '[blue]' in line
 
     def test_padding_minimum_one(self):
-        line = _status_line(ICON_OK, 'a' * 200, 'synced', 'green')
+        line = status_line(ICON_OK, 'a' * 200, 'synced', 'green')
         assert '_' in line
 
     def test_no_branch_vs_branch_alignment(self):
         # Both lines should target the same LINE_WIDTH
-        no_branch = _status_line(ICON_ERR, 'repo', 'no remote', 'red')
-        with_branch = _status_line(ICON_OK, 'repo', 'synced', 'green', branch='main')
+        no_branch = status_line(ICON_ERR, 'repo', 'no remote', 'red')
+        with_branch = status_line(ICON_OK, 'repo', 'synced', 'green', branch='main')
         # Both should contain padding
         assert '_' in no_branch
         assert '_' in with_branch
@@ -165,64 +165,64 @@ class TestRepo:
         assert repo.url == 'https://github.com/user/myrepo'
 
     def test_exists(self, tmp_path):
-        repo = _make_repo(tmp_path)
+        repo = make_repo(tmp_path)
         assert repo.exists is True
 
     def test_not_exists(self, tmp_path):
-        repo = _make_repo(tmp_path / 'nope')
+        repo = make_repo(tmp_path / 'nope')
         assert repo.exists is False
 
     def test_is_git_repo(self, git_repo):
-        repo = _make_repo(git_repo)
+        repo = make_repo(git_repo)
         assert repo.is_git_repo is True
 
     def test_is_not_git_repo(self, tmp_path):
-        repo = _make_repo(tmp_path)
+        repo = make_repo(tmp_path)
         assert repo.is_git_repo is False
 
     def test_has_no_remote(self, git_repo):
-        repo = _make_repo(git_repo)
+        repo = make_repo(git_repo)
         assert repo.has_remote is False
 
     def test_has_remote(self, git_repo_with_remote):
-        repo = _make_repo(git_repo_with_remote)
+        repo = make_repo(git_repo_with_remote)
         assert repo.has_remote is True
 
     def test_current_branch(self, git_repo):
-        repo = _make_repo(git_repo)
+        repo = make_repo(git_repo)
         branch = repo.current_branch
         assert branch in ('main', 'master')
 
     def test_uncommitted_changes_empty(self, git_repo):
-        repo = _make_repo(git_repo)
+        repo = make_repo(git_repo)
         assert repo.uncommitted_changes == []
 
     def test_uncommitted_changes_detected(self, git_repo):
         (git_repo / 'newfile.txt').write_text('hello')
-        repo = _make_repo(git_repo)
+        repo = make_repo(git_repo)
         assert len(repo.uncommitted_changes) > 0
 
     def test_stash_count_zero(self, git_repo):
-        repo = _make_repo(git_repo)
+        repo = make_repo(git_repo)
         assert repo.stash_count == 0
 
     def test_stash_count_nonzero(self, git_repo):
         (git_repo / 'wip.txt').write_text('work\n')
-        _git(git_repo, 'add', '.')
-        _git(git_repo, 'stash', 'push', '-m', 'save')
-        repo = _make_repo(git_repo)
+        git(git_repo, 'add', '.')
+        git(git_repo, 'stash', 'push', '-m', 'save')
+        repo = make_repo(git_repo)
         assert repo.stash_count == 1
 
     def test_default_branch_detection(self, git_repo):
-        repo = _make_repo(git_repo)
+        repo = make_repo(git_repo)
         branch = repo.default_branch
         assert branch in ('main', 'master')
 
     def test_unpushed_commits_with_remote(self, git_repo_with_remote):
         (git_repo_with_remote / 'new.txt').write_text('new\n')
-        _git(git_repo_with_remote, 'add', '.')
-        _git(git_repo_with_remote, 'commit', '-m', 'new commit')
-        repo = _make_repo(git_repo_with_remote)
+        git(git_repo_with_remote, 'add', '.')
+        git(git_repo_with_remote, 'commit', '-m', 'new commit')
+        repo = make_repo(git_repo_with_remote)
         assert repo.unpushed_commits == 1
 
     def test_behind_remote(self, tmp_path):
@@ -233,49 +233,49 @@ class TestRepo:
 
         repo_path = tmp_path / 'repo'
         subprocess.run(['git', 'clone', str(bare), str(repo_path)], capture_output=True)
-        _git(repo_path, 'config', 'user.email', 'test@test.com')
-        _git(repo_path, 'config', 'user.name', 'Test')
+        git(repo_path, 'config', 'user.email', 'test@test.com')
+        git(repo_path, 'config', 'user.name', 'Test')
         (repo_path / 'README.md').write_text('# Test\n')
-        _git(repo_path, 'add', '.')
-        _git(repo_path, 'commit', '-m', 'init')
-        _git(repo_path, 'push')
+        git(repo_path, 'add', '.')
+        git(repo_path, 'commit', '-m', 'init')
+        git(repo_path, 'push')
 
         # Push from a second clone to get the repo behind
         second = tmp_path / 'second'
         subprocess.run(['git', 'clone', str(bare), str(second)], capture_output=True)
-        _git(second, 'config', 'user.email', 'test@test.com')
-        _git(second, 'config', 'user.name', 'Test')
+        git(second, 'config', 'user.email', 'test@test.com')
+        git(second, 'config', 'user.name', 'Test')
         (second / 'update.txt').write_text('update\n')
-        _git(second, 'add', '.')
-        _git(second, 'commit', '-m', 'remote update')
-        _git(second, 'push')
+        git(second, 'add', '.')
+        git(second, 'commit', '-m', 'remote update')
+        git(second, 'push')
 
-        _git(repo_path, 'fetch')
-        repo = _make_repo(repo_path)
+        git(repo_path, 'fetch')
+        repo = make_repo(repo_path)
         assert repo.behind_remote == 1
 
 
 class TestGitStats:
     def test_total_commits(self, git_repo):
-        repo = _make_repo(git_repo)
+        repo = make_repo(git_repo)
         assert repo.total_commits == 1
 
     def test_total_commits_multiple(self, git_repo):
         (git_repo / 'file2.txt').write_text('content\n')
-        _git(git_repo, 'add', '.')
-        _git(git_repo, 'commit', '-m', 'second')
-        repo = _make_repo(git_repo)
+        git(git_repo, 'add', '.')
+        git(git_repo, 'commit', '-m', 'second')
+        repo = make_repo(git_repo)
         assert repo.total_commits == 2
 
     def test_last_commit_date(self, git_repo):
-        repo = _make_repo(git_repo)
+        repo = make_repo(git_repo)
         date = repo.last_commit_date
         assert date is not None
         # ISO 8601 format includes timezone offset
         assert 'T' in date
 
     def test_first_commit_date(self, git_repo):
-        repo = _make_repo(git_repo)
+        repo = make_repo(git_repo)
         date = repo.first_commit_date
         assert date is not None
         assert 'T' in date
@@ -283,13 +283,13 @@ class TestGitStats:
     def test_first_and_last_differ_with_multiple_commits(self, git_repo):
         time.sleep(1)  # ensure different timestamps
         (git_repo / 'file2.txt').write_text('content\n')
-        _git(git_repo, 'add', '.')
-        _git(git_repo, 'commit', '-m', 'second')
-        repo = _make_repo(git_repo)
+        git(git_repo, 'add', '.')
+        git(git_repo, 'commit', '-m', 'second')
+        repo = make_repo(git_repo)
         assert repo.first_commit_date != repo.last_commit_date
 
     def test_stats_on_non_git_dir(self, tmp_path):
-        repo = _make_repo(tmp_path)
+        repo = make_repo(tmp_path)
         assert repo.total_commits == 0
         assert repo.last_commit_date is None
         assert repo.first_commit_date is None
@@ -299,8 +299,8 @@ class TestDefaultBranchStaleRef:
     def test_stale_origin_head_falls_back_to_local(self, git_repo_with_remote):
         """If origin/HEAD points to a deleted branch, fall back to local branch detection."""
         # Point origin/HEAD to a non-existent branch
-        _git(git_repo_with_remote, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/nonexistent')
-        repo = _make_repo(git_repo_with_remote)
+        git(git_repo_with_remote, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/nonexistent')
+        repo = make_repo(git_repo_with_remote)
         branch = repo.default_branch
         # Should not return 'nonexistent', should fall back
         assert branch != 'nonexistent'
@@ -308,43 +308,43 @@ class TestDefaultBranchStaleRef:
 
     def test_valid_origin_head_is_trusted(self, git_repo_with_remote):
         """If origin/HEAD points to a valid branch, use it."""
-        repo = _make_repo(git_repo_with_remote)
+        repo = make_repo(git_repo_with_remote)
         branch = repo.default_branch
         assert branch in ('main', 'master')
 
     def test_no_remote_falls_back_to_local(self, git_repo):
         """Repo with no remote should still detect default branch from local refs."""
-        repo = _make_repo(git_repo)
+        repo = make_repo(git_repo)
         assert repo.default_branch in ('main', 'master')
 
 
 class TestIsFork:
     def test_is_fork_true(self, git_repo):
-        repo = _make_repo(git_repo)
-        with _patch_git(stdout='true\n'):
+        repo = make_repo(git_repo)
+        with patch_git(stdout='true\n'):
             assert repo.is_fork is True
 
     def test_is_fork_false(self, git_repo):
-        repo = _make_repo(git_repo)
-        with _patch_git(stdout='false\n'):
+        repo = make_repo(git_repo)
+        with patch_git(stdout='false\n'):
             assert repo.is_fork is False
 
     def test_is_fork_gh_fails(self, git_repo):
-        repo = _make_repo(git_repo)
-        with _patch_git(returncode=1, stderr='error'):
+        repo = make_repo(git_repo)
+        with patch_git(returncode=1, stderr='error'):
             assert repo.is_fork is False
 
     def test_non_github_host_never_invokes_gh(self, git_repo):
         """gh only speaks to GitHub, so asking it about a Bitbucket repo is a subprocess per
         repo that always answers 'no'."""
-        repo = _make_repo(git_repo, url='git@bitbucket.org:myworkspace/payments.git')
+        repo = make_repo(git_repo, url='git@bitbucket.org:myworkspace/payments.git')
         assert repo.is_github is False
         with patch('syncer.repos.subprocess.Popen') as popen:
             assert repo.is_fork is False
         popen.assert_not_called()
 
     def test_github_ssh_url_is_recognized(self, git_repo):
-        assert _make_repo(git_repo, url='git@github.com:datapointchris/syncer.git').is_github is True
+        assert make_repo(git_repo, url='git@github.com:datapointchris/syncer.git').is_github is True
 
 
 class TestNonInteractiveExecution:
@@ -359,23 +359,23 @@ class TestNonInteractiveExecution:
 
     def test_disables_git_terminal_prompting(self, monkeypatch):
         monkeypatch.delenv('GIT_TERMINAL_PROMPT', raising=False)
-        assert _noninteractive_env()['GIT_TERMINAL_PROMPT'] == '0'
+        assert noninteractive_env()['GIT_TERMINAL_PROMPT'] == '0'
 
     def test_disables_the_askpass_chain(self, monkeypatch):
         """Git takes the first of GIT_ASKPASS, core.askpass and SSH_ASKPASS that is *set*, so an
         empty value short-circuits the whole chain rather than falling through it."""
         monkeypatch.setenv('GIT_ASKPASS', '/usr/bin/some-gui-askpass')
-        assert _noninteractive_env()['GIT_ASKPASS'] == ''
+        assert noninteractive_env()['GIT_ASKPASS'] == ''
 
     def test_stops_ssh_reaching_for_a_gui(self, monkeypatch):
         monkeypatch.delenv('SSH_ASKPASS_REQUIRE', raising=False)
-        assert _noninteractive_env()['SSH_ASKPASS_REQUIRE'] == 'never'
+        assert noninteractive_env()['SSH_ASKPASS_REQUIRE'] == 'never'
 
     def test_refuses_the_credential_manager_window_in_both_spellings(self, monkeypatch):
         """Git Credential Manager reads a config key and an environment variable for the same
         switch, and a machine can have either vintage installed."""
         monkeypatch.delenv('GIT_CONFIG_COUNT', raising=False)
-        env = _noninteractive_env()
+        env = noninteractive_env()
         assert env['GCM_INTERACTIVE'] == 'never'
         assert env['GIT_CONFIG_KEY_0'] == 'credential.interactive'
         assert env['GIT_CONFIG_VALUE_0'] == 'false'
@@ -385,7 +385,7 @@ class TestNonInteractiveExecution:
         """Resetting it with `credential.helper=` would break every https remote whose stored
         credential is fine. A stored credential still answers; only the window is refused."""
         monkeypatch.delenv('GIT_CONFIG_COUNT', raising=False)
-        env = _noninteractive_env()
+        env = noninteractive_env()
         keys = {env[f'GIT_CONFIG_KEY_{index}'] for index in range(int(env['GIT_CONFIG_COUNT']))}
         assert 'credential.helper' not in keys
 
@@ -393,7 +393,7 @@ class TestNonInteractiveExecution:
         monkeypatch.setenv('GIT_CONFIG_COUNT', '1')
         monkeypatch.setenv('GIT_CONFIG_KEY_0', 'http.sslVerify')
         monkeypatch.setenv('GIT_CONFIG_VALUE_0', 'false')
-        env = _noninteractive_env()
+        env = noninteractive_env()
         assert env['GIT_CONFIG_KEY_0'] == 'http.sslVerify'
         assert env['GIT_CONFIG_KEY_1'] == 'credential.interactive'
         assert env['GIT_CONFIG_COUNT'] == '2'
@@ -406,11 +406,11 @@ class TestNonInteractiveExecution:
 
     def test_adds_ssh_batch_mode(self, monkeypatch):
         monkeypatch.delenv('GIT_SSH_COMMAND', raising=False)
-        assert _noninteractive_env()['GIT_SSH_COMMAND'] == 'ssh -o BatchMode=yes'
+        assert noninteractive_env()['GIT_SSH_COMMAND'] == 'ssh -o BatchMode=yes'
 
     def test_preserves_a_configured_ssh_command(self, monkeypatch):
         monkeypatch.setenv('GIT_SSH_COMMAND', 'ssh -i /keys/work')
-        assert _noninteractive_env()['GIT_SSH_COMMAND'] == 'ssh -i /keys/work -o BatchMode=yes'
+        assert noninteractive_env()['GIT_SSH_COMMAND'] == 'ssh -i /keys/work -o BatchMode=yes'
 
     def test_environment_reaches_the_subprocess(self):
         result = run_command(['sh', '-c', 'echo "$GIT_TERMINAL_PROMPT"'], timeout=10)
@@ -422,8 +422,8 @@ class TestNonInteractiveExecution:
         assert 'timed out' in result.stderr
 
     def test_a_timed_out_git_call_reads_as_failure(self, git_repo):
-        repo = _make_repo(git_repo, timeout=1)
-        with _patch_git(hangs=True):
+        repo = make_repo(git_repo, timeout=1)
+        with patch_git(hangs=True):
             failure = repo.fetch_prune()
             assert failure is not None
             assert failure.timed_out
@@ -463,7 +463,7 @@ class TestAbort:
         every branch state is measured against refs this fetch did not refresh. Returning None
         would let classify proceed against stale data, which is the `(0, 0)` reads as SYNCED bug
         wearing a different hat."""
-        repo = _make_repo(git_repo)
+        repo = make_repo(git_repo)
         abort_running_commands()
         failure = repo.fetch()
         assert failure is not None
@@ -485,28 +485,28 @@ class TestFailureRecording:
     like a healthy repo. Recording is the default; probe=True is the argued-for exception."""
 
     def test_a_failed_call_is_recorded(self, git_repo):
-        repo = _make_repo(git_repo)
+        repo = make_repo(git_repo)
         repo._git('rev-parse', '--verify', 'refs/heads/nope')
         assert len(repo.failures) == 1
         assert repo.failures[0].returncode != 0
         assert repo.failures[0].command.startswith('git rev-parse')
 
     def test_a_probe_is_not_recorded(self, git_repo):
-        repo = _make_repo(git_repo)
+        repo = make_repo(git_repo)
         repo._git('rev-parse', '--verify', 'refs/heads/nope', probe=True)
         assert repo.failures == []
 
     def test_walking_the_default_branch_fallbacks_is_not_a_failure(self, git_repo):
         """default_branch probes several refs by design; recording those would bury the real
         failures under noise on every repo whose origin/HEAD was never set."""
-        repo = _make_repo(git_repo)
+        repo = make_repo(git_repo)
         # Not asserting the name: `git init` honors init.defaultBranch, so this is 'main' on a
         # configured machine and 'master' on a stock CI runner.
         assert repo.default_branch is not None
         assert repo.failures == []
 
     def test_a_successful_call_records_nothing(self, git_repo):
-        repo = _make_repo(git_repo)
+        repo = make_repo(git_repo)
         repo.local_branches()
         assert repo.failures == []
 
@@ -532,13 +532,13 @@ class TestTagFetch:
         # on CI and the whole divergence this test is about was silently never built.
         upstream = tmp_path / 'upstream'
         subprocess.run(['git', 'clone', str(bare), str(upstream)], capture_output=True)
-        _git(upstream, 'config', 'user.email', 'test@test.com')
-        _git(upstream, 'config', 'user.name', 'Test')
-        _git(upstream, 'checkout', '-b', 'main')
+        git(upstream, 'config', 'user.email', 'test@test.com')
+        git(upstream, 'config', 'user.name', 'Test')
+        git(upstream, 'checkout', '-b', 'main')
         (upstream / 'README.md').write_text('one\n')
-        _git(upstream, 'add', '.')
-        _git(upstream, 'commit', '-m', 'one')
-        _git(upstream, 'push', 'origin', 'main')
+        git(upstream, 'add', '.')
+        git(upstream, 'commit', '-m', 'one')
+        git(upstream, 'push', 'origin', 'main')
 
         local = tmp_path / 'local'
         subprocess.run(['git', 'clone', str(bare), str(local)], capture_output=True)
@@ -547,8 +547,8 @@ class TestTagFetch:
         # rejects a changed tag — auto-follow skips one that already exists locally and exits 0.
         # They are on for every repo on the machine this was found on (~/.config/git/common.gitconfig)
         # and absent on CI, which is why the run there fetched clean.
-        _git(local, 'config', 'fetch.prune', 'true')
-        _git(local, 'config', 'fetch.pruneTags', 'true')
+        git(local, 'config', 'fetch.prune', 'true')
+        git(local, 'config', 'fetch.pruneTags', 'true')
         return upstream, local
 
     def test_a_tag_origin_moved_is_named_and_the_branches_are_still_measured(self, tmp_path):
@@ -558,37 +558,37 @@ class TestTagFetch:
 
         # The tag now means a different commit on each side, which is what git refuses to resolve.
         (upstream / 'README.md').write_text('two\n')
-        _git(upstream, 'add', 'README.md')
-        _git(upstream, 'commit', '-m', 'two')
-        _git(upstream, 'push', 'origin', 'main')
-        _git(upstream, 'tag', 'v1.0.0')
-        _git(upstream, 'push', 'origin', 'v1.0.0')
-        _git(local, 'tag', 'v1.0.0')
+        git(upstream, 'add', 'README.md')
+        git(upstream, 'commit', '-m', 'two')
+        git(upstream, 'push', 'origin', 'main')
+        git(upstream, 'tag', 'v1.0.0')
+        git(upstream, 'push', 'origin', 'v1.0.0')
+        git(local, 'tag', 'v1.0.0')
 
         # _git swallows a non-zero exit, so an unbuilt divergence would otherwise reach the
         # assertions below as a clean fetch and read as the bug being fixed. Both sides must
         # resolve: one missing tag is also a broken setup, and it also produces a clean fetch.
-        local_tag, upstream_tag = _rev(local, 'v1.0.0'), _rev(upstream, 'v1.0.0')
+        local_tag, upstream_tag = rev(local, 'v1.0.0'), rev(upstream, 'v1.0.0')
         assert local_tag and upstream_tag
         assert local_tag != upstream_tag
 
-        repo = _make_repo(local)
+        repo = make_repo(local)
         assert refresh_remote(repo, STANDARD_POLICY) is None
         assert repo.failures == []
         assert repo.moved_tags == ['v1.0.0']
-        assert _rev(local, 'v1.0.0') == local_tag
-        assert _rev(local, 'origin/main') == _rev(upstream, 'main')
+        assert rev(local, 'v1.0.0') == local_tag
+        assert rev(local, 'origin/main') == rev(upstream, 'main')
 
     def test_any_other_refusal_of_the_tag_fetch_is_kept_as_git_said_it(self, tmp_path):
         """A refusal naming no moved tag still reaches the reader. A stale lock is the
         deterministic case: it refuses one new tag and no branch."""
         upstream, local = self._upstream_and_clone(tmp_path)
-        _git(upstream, 'tag', 'v2.0.0')
-        _git(upstream, 'push', 'origin', 'v2.0.0')
-        assert _rev(upstream, 'v2.0.0')
+        git(upstream, 'tag', 'v2.0.0')
+        git(upstream, 'push', 'origin', 'v2.0.0')
+        assert rev(upstream, 'v2.0.0')
         (local / '.git' / 'refs' / 'tags' / 'v2.0.0.lock').touch()
 
-        repo = _make_repo(local)
+        repo = make_repo(local)
         assert refresh_remote(repo, STANDARD_POLICY) is None
         assert repo.failures == []
         assert repo.moved_tags == []
@@ -602,16 +602,16 @@ class TestLinkedWorktrees:
     checked out there is `is_current`, which the pipeline already models."""
 
     def test_the_main_checkout_is_not_reported_as_a_linked_worktree(self, git_repo):
-        repo = _make_repo(git_repo)
+        repo = make_repo(git_repo)
         assert repo.linked_worktree_branches == {}
         assert repo.worktree_for(repo.current_branch) is None
         assert repo.held_by_worktree(repo.current_branch) is False
 
     def test_a_linked_worktree_is_found_by_branch(self, git_repo, tmp_path):
-        _git(git_repo, 'branch', 'side')
+        git(git_repo, 'branch', 'side')
         linked = tmp_path / 'linked'
-        _git(git_repo, 'worktree', 'add', str(linked), 'side')
-        repo = _make_repo(git_repo)
+        git(git_repo, 'worktree', 'add', str(linked), 'side')
+        repo = make_repo(git_repo)
         assert repo.worktree_for('side') == str(linked)
         assert repo.held_by_worktree('side') is True
         assert repo.held_by_worktree('nonexistent') is False
@@ -622,7 +622,7 @@ class TestLinkedWorktrees:
         machine whose home or /tmp is a symlink."""
         link = tmp_path / 'via-symlink'
         link.symlink_to(git_repo)
-        repo = _make_repo(link)
+        repo = make_repo(link)
         assert repo.linked_worktree_branches == {}
 
     def test_an_unreadable_answer_is_none_not_empty(self, tmp_path):
@@ -631,7 +631,7 @@ class TestLinkedWorktrees:
         'git could not say' read as 'no worktree holds it', i.e. as permission to move the ref."""
         plain = tmp_path / 'not-a-repo'
         plain.mkdir()
-        repo = _make_repo(plain)
+        repo = make_repo(plain)
         assert repo.linked_worktree_branches is None
         assert repo.worktree_for('side') is None
         assert repo.held_by_worktree('side') is True
@@ -639,9 +639,9 @@ class TestLinkedWorktrees:
     def test_the_answer_is_read_once_per_repo(self, git_repo, tmp_path):
         """Every branch asks the same question of an answer that cannot change mid-run, and a
         registry of eighty repos pays for it once each."""
-        _git(git_repo, 'branch', 'side')
-        _git(git_repo, 'worktree', 'add', str(tmp_path / 'linked'), 'side')
-        repo = _make_repo(git_repo)
+        git(git_repo, 'branch', 'side')
+        git(git_repo, 'worktree', 'add', str(tmp_path / 'linked'), 'side')
+        repo = make_repo(git_repo)
         calls = []
         original = repo._git
         repo._git = lambda *args, **kwargs: (calls.append(args), original(*args, **kwargs))[1]
@@ -656,26 +656,26 @@ class TestUnknownIsNotClean:
 
     def test_a_dirty_tree_is_dirty(self, git_repo):
         (git_repo / 'new.txt').write_text('x\n')
-        assert _make_repo(git_repo).is_dirty is True
+        assert make_repo(git_repo).is_dirty is True
 
     def test_a_clean_tree_is_clean(self, git_repo):
-        assert _make_repo(git_repo).is_dirty is False
+        assert make_repo(git_repo).is_dirty is False
 
     def test_an_unreadable_tree_counts_as_dirty(self, git_repo):
-        repo = _make_repo(git_repo, timeout=1)
-        with _patch_git(hangs=True):
+        repo = make_repo(git_repo, timeout=1)
+        with patch_git(hangs=True):
             assert repo.is_dirty is True
 
     def test_no_remotes_is_distinct_from_cannot_ask(self, git_repo):
-        repo = _make_repo(git_repo)
+        repo = make_repo(git_repo)
         assert repo.remotes() == []  # a repo you never pushed anywhere
-        with _patch_git(hangs=True):
+        with patch_git(hangs=True):
             assert repo.remotes() is None  # says nothing about remotes at all
 
     def test_unreadable_counts_are_none_not_zero(self, git_repo):
-        """(0, 0) is read as SYNCED by _primary_from_counts, so it can never be the fallback."""
-        repo = _make_repo(git_repo, timeout=1)
-        with _patch_git(hangs=True):
+        """(0, 0) is read as SYNCED by primary_from_counts, so it can never be the fallback."""
+        repo = make_repo(git_repo, timeout=1)
+        with patch_git(hangs=True):
             assert repo.ahead_behind('main', 'origin/main') is None
 
 
@@ -685,21 +685,21 @@ class TestClone:
     capture_output means git's message never reaches the terminal by itself."""
 
     def test_a_successful_clone_reports_no_error(self, tmp_path, git_repo):
-        repo = _make_repo(tmp_path / 'dest', url=str(git_repo))
+        repo = make_repo(tmp_path / 'dest', url=str(git_repo))
         ok, err = repo.clone()
         assert ok is True
         assert err == ''
         assert (tmp_path / 'dest' / '.git').is_dir()
 
     def test_a_failed_clone_returns_gits_stderr(self, tmp_path):
-        repo = _make_repo(tmp_path / 'dest', url=str(tmp_path / 'no-such-repo.git'))
+        repo = make_repo(tmp_path / 'dest', url=str(tmp_path / 'no-such-repo.git'))
         ok, err = repo.clone()
         assert ok is False
         assert err  # the actual reason, not a bare False
 
     def test_a_clone_timeout_returns_its_reason(self, tmp_path):
-        repo = _make_repo(tmp_path / 'dest', url='https://example.invalid/x.git', timeout=1)
-        with _patch_git(hangs=True):
+        repo = make_repo(tmp_path / 'dest', url='https://example.invalid/x.git', timeout=1)
+        with patch_git(hangs=True):
             ok, err = repo.clone()
         assert ok is False
         assert 'timed out' in err
@@ -707,7 +707,7 @@ class TestClone:
     def test_clone_scales_its_timeout_from_the_configured_one(self, tmp_path):
         """config.toml and the README both promise clones get 5x git_timeout; before this the
         clone used a hard-coded 600s and ignored the setting entirely."""
-        repo = _make_repo(tmp_path / 'dest', url='https://example.invalid/x.git', timeout=30)
+        repo = make_repo(tmp_path / 'dest', url='https://example.invalid/x.git', timeout=30)
         with patch('syncer.repos.run_command') as run:
             run.return_value = subprocess.CompletedProcess([], returncode=0, stdout='', stderr='')
             repo.clone()
@@ -719,24 +719,24 @@ class TestContainsBranch:
     integration, which rewrites commits so ancestry can never see them."""
 
     def _branch_with_commit(self, repo_path: Path, branch: str, filename: str) -> None:
-        _git(repo_path, 'checkout', '-b', branch)
+        git(repo_path, 'checkout', '-b', branch)
         (repo_path / filename).write_text(f'{filename}\n')
-        _git(repo_path, 'add', '.')
-        _git(repo_path, 'commit', '-m', f'work on {branch}')
-        _git(repo_path, 'checkout', '-')
+        git(repo_path, 'add', '.')
+        git(repo_path, 'commit', '-m', f'work on {branch}')
+        git(repo_path, 'checkout', '-')
 
     def test_ancestry_proves_a_merged_branch(self, git_repo):
         self._branch_with_commit(git_repo, 'feature', 'a.txt')
-        _git(git_repo, 'merge', '--no-ff', '-m', 'merge feature', 'feature')
-        repo = _make_repo(git_repo)
+        git(git_repo, 'merge', '--no-ff', '-m', 'merge feature', 'feature')
+        repo = make_repo(git_repo)
         assert repo.is_merged_into('feature', 'master' if repo.default_branch == 'master' else 'main') is True
         assert repo.contains_branch('feature', repo.default_branch) is True
 
     def test_patch_equivalence_proves_a_squash_merged_branch(self, git_repo):
         self._branch_with_commit(git_repo, 'feature', 'a.txt')
-        _git(git_repo, 'merge', '--squash', 'feature')
-        _git(git_repo, 'commit', '-m', 'squash feature')
-        repo = _make_repo(git_repo)
+        git(git_repo, 'merge', '--squash', 'feature')
+        git(git_repo, 'commit', '-m', 'squash feature')
+        repo = make_repo(git_repo)
         default = repo.default_branch
         assert repo.is_merged_into('feature', default) is False  # a squash rewrites the commit
         assert repo.is_patch_applied_in('feature', default) is True
@@ -744,12 +744,12 @@ class TestContainsBranch:
 
     def test_unintegrated_branch_is_not_contained(self, git_repo):
         self._branch_with_commit(git_repo, 'feature', 'a.txt')
-        repo = _make_repo(git_repo)
+        repo = make_repo(git_repo)
         assert repo.contains_branch('feature', repo.default_branch) is False
 
     def test_missing_target_is_not_contained(self, git_repo):
         self._branch_with_commit(git_repo, 'feature', 'a.txt')
-        repo = _make_repo(git_repo)
+        repo = make_repo(git_repo)
         assert repo.contains_branch('feature', 'no-such-branch') is False
 
 
@@ -990,17 +990,17 @@ def seeded_origin(tmp_path):
     subprocess.run(['git', 'init', '--bare', '-b', 'main', str(bare)], capture_output=True)
     seed = tmp_path / 'seed'
     subprocess.run(['git', 'clone', str(bare), str(seed)], capture_output=True)
-    _git(seed, 'config', 'user.email', 'test@test.com')
-    _git(seed, 'config', 'user.name', 'Test')
+    git(seed, 'config', 'user.email', 'test@test.com')
+    git(seed, 'config', 'user.name', 'Test')
     (seed / 'README.md').write_text('# Test\n')
     (seed / '.gitignore').write_text('*.env\n.planning/\n')
-    _git(seed, 'add', 'README.md', '.gitignore')
-    _git(seed, 'commit', '-m', 'init')
-    _git(seed, 'push', '-u', 'origin', 'main')
+    git(seed, 'add', 'README.md', '.gitignore')
+    git(seed, 'commit', '-m', 'init')
+    git(seed, 'push', '-u', 'origin', 'main')
     return bare
 
 
-def _occupied(tmp_path: Path, **files: str) -> Path:
+def occupied(tmp_path: Path, **files: str) -> Path:
     target = tmp_path / 'target'
     target.mkdir()
     for name, content in files.items():
@@ -1017,7 +1017,7 @@ class TestCloneIntoExisting:
         return Repo(name='target', path=target, owner='user', host='https://github.com', url=str(origin))
 
     def test_clones_around_files_the_repo_ignores(self, tmp_path, seeded_origin):
-        target = _occupied(tmp_path, **{'local.env': 'SECRET\n', '.planning__status.md': 'notes\n'})
+        target = occupied(tmp_path, **{'local.env': 'SECRET\n', '.planning__status.md': 'notes\n'})
         repo = self._repo(target, seeded_origin)
 
         ok, err = repo.clone_into_existing()
@@ -1034,7 +1034,7 @@ class TestCloneIntoExisting:
     def test_a_tracked_path_already_occupied_is_refused_whole(self, tmp_path, seeded_origin):
         """git checkout declines the whole operation rather than overwriting one file, which is
         the guarantee `git clone` was standing in for when it declined the directory outright."""
-        target = _occupied(tmp_path, **{'README.md': 'MINE\n'})
+        target = occupied(tmp_path, **{'README.md': 'MINE\n'})
 
         ok, err = self._repo(target, seeded_origin).clone_into_existing()
 
@@ -1048,7 +1048,7 @@ class TestCloneIntoExisting:
     def test_identical_content_is_refused_too(self, tmp_path, seeded_origin):
         """The refusal is on the path, not the content. Relied on by the revert above: every file
         a checkout wrote is one it created, so removing .git cannot orphan a pre-existing file."""
-        target = _occupied(tmp_path, **{'README.md': '# Test\n'})
+        target = occupied(tmp_path, **{'README.md': '# Test\n'})
 
         ok, _ = self._repo(target, seeded_origin).clone_into_existing()
 
@@ -1058,7 +1058,7 @@ class TestCloneIntoExisting:
     def test_a_file_the_repo_neither_tracks_nor_ignores_is_kept(self, tmp_path, seeded_origin):
         """Kept, not deleted and not refused: the clone lands and the leftover shows as dirty,
         which is the vocabulary syncer already reports and already refuses to mutate."""
-        target = _occupied(tmp_path, **{'scratch.txt': 'mine\n'})
+        target = occupied(tmp_path, **{'scratch.txt': 'mine\n'})
         repo = self._repo(target, seeded_origin)
 
         ok, _ = repo.clone_into_existing()
@@ -1070,7 +1070,7 @@ class TestCloneIntoExisting:
     def test_never_writes_where_git_state_already_lives(self, tmp_path, seeded_origin):
         """A linked worktree keeps its .git as a file, so `is_git_repo` reads False for one.
         Running `git init` there would point the path at another repo's gitdir."""
-        target = _occupied(tmp_path, **{'.git': 'gitdir: /somewhere/else\n'})
+        target = occupied(tmp_path, **{'.git': 'gitdir: /somewhere/else\n'})
 
         ok, err = self._repo(target, seeded_origin).clone_into_existing()
 
@@ -1081,7 +1081,7 @@ class TestCloneIntoExisting:
     def test_follows_the_remotes_default_branch_not_the_local_init_default(self, tmp_path, seeded_origin):
         """`git init` names the first branch from local config, which has nothing to do with
         what the remote calls its default."""
-        target = _occupied(tmp_path, **{'local.env': 'SECRET\n'})
+        target = occupied(tmp_path, **{'local.env': 'SECRET\n'})
         subprocess.run(['git', 'branch', '-m', 'main', 'trunk'], cwd=seeded_origin, capture_output=True)
         repo = self._repo(target, seeded_origin)
 
@@ -1091,7 +1091,7 @@ class TestCloneIntoExisting:
         assert repo.current_branch == 'trunk'
 
     def test_an_unreachable_remote_leaves_the_directory_alone(self, tmp_path):
-        target = _occupied(tmp_path, **{'local.env': 'SECRET\n'})
+        target = occupied(tmp_path, **{'local.env': 'SECRET\n'})
 
         ok, err = self._repo(target, tmp_path / 'no-such-repo.git').clone_into_existing()
 

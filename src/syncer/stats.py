@@ -16,7 +16,7 @@ from syncer.tracking import read_events
 BLOCK_FULL = '\u2588'
 
 
-def _time_ago(moment: dt.datetime) -> str:
+def time_ago(moment: dt.datetime) -> str:
     now = dt.datetime.now(dt.UTC)
     delta = now - moment
     minutes = int(delta.total_seconds() / 60)
@@ -37,7 +37,7 @@ def _time_ago(moment: dt.datetime) -> str:
     return f'{years}y ago'
 
 
-def _format_duration(days: int) -> str:
+def format_duration(days: int) -> str:
     if days >= 365:
         years = days // 365
         months = (days % 365) // 30
@@ -48,7 +48,7 @@ def _format_duration(days: int) -> str:
     return f'{days}d'
 
 
-def _show_summary(events: list[SyncRunEvent]) -> None:
+def show_summary(events: list[SyncRunEvent]) -> None:
     console.print('  [bold]Summary (last 30 days)[/bold]')
     console.print('  ' + '\u2500' * 42)
 
@@ -64,11 +64,11 @@ def _show_summary(events: list[SyncRunEvent]) -> None:
     avg_issues = sum(e.summary.issues for e in recent) / total_runs
 
     console.print(f'  Total runs:     {total_runs}')
-    console.print(f'  Last run:       {_time_ago(last_run.timestamp)}')
+    console.print(f'  Last run:       {time_ago(last_run.timestamp)}')
     console.print(f'  Avg issues:     {avg_issues:.1f} per run')
 
 
-def _show_commits_graph(config: SyncerConfig) -> None:
+def show_commits_graph(config: SyncerConfig) -> None:
     rows: list[tuple[str, int]] = []
     for repo_config in config.repos:
         path = Path(repo_config.path).expanduser()
@@ -103,7 +103,7 @@ def _show_commits_graph(config: SyncerConfig) -> None:
         console.print(f'  {label:<{label_width}s} {bar}  {commits}')
 
 
-def _show_repo_age(config: SyncerConfig) -> None:
+def show_repo_age(config: SyncerConfig) -> None:
     rows: list[tuple[str, int]] = []
     for repo_config in config.repos:
         path = Path(repo_config.path).expanduser()
@@ -142,10 +142,10 @@ def _show_repo_age(config: SyncerConfig) -> None:
     for label, age_days in sorted(rows, key=itemgetter(1), reverse=True):
         bar_len = max(1, round(age_days / max_age * max_bar)) if max_age > 0 else 1
         bar = BLOCK_FULL * bar_len
-        console.print(f'  {label:<{label_width}s} {bar}  {_format_duration(age_days)}')
+        console.print(f'  {label:<{label_width}s} {bar}  {format_duration(age_days)}')
 
 
-def _show_frequently_dirty(events: list[SyncRunEvent]) -> None:
+def show_frequently_dirty(events: list[SyncRunEvent]) -> None:
     now = dt.datetime.now(dt.UTC)
     recent = [e for e in events if (now - e.timestamp).days <= 30]
     if not recent:
@@ -179,7 +179,7 @@ def _show_frequently_dirty(events: list[SyncRunEvent]) -> None:
         console.print(f'  {path:<{label_width}s} {bar}  {count} of {total_runs} runs ({pct:.0%})')
 
 
-def _show_stale(events: list[SyncRunEvent]) -> None:
+def show_stale(events: list[SyncRunEvent]) -> None:
     stale = find_stale_repos(events)
     if not stale:
         return
@@ -191,7 +191,7 @@ def _show_stale(events: list[SyncRunEvent]) -> None:
         console.print(f'  [yellow]\u26a0 {path:<30s} {days} days[/yellow]')
 
 
-def _show_all_repos(config: SyncerConfig, events: list[SyncRunEvent]) -> None:
+def show_all_repos(config: SyncerConfig, events: list[SyncRunEvent]) -> None:
     # Build latest status from most recent event
     latest_status: dict[str, str] = {}
     if events:
@@ -232,7 +232,7 @@ def _show_all_repos(config: SyncerConfig, events: list[SyncRunEvent]) -> None:
             if last_date:
                 try:
                     last_dt = dt.datetime.fromisoformat(last_date)
-                    last_active = _time_ago(last_dt)
+                    last_active = time_ago(last_dt)
                 except ValueError:
                     last_active = last_date
             else:
@@ -252,7 +252,7 @@ def _show_all_repos(config: SyncerConfig, events: list[SyncRunEvent]) -> None:
     console.print(table)
 
 
-def _show_recent_runs(events: list[SyncRunEvent]) -> None:
+def show_recent_runs(events: list[SyncRunEvent]) -> None:
     if not events:
         return
 
@@ -287,11 +287,11 @@ def show_stats(config: SyncerConfig, events_file: Path) -> None:
     console.print('\u2550' * 64)
     console.print()
 
-    _show_summary(events)
-    _show_commits_graph(config)
-    _show_repo_age(config)
-    _show_frequently_dirty(events)
-    _show_stale(events)
-    _show_all_repos(config, events)
-    _show_recent_runs(events)
+    show_summary(events)
+    show_commits_graph(config)
+    show_repo_age(config)
+    show_frequently_dirty(events)
+    show_stale(events)
+    show_all_repos(config, events)
+    show_recent_runs(events)
     console.print()

@@ -67,7 +67,7 @@ def decision_matrix(policy: Policy, branch: str) -> dict[str, dict[str, str]]:
     }
 
 
-def _summary(policy: Policy) -> dict:
+def policy_summary(policy: Policy) -> dict:
     return {
         'name': policy.name,
         'builtin': policy.name in BUILTIN_POLICIES,
@@ -87,7 +87,7 @@ actions_app = typer.Typer(
 policy_app.add_typer(actions_app, name='actions')
 
 
-def _legal_actions(state: PrimaryState) -> list[str]:
+def legal_actions(state: PrimaryState) -> list[str]:
     """The actions worth putting on a rule for `state`, from each action's own applies_to.
 
     Read off ACTION_DOCS rather than listed here, so an action added to the menu appears against
@@ -96,7 +96,7 @@ def _legal_actions(state: PrimaryState) -> list[str]:
     return [action.value for action in Action if state in ACTION_DOCS[action].applies_to]
 
 
-def _rule_rows(policy: Policy, branch: str) -> list[dict]:
+def rule_rows(policy: Policy, branch: str) -> list[dict]:
     """Every settable rule key for `branch`'s three possible roles, with the decision it produces.
 
     The action comes from decide() and the origin from deciding_selector(), so a row cannot claim
@@ -146,13 +146,13 @@ def policy_rules(
         hint(f'known policies: {", ".join(sorted(policies))}')
         raise typer.Exit(2)
 
-    rows = _rule_rows(policy, branch)
+    rows = rule_rows(policy, branch)
     if as_json:
         emit_json(
             {
                 'policy': policy.name,
                 'branch': branch,
-                'states': [{'state': state.value, 'means': STATE_DOCS[state], 'actions': _legal_actions(state)} for state in PrimaryState],
+                'states': [{'state': state.value, 'means': STATE_DOCS[state], 'actions': legal_actions(state)} for state in PrimaryState],
                 'rules': rows,
             }
         )
@@ -163,7 +163,7 @@ def policy_rules(
     for state in PrimaryState:
         console.print()
         console.print(f'[bold]{state.value}[/bold] — {STATE_DOCS[state]}', soft_wrap=True)
-        console.print(f'  actions: {" · ".join(_legal_actions(state))}', soft_wrap=True)
+        console.print(f'  actions: {" · ".join(legal_actions(state))}', soft_wrap=True)
         table = Table(box=None, pad_edge=False, show_header=False)
         table.add_column('rule')
         table.add_column('matches')
@@ -174,7 +174,7 @@ def policy_rules(
         console.print(table)
 
 
-def _action_record(action: Action, policies: dict[str, Policy]) -> dict:
+def action_record(action: Action, policies: dict[str, Policy]) -> dict:
     doc = ACTION_DOCS[action]
     return {
         'action': action.value,
@@ -204,7 +204,7 @@ def actions_list(
     """
     policies = resolve_policies(load_tool_config())
     if as_json:
-        emit_json([_action_record(action, policies) for action in Action])
+        emit_json([action_record(action, policies) for action in Action])
         return
 
     table = Table(box=None, pad_edge=False)
@@ -247,7 +247,7 @@ def actions_show(
         raise typer.Exit(2) from None
 
     policies = resolve_policies(load_tool_config())
-    record = _action_record(action, policies)
+    record = action_record(action, policies)
     if as_json:
         emit_json(record)
         return
@@ -281,7 +281,7 @@ def policy_list(
     policies = resolve_policies(tool_config)
 
     if as_json:
-        emit_json([_summary(policies[name]) for name in sorted(policies)])
+        emit_json([policy_summary(policies[name]) for name in sorted(policies)])
         return
 
     table = Table(box=None, pad_edge=False)
@@ -341,7 +341,7 @@ def policy_show(
 
     if as_json:
         emit_json(
-            _summary(policy)
+            policy_summary(policy)
             | {
                 'rules': policy.rules,
                 'branch': branch,

@@ -12,11 +12,11 @@ from syncer.policy import Scope
 from syncer.repos import Repo
 
 
-def _git(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def git(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(['git', *args], cwd=path, capture_output=True, text=True)
 
 
-def _make_repo(path: Path) -> Repo:
+def make_repo(path: Path) -> Repo:
     return Repo(name='test-repo', path=path, owner='user', host='https://github.com')
 
 
@@ -28,76 +28,76 @@ def cloned_repo(tmp_path):
 
     repo_path = tmp_path / 'repo'
     subprocess.run(['git', 'clone', str(bare), str(repo_path)], capture_output=True)
-    _git(repo_path, 'config', 'user.email', 'test@test.com')
-    _git(repo_path, 'config', 'user.name', 'Test')
+    git(repo_path, 'config', 'user.email', 'test@test.com')
+    git(repo_path, 'config', 'user.name', 'Test')
     (repo_path / 'README.md').write_text('# Test\n')
-    _git(repo_path, 'add', '.')
-    _git(repo_path, 'commit', '-m', 'init')
-    _git(repo_path, 'push', '-u', 'origin', 'main')
+    git(repo_path, 'add', '.')
+    git(repo_path, 'commit', '-m', 'init')
+    git(repo_path, 'push', '-u', 'origin', 'main')
     return repo_path
 
 
-def _commit(path: Path, filename: str, message: str) -> None:
+def commit(path: Path, filename: str, message: str) -> None:
     (path / filename).write_text(f'{filename}\n')
-    _git(path, 'add', '.')
-    _git(path, 'commit', '-m', message)
+    git(path, 'add', '.')
+    git(path, 'commit', '-m', message)
 
 
-def _second_clone_pushes(tmp_path: Path, filename: str = 'remote.txt') -> None:
+def second_clone_pushes(tmp_path: Path, filename: str = 'remote.txt') -> None:
     """Push a commit to the bare remote from an independent clone (moves origin ahead)."""
     bare = tmp_path / 'remote.git'
     second = tmp_path / 'second'
     subprocess.run(['git', 'clone', str(bare), str(second)], capture_output=True)
-    _git(second, 'config', 'user.email', 'test@test.com')
-    _git(second, 'config', 'user.name', 'Test')
-    _commit(second, filename, 'remote change')
-    _git(second, 'push')
+    git(second, 'config', 'user.email', 'test@test.com')
+    git(second, 'config', 'user.name', 'Test')
+    commit(second, filename, 'remote change')
+    git(second, 'push')
 
 
-def _classify_main(repo: Repo) -> object:
+def classify_main(repo: Repo) -> object:
     return classify_branch(repo, 'main', default='main', current='main', dirty_current=False, stashed=False)
 
 
 class TestClassifyBranchStates:
     def test_synced(self, cloned_repo):
-        repo = _make_repo(cloned_repo)
-        state = _classify_main(repo)
+        repo = make_repo(cloned_repo)
+        state = classify_main(repo)
         assert state.primary == PrimaryState.SYNCED
         assert state.ahead == 0
         assert state.behind == 0
         assert state.upstream == 'origin/main'
 
     def test_ahead(self, cloned_repo):
-        _commit(cloned_repo, 'feature.py', 'feat')
-        repo = _make_repo(cloned_repo)
-        state = _classify_main(repo)
+        commit(cloned_repo, 'feature.py', 'feat')
+        repo = make_repo(cloned_repo)
+        state = classify_main(repo)
         assert state.primary == PrimaryState.AHEAD
         assert state.ahead == 1
         assert state.behind == 0
 
     def test_behind(self, cloned_repo, tmp_path):
-        _second_clone_pushes(tmp_path)
-        repo = _make_repo(cloned_repo)
+        second_clone_pushes(tmp_path)
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
-        state = _classify_main(repo)
+        state = classify_main(repo)
         assert state.primary == PrimaryState.BEHIND
         assert state.ahead == 0
         assert state.behind == 1
 
     def test_diverged(self, cloned_repo, tmp_path):
-        _commit(cloned_repo, 'local.py', 'local work')
-        _second_clone_pushes(tmp_path)
-        repo = _make_repo(cloned_repo)
+        commit(cloned_repo, 'local.py', 'local work')
+        second_clone_pushes(tmp_path)
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
-        state = _classify_main(repo)
+        state = classify_main(repo)
         assert state.primary == PrimaryState.DIVERGED
         assert state.ahead == 1
         assert state.behind == 1
 
     def test_no_upstream(self, cloned_repo):
-        _git(cloned_repo, 'checkout', '-b', 'feature/local-only')
-        _commit(cloned_repo, 'wip.py', 'wip')
-        repo = _make_repo(cloned_repo)
+        git(cloned_repo, 'checkout', '-b', 'feature/local-only')
+        commit(cloned_repo, 'wip.py', 'wip')
+        repo = make_repo(cloned_repo)
         state = classify_branch(
             repo, 'feature/local-only', default='main', current='feature/local-only', dirty_current=False, stashed=False
         )
@@ -106,11 +106,11 @@ class TestClassifyBranchStates:
 
     def test_gone(self, cloned_repo):
         # Push a branch (sets upstream), then delete it on the remote and prune.
-        _git(cloned_repo, 'checkout', '-b', 'feature/gone')
-        _commit(cloned_repo, 'gone.py', 'gone')
-        _git(cloned_repo, 'push', '-u', 'origin', 'feature/gone')
-        _git(cloned_repo, 'push', 'origin', '--delete', 'feature/gone')
-        repo = _make_repo(cloned_repo)
+        git(cloned_repo, 'checkout', '-b', 'feature/gone')
+        commit(cloned_repo, 'gone.py', 'gone')
+        git(cloned_repo, 'push', '-u', 'origin', 'feature/gone')
+        git(cloned_repo, 'push', 'origin', '--delete', 'feature/gone')
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
         state = classify_branch(repo, 'feature/gone', default='main', current='feature/gone', dirty_current=False, stashed=False)
         assert state.primary == PrimaryState.GONE
@@ -119,11 +119,11 @@ class TestClassifyBranchStates:
 
     def test_gone_merged_into_target(self, cloned_repo):
         # A branch pointing exactly at main (no extra commits) is an ancestor of main.
-        _git(cloned_repo, 'checkout', '-b', 'feature/merged')
-        _git(cloned_repo, 'push', '-u', 'origin', 'feature/merged')
-        _git(cloned_repo, 'push', 'origin', '--delete', 'feature/merged')
-        _git(cloned_repo, 'checkout', 'main')
-        repo = _make_repo(cloned_repo)
+        git(cloned_repo, 'checkout', '-b', 'feature/merged')
+        git(cloned_repo, 'push', '-u', 'origin', 'feature/merged')
+        git(cloned_repo, 'push', 'origin', '--delete', 'feature/merged')
+        git(cloned_repo, 'checkout', 'main')
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
         state = classify_branch(repo, 'feature/merged', default='main', current='main', dirty_current=False, stashed=False)
         assert state.primary == PrimaryState.GONE
@@ -132,16 +132,16 @@ class TestClassifyBranchStates:
     def test_merge_target_overrides_the_default_branch(self, cloned_repo):
         """The classified state has to agree with what the delete_local guard will decide,
         so classify resolves integration against the policy's merge_target too."""
-        _git(cloned_repo, 'checkout', '-b', 'develop')
-        _git(cloned_repo, 'push', '-u', 'origin', 'develop')
-        _git(cloned_repo, 'checkout', '-b', 'feature/x')
-        _commit(cloned_repo, 'feature.py', 'feat')
-        _git(cloned_repo, 'push', '-u', 'origin', 'feature/x')
-        _git(cloned_repo, 'checkout', 'develop')
-        _git(cloned_repo, 'merge', '--no-ff', '-m', 'merge feature/x', 'feature/x')
-        _git(cloned_repo, 'push')
-        _git(cloned_repo, 'push', 'origin', '--delete', 'feature/x')
-        repo = _make_repo(cloned_repo)
+        git(cloned_repo, 'checkout', '-b', 'develop')
+        git(cloned_repo, 'push', '-u', 'origin', 'develop')
+        git(cloned_repo, 'checkout', '-b', 'feature/x')
+        commit(cloned_repo, 'feature.py', 'feat')
+        git(cloned_repo, 'push', '-u', 'origin', 'feature/x')
+        git(cloned_repo, 'checkout', 'develop')
+        git(cloned_repo, 'merge', '--no-ff', '-m', 'merge feature/x', 'feature/x')
+        git(cloned_repo, 'push')
+        git(cloned_repo, 'push', 'origin', '--delete', 'feature/x')
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
 
         args = {'default': 'main', 'current': 'develop', 'dirty_current': False, 'stashed': False}
@@ -152,7 +152,7 @@ class TestClassifyBranchStates:
 class TestClassifyModifiers:
     def test_dirty_only_on_current_branch(self, cloned_repo):
         (cloned_repo / 'README.md').write_text('# changed\n')
-        repo = _make_repo(cloned_repo)
+        repo = make_repo(cloned_repo)
         # main is current → dirty flows through
         current = classify_branch(repo, 'main', default='main', current='main', dirty_current=True, stashed=False)
         assert current.dirty is True
@@ -161,7 +161,7 @@ class TestClassifyModifiers:
         assert noncurrent.dirty is False
 
     def test_is_default_and_is_current_flags(self, cloned_repo):
-        repo = _make_repo(cloned_repo)
+        repo = make_repo(cloned_repo)
         state = classify_branch(repo, 'main', default='main', current='main', dirty_current=False, stashed=False)
         assert state.is_default is True
         assert state.is_current is True
@@ -169,10 +169,10 @@ class TestClassifyModifiers:
     def test_a_branch_in_a_linked_worktree_records_where(self, cloned_repo, tmp_path):
         """Without this a worktree branch is indistinguishable from one nothing has checked out,
         which is the distinction invariant 9 turns on and the one a hint has to name."""
-        _git(cloned_repo, 'branch', 'side')
+        git(cloned_repo, 'branch', 'side')
         linked = tmp_path / 'linked'
-        _git(cloned_repo, 'worktree', 'add', str(linked), 'side')
-        repo = _make_repo(cloned_repo)
+        git(cloned_repo, 'worktree', 'add', str(linked), 'side')
+        repo = make_repo(cloned_repo)
         state = classify_branch(repo, 'side', default='main', current='main', dirty_current=False, stashed=False)
         assert state.is_current is False
         assert state.worktree == str(linked)
@@ -180,41 +180,41 @@ class TestClassifyModifiers:
     def test_the_current_branch_is_never_also_a_worktree(self, cloned_repo):
         """is_current already says this checkout holds it, and the guards read the two fields as
         alternatives — a branch reported as both would be refused twice for one fact."""
-        repo = _make_repo(cloned_repo)
+        repo = make_repo(cloned_repo)
         state = classify_branch(repo, 'main', default='main', current='main', dirty_current=False, stashed=False)
         assert state.worktree is None
 
 
 class TestClassifyRepoScope:
     def test_scope_default_only_returns_default(self, cloned_repo):
-        _git(cloned_repo, 'checkout', '-b', 'feature/extra')
-        _git(cloned_repo, 'checkout', 'main')
-        repo = _make_repo(cloned_repo)
+        git(cloned_repo, 'checkout', '-b', 'feature/extra')
+        git(cloned_repo, 'checkout', 'main')
+        repo = make_repo(cloned_repo)
         policy = Policy(name='p', scope=Scope.DEFAULT, prune=True)
         states = classify_repo(repo, policy)
         assert [s.branch for s in states] == ['main']
 
     def test_scope_all_returns_every_local_branch(self, cloned_repo):
-        _git(cloned_repo, 'checkout', '-b', 'feature/extra')
-        _git(cloned_repo, 'checkout', 'main')
-        repo = _make_repo(cloned_repo)
+        git(cloned_repo, 'checkout', '-b', 'feature/extra')
+        git(cloned_repo, 'checkout', 'main')
+        repo = make_repo(cloned_repo)
         policy = Policy(name='p', scope=Scope.ALL, prune=True)
         branches = {s.branch for s in classify_repo(repo, policy)}
         assert branches == {'main', 'feature/extra'}
 
     def test_scope_tracked_excludes_untracked_branch(self, cloned_repo):
-        _git(cloned_repo, 'checkout', '-b', 'feature/local-only')
-        _git(cloned_repo, 'checkout', 'main')
-        repo = _make_repo(cloned_repo)
+        git(cloned_repo, 'checkout', '-b', 'feature/local-only')
+        git(cloned_repo, 'checkout', 'main')
+        repo = make_repo(cloned_repo)
         policy = Policy(name='p', scope=Scope.TRACKED, prune=True)
         branches = {s.branch for s in classify_repo(repo, policy)}
         assert branches == {'main'}  # feature/local-only has no upstream
 
     def test_detached_head_emits_detached_state(self, cloned_repo):
-        _commit(cloned_repo, 'second.py', 'second')
-        head = _git(cloned_repo, 'rev-parse', 'HEAD').stdout.strip()
-        _git(cloned_repo, 'checkout', head)
-        repo = _make_repo(cloned_repo)
+        commit(cloned_repo, 'second.py', 'second')
+        head = git(cloned_repo, 'rev-parse', 'HEAD').stdout.strip()
+        git(cloned_repo, 'checkout', head)
+        repo = make_repo(cloned_repo)
         assert repo.is_detached is True
         states = classify_repo(repo, BUILTIN_POLICIES['observe'])  # scope=all
         assert any(s.primary == PrimaryState.DETACHED for s in states)
@@ -225,8 +225,8 @@ class TestClassifyRepoRemediation:
         """The original incident: origin/HEAD points at a renamed-away default. classify_repo
         runs set-head --auto so default resolves to the real remote default, not the stale ref."""
         # Point origin/HEAD at a branch that doesn't exist on the remote.
-        _git(cloned_repo, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/master')
-        repo = _make_repo(cloned_repo)
+        git(cloned_repo, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/master')
+        repo = make_repo(cloned_repo)
         classify_repo(repo, BUILTIN_POLICIES['standard'])
         # After set-head --auto, default resolves to the real default (main), never 'master'.
         assert repo.default_branch == 'main'
@@ -242,24 +242,24 @@ class TestClassifyRepoRemediation:
         origin/HEAD, (b) resolves the real default, (c) surfaces the orphaned master as GONE.
         """
         # Local master tracking origin/master; origin/HEAD points at master (pre-rename default).
-        _git(cloned_repo, 'checkout', '-b', 'master')
-        _git(cloned_repo, 'push', '-u', 'origin', 'master')
-        _git(cloned_repo, 'remote', 'set-head', 'origin', 'master')
+        git(cloned_repo, 'checkout', '-b', 'master')
+        git(cloned_repo, 'push', '-u', 'origin', 'master')
+        git(cloned_repo, 'remote', 'set-head', 'origin', 'master')
 
         # A second clone advances origin/main and deletes master on the remote, so THIS clone's
         # origin/master stays stale until it prunes (deleting via this clone would clean it now).
         second = tmp_path / 'second'
         subprocess.run(['git', 'clone', '-b', 'main', str(tmp_path / 'remote.git'), str(second)], capture_output=True)
-        _git(second, 'config', 'user.email', 'test@test.com')
-        _git(second, 'config', 'user.name', 'Test')
-        _commit(second, 'ahead.txt', 'ahead on main')
-        _git(second, 'push')
-        _git(second, 'push', 'origin', '--delete', 'master')
+        git(second, 'config', 'user.email', 'test@test.com')
+        git(second, 'config', 'user.name', 'Test')
+        commit(second, 'ahead.txt', 'ahead on main')
+        git(second, 'push')
+        git(second, 'push', 'origin', '--delete', 'master')
 
         # Clone left on master with an untracked file.
         (cloned_repo / 'uv.lock').write_text('lock\n')
-        _git(cloned_repo, 'checkout', 'master')
-        repo = _make_repo(cloned_repo)
+        git(cloned_repo, 'checkout', 'master')
+        repo = make_repo(cloned_repo)
 
         # Precondition: the stale ref and stale origin/HEAD are present before remediation.
         assert repo._git('rev-parse', '--verify', 'refs/remotes/origin/master').returncode == 0

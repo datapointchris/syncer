@@ -9,7 +9,7 @@ from syncer.repos import TIMEOUT_RETURNCODE
 from syncer.repos import GitFailure
 
 
-def _failure(stderr: str, returncode: int = 128) -> GitFailure:
+def git_failure(stderr: str, returncode: int = 128) -> GitFailure:
     return GitFailure(argv=('fetch', '--quiet'), returncode=returncode, stderr=stderr)
 
 
@@ -69,27 +69,27 @@ REAL_STDERR = [
 class TestClassifyFailure:
     @pytest.mark.parametrize(('expected', 'stderr'), REAL_STDERR)
     def test_real_stderr_is_classified(self, expected, stderr):
-        assert classify_failure(_failure(stderr)) is expected
+        assert classify_failure(git_failure(stderr)) is expected
 
     def test_a_host_key_rejection_is_not_read_as_an_auth_problem(self):
         """Both lines appear together; matching AUTH first would send you to re-check a
         credential that was never the problem."""
         both = 'git@host: Permission denied (publickey).\nHost key verification failed.'
-        assert classify_failure(_failure(both)) is Cause.HOST_KEY
+        assert classify_failure(git_failure(both)) is Cause.HOST_KEY
 
     def test_a_timeout_is_recognized_by_its_returncode_not_its_text(self):
-        failure = _failure('timed out after 120s', returncode=TIMEOUT_RETURNCODE)
+        failure = git_failure('timed out after 120s', returncode=TIMEOUT_RETURNCODE)
         assert classify_failure(failure) is Cause.TIMEOUT
 
     def test_unrecognized_output_gets_no_cause(self):
         """Honesty rule 1: no fallback bucket. A confident wrong explanation sends someone to
         fix the wrong thing, which is worse than admitting we do not know."""
-        assert classify_failure(_failure('error: something nobody has seen before')) is None
+        assert classify_failure(git_failure('error: something nobody has seen before')) is None
 
     def test_the_generic_line_alone_is_not_enough(self):
         """'Could not read from remote repository' accompanies every one of these causes, so
         matching on it would classify all of them as whichever pattern happened to list it."""
-        assert classify_failure(_failure('fatal: Could not read from remote repository.')) is None
+        assert classify_failure(git_failure('fatal: Could not read from remote repository.')) is None
 
 
 class TestHints:
@@ -143,7 +143,7 @@ class TestGroupFailures:
         """N repos behind one dead VPN produce N identical blobs; a wall of those is its own
         kind of unreadable."""
         stderr = 'ssh: connect to host git.corp port 22: Network is unreachable'
-        groups = group_failures([(f'repo{i}', 'git@git.corp:p/r.git', _failure(stderr)) for i in range(5)])
+        groups = group_failures([(f'repo{i}', 'git@git.corp:p/r.git', git_failure(stderr)) for i in range(5)])
         assert len(groups) == 1
         assert len(groups[0].repos) == 5
         assert groups[0].cause is Cause.NETWORK
@@ -151,8 +151,8 @@ class TestGroupFailures:
     def test_different_causes_stay_separate(self):
         groups = group_failures(
             [
-                ('a', 'git@git.corp:p/a.git', _failure('Host key verification failed.')),
-                ('b', 'git@git.corp:p/b.git', _failure('git@git.corp: Permission denied (publickey).')),
+                ('a', 'git@git.corp:p/a.git', git_failure('Host key verification failed.')),
+                ('b', 'git@git.corp:p/b.git', git_failure('git@git.corp: Permission denied (publickey).')),
             ]
         )
         assert {group.cause for group in groups} == {Cause.HOST_KEY, Cause.AUTH}
@@ -162,8 +162,8 @@ class TestGroupFailures:
         stderr = 'Could not resolve host: x'
         groups = group_failures(
             [
-                ('a', 'https://one.corp/p/a.git', _failure(stderr)),
-                ('b', 'https://two.corp/p/b.git', _failure(stderr)),
+                ('a', 'https://one.corp/p/a.git', git_failure(stderr)),
+                ('b', 'https://two.corp/p/b.git', git_failure(stderr)),
             ]
         )
         assert len(groups) == 2
@@ -171,11 +171,11 @@ class TestGroupFailures:
     def test_raw_stderr_survives_grouping(self):
         """Honesty rule 3: the cause is a summary, and summaries lose things."""
         stderr = 'ssh: connect to host git.corp port 22: Network is unreachable'
-        [group] = group_failures([('a', 'git@git.corp:p/a.git', _failure(stderr))])
+        [group] = group_failures([('a', 'git@git.corp:p/a.git', git_failure(stderr))])
         assert group.stderr == stderr
 
     def test_an_unclassified_failure_still_groups_and_shows_its_output(self):
-        [group] = group_failures([('a', 'https://git.corp/p/a.git', _failure('something novel'))])
+        [group] = group_failures([('a', 'https://git.corp/p/a.git', git_failure('something novel'))])
         assert group.cause is None
         assert group.hints == ()
         assert group.stderr == 'something novel'

@@ -8,8 +8,8 @@ from syncer.config import ConfigError
 from syncer.config import RepoConfig
 from syncer.config import SyncerConfig
 from syncer.config import ToolConfig
-from syncer.config import _load_repos_file
 from syncer.config import get_repos_file_path
+from syncer.config import load_repos_file
 from syncer.config import load_tool_config
 from syncer.config import parse_tool_config
 from syncer.config import registry_location
@@ -261,24 +261,24 @@ class TestSyncerConfig:
 class TestLoadReposFile:
     def test_load_existing_file(self, repos_file, sample_config):
         repos_file.write_text(json.dumps(sample_config))
-        config = _load_repos_file(repos_file)
+        config = load_repos_file(repos_file)
         assert config.owner == 'testuser'
         assert len(config.repos) == 2
 
     def test_load_missing_file(self, repos_file):
         with pytest.raises(SystemExit):
-            _load_repos_file(repos_file)
+            load_repos_file(repos_file)
 
     def test_missing_file_names_what_chose_the_path(self, repos_file, capsys):
         """A path this machine never had is the common failure, and the actionable half of it is
         which file named the path — not that the file is absent."""
         with pytest.raises(SystemExit):
-            _load_repos_file(repos_file, 'repos_registry in /somewhere/config.toml')
+            load_repos_file(repos_file, 'repos_registry in /somewhere/config.toml')
         assert 'repos_registry in /somewhere/config.toml' in capsys.readouterr().err
 
     def test_repos_sorted_by_path(self, repos_file, sample_config):
         repos_file.write_text(json.dumps(sample_config))
-        config = _load_repos_file(repos_file)
+        config = load_repos_file(repos_file)
         paths = [r.path for r in config.repos]
         assert paths == sorted(paths)
 
@@ -448,7 +448,7 @@ class TestBrokenConfigIsExplained:
     def test_a_bad_registry_names_the_offending_key(self, repos_file, capsys):
         repos_file.write_text(json.dumps({'owner': 'me', 'url_template': '{host}/{oops}/{name}', 'repos': []}))
         with pytest.raises(SystemExit):
-            _load_repos_file(repos_file)
+            load_repos_file(repos_file)
         stderr = capsys.readouterr().err
         assert 'url_template' in stderr
         assert 'unknown placeholder' in stderr
@@ -456,7 +456,7 @@ class TestBrokenConfigIsExplained:
     def test_malformed_registry_json_names_the_syntax_error(self, repos_file, capsys):
         repos_file.write_text('{not json')
         with pytest.raises(SystemExit):
-            _load_repos_file(repos_file)
+            load_repos_file(repos_file)
         assert 'not valid JSON' in capsys.readouterr().err
 
 

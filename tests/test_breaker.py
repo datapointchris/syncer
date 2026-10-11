@@ -8,17 +8,17 @@ GITHUB_HTTPS = 'https://github.com/datapointchris/syncer'
 GITHUB_SSH = 'git@github.com:datapointchris/syncer.git'
 
 
-def _failure(stderr: str, returncode: int = 128) -> GitFailure:
+def git_failure(stderr: str, returncode: int = 128) -> GitFailure:
     return GitFailure(argv=('fetch',), returncode=returncode, stderr=stderr)
 
 
-AUTH = _failure('fatal: could not read Username for https://github.com: terminal prompts disabled')
-HOST_KEY = _failure('Host key verification failed.\nfatal: Could not read from remote repository.')
-DNS = _failure('fatal: unable to access: Could not resolve host: github.com')
-NETWORK = _failure('fatal: unable to access: Failed to connect to github.com port 443: Connection refused')
-NOT_FOUND = _failure('ERROR: Repository not found.')
-TIMEOUT = _failure('timed out after 120s', returncode=TIMEOUT_RETURNCODE)
-UNKNOWN = _failure('fatal: something nobody has written a pattern for')
+AUTH = git_failure('fatal: could not read Username for https://github.com: terminal prompts disabled')
+HOST_KEY = git_failure('Host key verification failed.\nfatal: Could not read from remote repository.')
+DNS = git_failure('fatal: unable to access: Could not resolve host: github.com')
+NETWORK = git_failure('fatal: unable to access: Failed to connect to github.com port 443: Connection refused')
+NOT_FOUND = git_failure('ERROR: Repository not found.')
+TIMEOUT = git_failure('timed out after 120s', returncode=TIMEOUT_RETURNCODE)
+UNKNOWN = git_failure('fatal: something nobody has written a pattern for')
 
 
 class TestAHostWideCauseTripsOnTheFirstFailure:

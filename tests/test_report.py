@@ -24,12 +24,11 @@ from syncer.remedy import Remedy
 from syncer.report import BranchRow
 from syncer.report import RepoBranchReport
 from syncer.report import Severity
-from syncer.report import _apply_line
-from syncer.report import _branch_line
-from syncer.report import _branch_prefix
-from syncer.report import _build_repo_report
-from syncer.report import _row_severity
+from syncer.report import apply_line
+from syncer.report import branch_line
+from syncer.report import branch_prefix
 from syncer.report import build_branch_rows
+from syncer.report import build_repo_report
 from syncer.report import exit_code_for
 from syncer.report import gather_reports
 from syncer.report import hidden_count
@@ -39,6 +38,7 @@ from syncer.report import render_remedy
 from syncer.report import render_report
 from syncer.report import report_branches
 from syncer.report import report_severity
+from syncer.report import row_severity
 from syncer.report import visible_reports
 from syncer.repos import ABORTED_RETURNCODE
 from syncer.repos import GitFailure
@@ -47,7 +47,7 @@ from syncer.repos import reset_abort
 from syncer.repos import run_command
 
 
-class _RecordingBreaker(HostBreaker):
+class RecordingBreaker(HostBreaker):
     """A real breaker that also remembers what the worker told it, so the wiring is provable
     without a network: the fixtures all clone from a local path, which has no host to close."""
 
@@ -65,10 +65,10 @@ class _RecordingBreaker(HostBreaker):
         super().record_failure(url, failure)
 
 
-def _build(repo_config, config, *, cli_policy=None, apply=False, include_lifecycle=True, breaker=None, tool_config=None):
+def build_report(repo_config, config, *, cli_policy=None, apply=False, include_lifecycle=True, breaker=None, tool_config=None):
     """Call the worker with sensible test defaults for its many keyword args."""
     tool_config = tool_config or ToolConfig()
-    return _build_repo_report(
+    return build_repo_report(
         repo_config,
         config=config,
         tool_config=tool_config,
@@ -83,25 +83,25 @@ def _build(repo_config, config, *, cli_policy=None, apply=False, include_lifecyc
     )
 
 
-def _git(path: Path, *args: str) -> None:
+def git(path: Path, *args: str) -> None:
     subprocess.run(['git', *args], cwd=path, capture_output=True, text=True)
 
 
-def _make_cloned_repo(tmp_path: Path, name: str) -> Path:
+def make_cloned_repo(tmp_path: Path, name: str) -> Path:
     bare = tmp_path / f'{name}.git'
     subprocess.run(['git', 'init', '--bare', '-b', 'main', str(bare)], capture_output=True)
     repo_path = tmp_path / name
     subprocess.run(['git', 'clone', str(bare), str(repo_path)], capture_output=True)
-    _git(repo_path, 'config', 'user.email', 'test@test.com')
-    _git(repo_path, 'config', 'user.name', 'Test')
+    git(repo_path, 'config', 'user.email', 'test@test.com')
+    git(repo_path, 'config', 'user.name', 'Test')
     (repo_path / 'README.md').write_text('# Test\n')
-    _git(repo_path, 'add', '.')
-    _git(repo_path, 'commit', '-m', 'init')
-    _git(repo_path, 'push', '-u', 'origin', 'main')
+    git(repo_path, 'add', '.')
+    git(repo_path, 'commit', '-m', 'init')
+    git(repo_path, 'push', '-u', 'origin', 'main')
     return repo_path
 
 
-def _config_for(paths: list[Path]) -> SyncerConfig:
+def config_for(paths: list[Path]) -> SyncerConfig:
     return SyncerConfig(
         owner='demo',
         host='https://github.com',
@@ -112,21 +112,21 @@ def _config_for(paths: list[Path]) -> SyncerConfig:
 
 class TestBuildRepoReport:
     def test_returns_rows_for_real_repo(self, tmp_path):
-        repo_path = _make_cloned_repo(tmp_path, 'alpha')
-        config = _config_for([repo_path])
-        report = _build(config.repos[0], config, cli_policy='observe')
+        repo_path = make_cloned_repo(tmp_path, 'alpha')
+        config = config_for([repo_path])
+        report = build_report(config.repos[0], config, cli_policy='observe')
         assert report is not None
         assert report.policy_name == 'observe'
         assert any(row.state.branch == 'main' for row in report.rows)
 
     def test_skips_missing_repo_without_lifecycle(self, tmp_path):
-        config = _config_for([tmp_path / 'does-not-exist'])
-        report = _build(config.repos[0], config, include_lifecycle=False)
+        config = config_for([tmp_path / 'does-not-exist'])
+        report = build_report(config.repos[0], config, include_lifecycle=False)
         assert report is None
 
     def test_surfaces_missing_repo_as_lifecycle(self, tmp_path):
-        config = _config_for([tmp_path / 'does-not-exist'])
-        report = _build(config.repos[0], config)  # _build defaults include_lifecycle=True
+        config = config_for([tmp_path / 'does-not-exist'])
+        report = build_report(config.repos[0], config)  # build_report defaults include_lifecycle=True
         assert report is not None
         assert report.lifecycle == 'would_clone'
 
@@ -139,7 +139,7 @@ class TestBuildRepoReport:
             search_paths=[],
             repos=[RepoConfig(name='ghost', path=str(tmp_path / 'ghost'), clone_url=str(tmp_path / 'no-such-repo.git'))],
         )
-        report = _build(config.repos[0], config, apply=True)
+        report = build_report(config.repos[0], config, apply=True)
         assert report is not None
         assert report.lifecycle == 'clone_failed'
         assert report.lifecycle_detail
@@ -163,10 +163,10 @@ class TestBuildRepoReport:
     def test_an_occupied_path_is_work_to_do_not_an_error(self, tmp_path):
         """`not a git repository` stopped a new box at the one moment syncer was most needed: it
         exits 1 and names no next step, for a repo apply clones without help."""
-        _make_cloned_repo(tmp_path, 'alpha')
+        make_cloned_repo(tmp_path, 'alpha')
         config = self._occupied_config(tmp_path, tmp_path / 'alpha.git', **{'local.env': 'SECRET\n'})
 
-        report = _build(config.repos[0], config)
+        report = build_report(config.repos[0], config)
 
         assert report is not None
         assert report.lifecycle == 'would_clone'
@@ -174,10 +174,10 @@ class TestBuildRepoReport:
         assert '1 entry' in report.lifecycle_detail
 
     def test_apply_clones_into_an_occupied_path(self, tmp_path):
-        _make_cloned_repo(tmp_path, 'alpha')
+        make_cloned_repo(tmp_path, 'alpha')
         config = self._occupied_config(tmp_path, tmp_path / 'alpha.git', **{'local.env': 'SECRET\n'})
 
-        report = _build(config.repos[0], config, apply=True)
+        report = build_report(config.repos[0], config, apply=True)
 
         assert report is not None
         assert report.lifecycle == 'cloned'
@@ -187,26 +187,26 @@ class TestBuildRepoReport:
     def test_a_path_carrying_git_state_stays_an_error(self, tmp_path):
         """A linked worktree's .git is a file, so is_git_repo reads False for one. Cloning into
         it would point the path at another repo's gitdir, so it is reported and left alone."""
-        _make_cloned_repo(tmp_path, 'alpha')
+        make_cloned_repo(tmp_path, 'alpha')
         config = self._occupied_config(tmp_path, tmp_path / 'alpha.git', **{'.git': 'gitdir: /elsewhere\n'})
 
-        report = _build(config.repos[0], config, apply=True)
+        report = build_report(config.repos[0], config, apply=True)
 
         assert report is not None
         assert report.lifecycle == 'not_git'
         assert (tmp_path / 'target' / '.git').read_text() == 'gitdir: /elsewhere\n'
 
     def test_the_branches_view_still_skips_an_occupied_path(self, tmp_path):
-        _make_cloned_repo(tmp_path, 'alpha')
+        make_cloned_repo(tmp_path, 'alpha')
         config = self._occupied_config(tmp_path, tmp_path / 'alpha.git', **{'local.env': 'SECRET\n'})
 
-        assert _build(config.repos[0], config, include_lifecycle=False) is None
+        assert build_report(config.repos[0], config, include_lifecycle=False) is None
 
     def test_apply_attaches_outcomes(self, tmp_path):
-        repo_path = _make_cloned_repo(tmp_path, 'beta')
-        _git(repo_path, 'commit', '--allow-empty', '-m', 'unpushed')
-        config = _config_for([repo_path])
-        report = _build(config.repos[0], config, cli_policy='mirror', apply=True)
+        repo_path = make_cloned_repo(tmp_path, 'beta')
+        git(repo_path, 'commit', '--allow-empty', '-m', 'unpushed')
+        config = config_for([repo_path])
+        report = build_report(config.repos[0], config, cli_policy='mirror', apply=True)
         assert report is not None
         main_row = next(row for row in report.rows if row.state.branch == 'main')
         assert main_row.state.primary == PrimaryState.AHEAD
@@ -217,19 +217,19 @@ class TestBuildRepoReport:
 
 class TestUnverifiableRepoIsNotSynced:
     """The deepest bug this tool had: classify_repo did not even bind the fetch's result, and
-    ahead_behind returned (0, 0) when rev-list failed — which _primary_from_counts reads as
+    ahead_behind returned (0, 0) when rev-list failed — which primary_from_counts reads as
     SYNCED. So a repo that had never once reached its remote reported as fully in sync, which
     is the exact opposite of the one question syncer exists to answer.
     """
 
     def _repo_with_dead_remote(self, tmp_path):
-        repo_path = _make_cloned_repo(tmp_path, 'orphan')
+        repo_path = make_cloned_repo(tmp_path, 'orphan')
         shutil.rmtree(tmp_path / 'orphan.git')  # origin is gone; every fetch now fails
-        return _config_for([repo_path])
+        return config_for([repo_path])
 
     def test_a_dead_fetch_is_an_error_not_synced(self, tmp_path):
         config = self._repo_with_dead_remote(tmp_path)
-        report = _build(config.repos[0], config, cli_policy='observe')
+        report = build_report(config.repos[0], config, cli_policy='observe')
         assert report is not None
         assert report.error is not None
         assert report_severity(report) == Severity.ERROR
@@ -237,28 +237,28 @@ class TestUnverifiableRepoIsNotSynced:
 
     def test_it_carries_gits_own_reason(self, tmp_path):
         config = self._repo_with_dead_remote(tmp_path)
-        report = _build(config.repos[0], config, cli_policy='observe')
+        report = build_report(config.repos[0], config, cli_policy='observe')
         assert report.error_detail
         assert report.failures
 
     def test_no_branch_rows_are_claimed(self, tmp_path):
         """A row is a claim about a branch, and the point is that no such claim can be made."""
         config = self._repo_with_dead_remote(tmp_path)
-        report = _build(config.repos[0], config, cli_policy='observe')
+        report = build_report(config.repos[0], config, cli_policy='observe')
         assert report.rows == []
 
     def test_apply_executes_nothing(self, tmp_path):
         """Returning before build_branch_rows is what refuses execution: no execute() call is
         ever constructed for a repo whose state could not be established."""
         config = self._repo_with_dead_remote(tmp_path)
-        report = _build(config.repos[0], config, cli_policy='mirror', apply=True)
+        report = build_report(config.repos[0], config, cli_policy='mirror', apply=True)
         assert report.rows == []
         assert report.error is not None
 
     def test_branches_view_reports_it_too(self, tmp_path):
         """A branch view built on unverified refs tells the same lie the default run did."""
         config = self._repo_with_dead_remote(tmp_path)
-        report = _build(config.repos[0], config, cli_policy='observe', include_lifecycle=False)
+        report = build_report(config.repos[0], config, cli_policy='observe', include_lifecycle=False)
         assert report is not None
         assert report.error is not None
 
@@ -267,7 +267,7 @@ class TestUnverifiableRepoIsNotSynced:
         Grouping on the latter would put a corporate host's outage under github.com and hand
         out a hint for the wrong machine."""
         config = self._repo_with_dead_remote(tmp_path)
-        report = _build(config.repos[0], config, cli_policy='observe')
+        report = build_report(config.repos[0], config, cli_policy='observe')
         # What collect_failures groups on: the real origin when it differs from the registry's
         # expectation, and the expectation itself when it does not.
         grouped_on = report.origin_mismatch or report.expected_url
@@ -277,7 +277,7 @@ class TestUnverifiableRepoIsNotSynced:
     def test_local_counts_survive_for_the_stale_warnings(self, tmp_path):
         config = self._repo_with_dead_remote(tmp_path)
         (Path(config.repos[0].path) / 'dirty.txt').write_text('x\n')
-        report = _build(config.repos[0], config, cli_policy='observe')
+        report = build_report(config.repos[0], config, cli_policy='observe')
         assert report.uncommitted == 1
 
 
@@ -331,32 +331,32 @@ class TestReportOrdering:
     def test_reports_sorted_by_path_within_same_severity(self, tmp_path):
         # Submit out of alphabetical order; all synced (same severity) → path-sorted output.
         names = ['charlie', 'alpha', 'bravo']
-        paths = [_make_cloned_repo(tmp_path, name) for name in names]
-        config = _config_for(paths)
+        paths = [make_cloned_repo(tmp_path, name) for name in names]
+        config = config_for(paths)
         reports = gather_reports(config, ToolConfig(default_policy='observe'), jitter=0.0)
         assert [report.name for report in reports] == ['alpha', 'bravo', 'charlie']
 
     def test_repos_needing_attention_sort_to_the_bottom(self, tmp_path):
-        synced = _make_cloned_repo(tmp_path, 'aaa-synced')
-        behind = _make_cloned_repo(tmp_path, 'zzz-behind')
+        synced = make_cloned_repo(tmp_path, 'aaa-synced')
+        behind = make_cloned_repo(tmp_path, 'zzz-behind')
         # Move zzz-behind behind its remote via a second clone push.
         second = tmp_path / 'second'
         subprocess.run(['git', 'clone', str(tmp_path / 'zzz-behind.git'), str(second)], capture_output=True)
-        _git(second, 'config', 'user.email', 't@t.com')
-        _git(second, 'config', 'user.name', 'T')
+        git(second, 'config', 'user.email', 't@t.com')
+        git(second, 'config', 'user.name', 'T')
         (second / 'x.txt').write_text('x\n')
-        _git(second, 'add', '.')
-        _git(second, 'commit', '-m', 'ahead')
-        _git(second, 'push')
-        config = _config_for([synced, behind])
+        git(second, 'add', '.')
+        git(second, 'commit', '-m', 'ahead')
+        git(second, 'push')
+        config = config_for([synced, behind])
         reports = gather_reports(config, ToolConfig(default_policy='observe'), jitter=0.0)
         # Even though 'aaa' < 'zzz' by path, severity dominates: synced first, behind (warning) last.
         assert reports[0].name == 'aaa-synced'
         assert reports[-1].name == 'zzz-behind'
 
     def test_all_repos_processed_concurrently(self, tmp_path, capsys):
-        paths = [_make_cloned_repo(tmp_path, f'repo{i}') for i in range(5)]
-        config = _config_for(paths)
+        paths = [make_cloned_repo(tmp_path, f'repo{i}') for i in range(5)]
+        config = config_for(paths)
         report_branches(config, ToolConfig(default_policy='observe'), jobs=4, jitter=0.0)
         out = capsys.readouterr().out
         for i in range(5):
@@ -367,7 +367,7 @@ class TestSeverityIsOwnershipNotGitState:
     """Regression lock for a report that counted 32 repos as needing attention and then drew
     30 of them exactly like the 43 that did not.
 
-    The count and the sort came from _row_severity, which knows a dirty tree is a warning; the
+    The count and the sort came from row_severity, which knows a dirty tree is a warning; the
     icon and color came from the primary state alone, which says 'synced'. Two notions of
     'needs attention' in one report means the reader trusts neither.
     """
@@ -377,8 +377,8 @@ class TestSeverityIsOwnershipNotGitState:
         return BranchRow(state=state, action=action, blocked=blocked)
 
     def test_a_dirty_tree_never_renders_as_a_clean_one(self):
-        clean = _branch_prefix(self._row(PrimaryState.SYNCED))
-        dirty = _branch_prefix(self._row(PrimaryState.SYNCED, dirty=True), uncommitted=4)
+        clean = branch_prefix(self._row(PrimaryState.SYNCED))
+        dirty = branch_prefix(self._row(PrimaryState.SYNCED, dirty=True), uncommitted=4)
         assert '[green]' in clean
         assert '[green]' not in dirty
         assert '[yellow]' in dirty
@@ -390,29 +390,29 @@ class TestSeverityIsOwnershipNotGitState:
         """`behind` is queued work, not damage. Painting it the same yellow as a dirty tree is
         what made the color unreadable — the one repo syncer could fix looked like the worst."""
         row = self._row(PrimaryState.BEHIND, action=Action.FAST_FORWARD, behind=1)
-        assert _row_severity(row) == Severity.OPERATION
-        assert '[cyan]' in _branch_prefix(row)
+        assert row_severity(row) == Severity.OPERATION
+        assert '[cyan]' in branch_prefix(row)
 
     def test_a_dirty_tree_outranks_the_action_band(self):
         """Every mutator that touches the tree refuses on a dirty one, so the row is yours to
         clear whatever git state the branch is in — it must not sort as queued work."""
         row = self._row(PrimaryState.BEHIND, action=Action.FAST_FORWARD, behind=1, dirty=True)
-        assert _row_severity(row) == Severity.WARNING
+        assert row_severity(row) == Severity.WARNING
 
     def test_a_blocked_action_is_not_queued_work(self):
         row = self._row(PrimaryState.AHEAD, action=Action.PUSH, ahead=1, blocked="protected by 'main'")
-        assert _row_severity(row) == Severity.WARNING
+        assert row_severity(row) == Severity.WARNING
 
     def test_the_arrow_appears_only_when_syncer_will_act(self):
         """`→ skip` after every clean repo spent a column on the least informative word in the
         vocabulary, and left the arrow meaning nothing where it mattered."""
-        assert '→' not in _branch_line(self._row(PrimaryState.SYNCED))
-        assert '→' not in _branch_line(self._row(PrimaryState.AHEAD, action=Action.REPORT, ahead=1))
-        assert '→ push' in _branch_line(self._row(PrimaryState.AHEAD, action=Action.PUSH, ahead=1))
+        assert '→' not in branch_line(self._row(PrimaryState.SYNCED))
+        assert '→' not in branch_line(self._row(PrimaryState.AHEAD, action=Action.REPORT, ahead=1))
+        assert '→ push' in branch_line(self._row(PrimaryState.AHEAD, action=Action.PUSH, ahead=1))
 
     def test_every_non_mutating_action_suppresses_the_arrow(self):
         for action in set(Action) - MUTATING_ACTIONS:
-            assert '→' not in _branch_line(self._row(PrimaryState.SYNCED, action=action)), action
+            assert '→' not in branch_line(self._row(PrimaryState.SYNCED, action=action)), action
 
 
 class TestApplyRowsFollowTheSameArrowRule:
@@ -430,8 +430,8 @@ class TestApplyRowsFollowTheSameArrowRule:
 
     def test_a_skipped_row_renders_exactly_as_its_report_row(self):
         row = self._row(Action.SKIP, 'skipped')
-        assert '→' not in _apply_line(row)
-        assert _apply_line(row) == _branch_line(row)
+        assert '→' not in apply_line(row)
+        assert apply_line(row) == branch_line(row)
 
     def test_every_non_mutating_action_suppresses_the_outcome(self):
         """SKIP/REPORT/PROMPT are all in PROTECTED_ALLOWED and dirty_refusal ignores them, so a
@@ -439,16 +439,16 @@ class TestApplyRowsFollowTheSameArrowRule:
         carry that the row does not already say."""
         for action in set(Action) - MUTATING_ACTIONS:
             row = self._row(action, 'reported')
-            assert '→' not in _apply_line(row), action
-            assert _apply_line(row) == _branch_line(row), action
+            assert '→' not in apply_line(row), action
+            assert apply_line(row) == branch_line(row), action
 
     def test_a_mutating_action_still_reports_what_it_did(self):
         row = self._row(Action.PUSH, 'done', primary=PrimaryState.AHEAD, ahead=1)
-        assert '→ push: done' in _apply_line(row)
+        assert '→ push: done' in apply_line(row)
 
     def test_a_refusal_is_never_suppressed(self):
         row = self._row(Action.PUSH, 'refused', primary=PrimaryState.AHEAD, ahead=1, message='dirty tree')
-        line = _apply_line(row)
+        line = apply_line(row)
         assert '→ push: refused' in line
         assert 'dirty tree' in line
 
@@ -456,7 +456,7 @@ class TestApplyRowsFollowTheSameArrowRule:
         """Only an executed run learns one — it is the thing apply legitimately adds over check,
         so suppressing the noise must not take it. `prompt` degrades to a report and says so."""
         row = self._row(Action.PROMPT, 'reported', message='interactive prompt not implemented (v1)')
-        assert 'interactive prompt not implemented (v1)' in _apply_line(row)
+        assert 'interactive prompt not implemented (v1)' in apply_line(row)
 
 
 class TestRemedyRendering:
@@ -532,7 +532,7 @@ class TestProtectedBranchReporting:
         )
 
     def test_report_line_marks_an_action_protection_would_refuse(self):
-        line = _branch_line(self._row(Action.PUSH, ['develop']))
+        line = branch_line(self._row(Action.PUSH, ['develop']))
         assert 'would refuse' in line
         # The pattern, not just the branch name: 'protected by "release/*"' says what to edit.
         assert "'develop'" in line
@@ -540,19 +540,19 @@ class TestProtectedBranchReporting:
     def test_report_line_is_unchanged_when_nothing_is_protected(self):
         row = self._row(Action.PUSH, [])
         assert row.blocked is None
-        assert 'would refuse' not in _branch_line(row)
+        assert 'would refuse' not in branch_line(row)
 
     def test_a_protection_refusal_is_a_warning_not_an_error(self):
         """It is the guard working as configured. Counting it as an error would paint develop
         red at the bottom of every run forever, which trains you to ignore the bottom."""
         row = self._row(Action.PUSH, ['develop'])
         row.outcome = Outcome(branch='develop', action=Action.PUSH, status='refused', message=row.blocked_message)
-        assert _row_severity(row) == Severity.WARNING
+        assert row_severity(row) == Severity.WARNING
 
     def test_other_refusals_are_still_errors(self):
         row = self._row(Action.PUSH, [])
         row.outcome = Outcome(branch='develop', action=Action.PUSH, status='refused', message='working tree is dirty')
-        assert _row_severity(row) == Severity.ERROR
+        assert row_severity(row) == Severity.ERROR
 
 
 class TestOriginMismatchReporting:
@@ -567,7 +567,7 @@ class TestOriginMismatchReporting:
         with credentials and fail on one without — the mismatch check compares two strings and
         never needed the network to do it.
         """
-        repo_path = _make_cloned_repo(tmp_path, 'homelab')
+        repo_path = make_cloned_repo(tmp_path, 'homelab')
         real_origin = str(tmp_path / 'homelab.git')
         clone_url = real_origin if expects_its_own_origin else 'https://github.com/khuedoan/homelab'
         config = SyncerConfig(
@@ -580,25 +580,25 @@ class TestOriginMismatchReporting:
 
     def test_flagged_when_the_origin_is_someone_elses(self, tmp_path):
         repo_config, config, real_origin = self._clone_with_origin(tmp_path, expects_its_own_origin=False)
-        report = _build(repo_config, config)
+        report = build_report(repo_config, config)
         assert report.origin_mismatch == real_origin
         assert report.expected_url == 'https://github.com/khuedoan/homelab'
 
     def test_silent_when_the_origin_matches(self, tmp_path):
         repo_config, config, _ = self._clone_with_origin(tmp_path, expects_its_own_origin=True)
-        assert _build(repo_config, config).origin_mismatch is None
+        assert build_report(repo_config, config).origin_mismatch is None
 
     def test_the_branch_report_is_annotated_not_replaced(self, tmp_path):
         """A lifecycle status would return instead of classifying — losing every branch row for
         a repo whose only problem is where it points."""
         repo_config, config, _ = self._clone_with_origin(tmp_path, expects_its_own_origin=False)
-        report = _build(repo_config, config, cli_policy='observe')
+        report = build_report(repo_config, config, cli_policy='observe')
         assert report.lifecycle is None
         assert [row.state.branch for row in report.rows] == ['main']
 
     def test_lifts_an_otherwise_clean_repo_to_warning(self, tmp_path):
         repo_config, config, _ = self._clone_with_origin(tmp_path, expects_its_own_origin=False)
-        assert report_severity(_build(repo_config, config)) == Severity.WARNING
+        assert report_severity(build_report(repo_config, config)) == Severity.WARNING
 
     def test_it_survives_a_failed_fetch(self, tmp_path):
         """The check needs no network, and a repo pointing at a host you have no credential for
@@ -606,7 +606,7 @@ class TestOriginMismatchReporting:
         dropping it on the failure path would lose the diagnosis when it matters most."""
         repo_config, config, real_origin = self._clone_with_origin(tmp_path, expects_its_own_origin=False)
         shutil.rmtree(tmp_path / 'homelab.git')
-        report = _build(repo_config, config)
+        report = build_report(repo_config, config)
         assert report.error is not None
         assert report.origin_mismatch == real_origin
 
@@ -640,7 +640,7 @@ class TestWatchedRemoteBranches:
     def _watched(self, tmp_path, patterns, *branches):
         repo_config, config = self._repo_with_remote_branches(tmp_path, *branches)
         tool_config = ToolConfig(policies={'w': Policy(name='w', scope='all', watch_remote=patterns)})
-        report = _build_repo_report(
+        report = build_repo_report(
             repo_config,
             config=config,
             tool_config=tool_config,
@@ -701,7 +701,7 @@ class TestTagFetchFindings:
         assert 'cannot lock ref' in capsys.readouterr().out
 
 
-def _config_matching_origin(paths: list[Path]) -> SyncerConfig:
+def config_matching_origin(paths: list[Path]) -> SyncerConfig:
     """A registry whose clone URL is the bare repo each clone really came from.
 
     Without it every fixture repo carries an origin mismatch — the registry resolves a github.com
@@ -716,12 +716,12 @@ def _config_matching_origin(paths: list[Path]) -> SyncerConfig:
     )
 
 
-def _skipped_report(name: str) -> RepoBranchReport:
+def skipped_report(name: str) -> RepoBranchReport:
     trip = Trip(host='git.example.com', cause=Cause.AUTH)
     return RepoBranchReport(label=name, path=f'~/code/{name}', name=name, error='not checked', skipped=trip)
 
 
-def _synced_report(name: str = 'alpha') -> RepoBranchReport:
+def synced_report(name: str = 'alpha') -> RepoBranchReport:
     state = BranchState(branch='main', primary=PrimaryState.SYNCED, is_default=True, is_current=True)
     return RepoBranchReport(label=name, path=f'~/code/{name}', name=name, rows=[BranchRow(state=state, action=Action.SKIP)])
 
@@ -731,10 +731,10 @@ class TestOnlyRepoWithSomethingToSayAreShown:
     where the four rows that mattered were indistinguishable from the seventy that did not."""
 
     def test_a_synced_repo_is_hidden_by_default(self):
-        assert visible_reports([_synced_report()], verbose=False) == []
+        assert visible_reports([synced_report()], verbose=False) == []
 
     def test_verbose_shows_it(self):
-        reports = [_synced_report()]
+        reports = [synced_report()]
         assert visible_reports(reports, verbose=True) == reports
 
     def test_a_repo_syncer_will_act_on_is_shown(self):
@@ -753,12 +753,12 @@ class TestOnlyRepoWithSomethingToSayAreShown:
     def test_a_watched_remote_branch_keeps_a_synced_repo_visible(self):
         """watch_remote is opt-in and deliberately never affects severity. A branch someone asked
         to be told about should not then need a flag to appear."""
-        report = _synced_report()
+        report = synced_report()
         report.remote_only = [('develop', '3 days ago')]
         assert visible_reports([report], verbose=False) == [report]
 
     def test_the_hidden_count_is_a_value_not_a_sentence(self):
-        reports = [_synced_report(name) for name in ('alpha', 'bravo', 'charlie')]
+        reports = [synced_report(name) for name in ('alpha', 'bravo', 'charlie')]
         visible = visible_reports(reports, verbose=False)
         assert hidden_count(reports, visible) == 3
 
@@ -766,7 +766,7 @@ class TestOnlyRepoWithSomethingToSayAreShown:
         """The failure summary already accounts for them. Counting them here stated the same
         repos twice under two framings, and offered a flag that would reveal repos syncer never
         measured."""
-        reports = [_synced_report('alpha'), _skipped_report('bravo')]
+        reports = [synced_report('alpha'), skipped_report('bravo')]
         visible = visible_reports(reports, verbose=False)
         assert hidden_count(reports, visible) == 1
 
@@ -779,16 +779,16 @@ class TestOnlyRepoWithSomethingToSayAreShown:
         assert capsys.readouterr().out == ''
 
     def test_end_to_end_a_synced_registry_prints_no_repo_rows(self, tmp_path, capsys):
-        paths = [_make_cloned_repo(tmp_path, name) for name in ('alpha', 'bravo')]
-        report_branches(_config_matching_origin(paths), ToolConfig(default_policy='observe'), jitter=0.0)
+        paths = [make_cloned_repo(tmp_path, name) for name in ('alpha', 'bravo')]
+        report_branches(config_matching_origin(paths), ToolConfig(default_policy='observe'), jitter=0.0)
         out = capsys.readouterr().out
         assert 'alpha' not in out
         assert 'bravo' not in out
         assert '2 repos not shown' in out
 
     def test_end_to_end_verbose_prints_them(self, tmp_path, capsys):
-        paths = [_make_cloned_repo(tmp_path, name) for name in ('alpha', 'bravo')]
-        report_branches(_config_matching_origin(paths), ToolConfig(default_policy='observe'), jitter=0.0, verbose=True)
+        paths = [make_cloned_repo(tmp_path, name) for name in ('alpha', 'bravo')]
+        report_branches(config_matching_origin(paths), ToolConfig(default_policy='observe'), jitter=0.0, verbose=True)
         out = capsys.readouterr().out
         assert 'alpha' in out
         assert 'bravo' in out
@@ -801,16 +801,16 @@ class TestAHostThatFailedIsNotAskedAgain:
     AUTH = GitFailure(argv=('fetch',), returncode=128, stderr='fatal: Authentication failed for https://git.example.com/')
 
     def _repo_on_a_named_host(self, tmp_path, name='alpha'):
-        repo_path = _make_cloned_repo(tmp_path, name)
-        _git(repo_path, 'remote', 'set-url', 'origin', f'https://git.example.com/o/{name}.git')
+        repo_path = make_cloned_repo(tmp_path, name)
+        git(repo_path, 'remote', 'set-url', 'origin', f'https://git.example.com/o/{name}.git')
         return repo_path
 
     def test_a_closed_host_skips_the_repo(self, tmp_path):
         repo_path = self._repo_on_a_named_host(tmp_path)
         breaker = HostBreaker()
         breaker.record_failure('https://git.example.com/o/alpha.git', self.AUTH)
-        config = _config_for([repo_path])
-        report = _build(config.repos[0], config, breaker=breaker, tool_config=ToolConfig(git_timeout=5))
+        config = config_for([repo_path])
+        report = build_report(config.repos[0], config, breaker=breaker, tool_config=ToolConfig(git_timeout=5))
         assert report is not None
         assert report.skipped is not None
         assert report.skipped.host == 'git.example.com'
@@ -822,25 +822,25 @@ class TestAHostThatFailedIsNotAskedAgain:
         repo_path = self._repo_on_a_named_host(tmp_path, 'bravo')
         breaker = HostBreaker()
         breaker.record_failure('https://git.example.com/o/bravo.git', self.AUTH)
-        config = _config_for([repo_path])
-        report = _build(config.repos[0], config, breaker=breaker, tool_config=ToolConfig(git_timeout=5))
+        config = config_for([repo_path])
+        report = build_report(config.repos[0], config, breaker=breaker, tool_config=ToolConfig(git_timeout=5))
         assert report is not None
         assert report.rows == []
 
     def test_a_successful_fetch_is_reported_to_the_breaker(self, tmp_path):
         """Which is what stops one odd failure later in the run closing a host that answered."""
-        recorder = _RecordingBreaker()
-        paths = [_make_cloned_repo(tmp_path, 'alpha')]
-        config = _config_matching_origin(paths)
-        _build(config.repos[0], config, breaker=recorder)
+        recorder = RecordingBreaker()
+        paths = [make_cloned_repo(tmp_path, 'alpha')]
+        config = config_matching_origin(paths)
+        build_report(config.repos[0], config, breaker=recorder)
         assert recorder.successes == [str(tmp_path / 'alpha.git')]
 
     def test_a_failed_fetch_is_reported_to_the_breaker(self, tmp_path):
-        paths = [_make_cloned_repo(tmp_path, 'alpha')]
+        paths = [make_cloned_repo(tmp_path, 'alpha')]
         shutil.rmtree(tmp_path / 'alpha.git')  # the remote it was cloned from is gone
-        recorder = _RecordingBreaker()
-        config = _config_matching_origin(paths)
-        _build(config.repos[0], config, breaker=recorder)
+        recorder = RecordingBreaker()
+        config = config_matching_origin(paths)
+        build_report(config.repos[0], config, breaker=recorder)
         assert [url for url, _ in recorder.failures] == [str(tmp_path / 'alpha.git')]
 
     def test_skipped_repos_are_summarized_under_the_failure_that_closed_the_host(self, capsys):
@@ -872,15 +872,15 @@ class TestOneRepoCannotTakeTheRunDown:
     printed, and not one line about the repos that were fine."""
 
     def test_a_raising_repo_becomes_an_error_report(self, tmp_path):
-        paths = [_make_cloned_repo(tmp_path, 'alpha')]
+        paths = [make_cloned_repo(tmp_path, 'alpha')]
         with patch('syncer.report.build_branch_rows', side_effect=RuntimeError('boom')):
-            reports = gather_reports(_config_for(paths), ToolConfig(default_policy='observe'), jitter=0.0)
+            reports = gather_reports(config_for(paths), ToolConfig(default_policy='observe'), jitter=0.0)
         assert len(reports) == 1
         assert reports[0].error == 'syncer failed on this repo'
         assert 'RuntimeError: boom' in (reports[0].error_detail or '')
 
     def test_the_other_repos_still_report(self, tmp_path):
-        paths = [_make_cloned_repo(tmp_path, name) for name in ('alpha', 'bravo')]
+        paths = [make_cloned_repo(tmp_path, name) for name in ('alpha', 'bravo')]
         real = build_branch_rows
 
         def explode_on_alpha(repo, *args, **kwargs):
@@ -889,7 +889,7 @@ class TestOneRepoCannotTakeTheRunDown:
             return real(repo, *args, **kwargs)
 
         with patch('syncer.report.build_branch_rows', side_effect=explode_on_alpha):
-            reports = gather_reports(_config_for(paths), ToolConfig(default_policy='observe'), jobs=1, jitter=0.0)
+            reports = gather_reports(config_for(paths), ToolConfig(default_policy='observe'), jobs=1, jitter=0.0)
         by_name = {report.name: report for report in reports}
         assert by_name['alpha'].error == 'syncer failed on this repo'
         assert by_name['bravo'].error is None
@@ -902,13 +902,13 @@ class TestAnInterruptEndsTheGitCalls:
     of git_timeout."""
 
     def test_the_abort_reaches_run_command(self, tmp_path):
-        paths = [_make_cloned_repo(tmp_path, 'alpha')]
+        paths = [make_cloned_repo(tmp_path, 'alpha')]
         try:
             with (
                 patch('syncer.report.build_branch_rows', side_effect=KeyboardInterrupt),
                 pytest.raises(KeyboardInterrupt),
             ):
-                gather_reports(_config_for(paths), ToolConfig(default_policy='observe'), jitter=0.0)
+                gather_reports(config_for(paths), ToolConfig(default_policy='observe'), jitter=0.0)
             assert run_command(['echo', 'hi'], timeout=10).returncode == ABORTED_RETURNCODE
         finally:
             reset_abort()
@@ -916,9 +916,9 @@ class TestAnInterruptEndsTheGitCalls:
     def test_the_next_run_is_re_armed(self, tmp_path):
         """The abort flag is module-level, so a run that does not clear it would be the last one
         this process could do — which the test suite proves by running two."""
-        paths = [_make_cloned_repo(tmp_path, 'alpha')]
+        paths = [make_cloned_repo(tmp_path, 'alpha')]
         abort_running_commands()
-        reports = gather_reports(_config_for(paths), ToolConfig(default_policy='observe'), jitter=0.0)
+        reports = gather_reports(config_for(paths), ToolConfig(default_policy='observe'), jitter=0.0)
         assert reports[0].rows
 
 
@@ -928,7 +928,7 @@ class TestSkippedReposAreNeverASilentFact:
     under a change nobody has made yet, and it is exercised here rather than left to a trace."""
 
     def test_an_orphaned_skip_is_still_reported(self, capsys):
-        skipped = [_skipped_report(f'r{index}') for index in range(4)]
+        skipped = [skipped_report(f'r{index}') for index in range(4)]
         render_failure_summary(skipped)  # no failing report accompanies them
         err = capsys.readouterr().err
         assert '4 repos on git.example.com not contacted' in err
@@ -936,7 +936,7 @@ class TestSkippedReposAreNeverASilentFact:
 
     def test_it_carries_the_same_next_command_a_group_would(self, capsys):
         """A cause with no next command is the half of a diagnosis you cannot act on."""
-        render_failure_summary([_skipped_report('r1')])
+        render_failure_summary([skipped_report('r1')])
         err = capsys.readouterr().err
         assert '→' in err
         assert 'non-interactively' in err

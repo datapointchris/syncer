@@ -65,8 +65,8 @@ MAX_HOSTS_PROBED = 3
 
 # Placeholder identities shipped in TEMPLATE_REGISTRY. Matched by value rather than by comparing
 # the whole file, so a registry half-edited from the template is still caught.
-_PLACEHOLDER_OWNER = 'your-github-username'
-_PLACEHOLDER_REPOS = {'example-repo', 'example-clone', 'example-work-repo'}
+PLACEHOLDER_OWNER = 'your-github-username'
+PLACEHOLDER_REPOS = {'example-repo', 'example-clone', 'example-work-repo'}
 
 
 class Status(StrEnum):
@@ -87,7 +87,7 @@ class Check:
     hints: list[str] = field(default_factory=list)
 
 
-def _git_present() -> Check:
+def git_present() -> Check:
     binary = shutil.which('git')
     if binary is None:
         return Check(
@@ -100,7 +100,7 @@ def _git_present() -> Check:
     return Check('git', Status.OK, version.stdout.strip() or 'git found', detail=[binary])
 
 
-def _paths(tool_config: ToolConfig, override: Path | None) -> Check:
+def paths_in_use(tool_config: ToolConfig, override: Path | None) -> Check:
     """Always OK — this is context, not a verdict.
 
     It is also the single most valuable line on a broken machine: a `repos_registry` inherited from
@@ -123,7 +123,7 @@ def _paths(tool_config: ToolConfig, override: Path | None) -> Check:
     )
 
 
-def _tool_config_parses() -> tuple[Check, ToolConfig]:
+def tool_config_parses() -> tuple[Check, ToolConfig]:
     """Parse config.toml the way a real run does, and hand back what it produced.
 
     Full parse, not just the TOML syntax: a file that is syntactically fine but names a bad
@@ -139,7 +139,7 @@ def _tool_config_parses() -> tuple[Check, ToolConfig]:
     return Check('config', Status.OK, f'{TOOL_CONFIG_PATH} parses'), tool_config
 
 
-def _registry_loads(path: Path, source: str | None) -> tuple[Check, SyncerConfig | None]:
+def registry_loads(path: Path, source: str | None) -> tuple[Check, SyncerConfig | None]:
     if not path.exists():
         return (
             Check(
@@ -163,12 +163,12 @@ def _registry_loads(path: Path, source: str | None) -> tuple[Check, SyncerConfig
     return Check('registry', Status.OK, f'{len(active)} active repos in {path}'), config
 
 
-def _not_the_shipped_template(config: SyncerConfig) -> Check:
+def not_the_shipped_template(config: SyncerConfig) -> Check:
     """A registry of placeholders validates clean and then reports three bogus `would clone`
     lines on the very first run, which teaches a new user that this tool's output is noise."""
-    found = [repo.name for repo in config.repos if repo.name in _PLACEHOLDER_REPOS]
-    if config.owner == _PLACEHOLDER_OWNER:
-        found.append(f'owner={_PLACEHOLDER_OWNER}')
+    found = [repo.name for repo in config.repos if repo.name in PLACEHOLDER_REPOS]
+    if config.owner == PLACEHOLDER_OWNER:
+        found.append(f'owner={PLACEHOLDER_OWNER}')
     if not found:
         # Worded for what was actually established. "Edited from the template" would be a claim
         # about history, and it is false of a registry nobody has touched yet.
@@ -184,7 +184,7 @@ def _not_the_shipped_template(config: SyncerConfig) -> Check:
     )
 
 
-def _identity_is_usable(config: SyncerConfig) -> Check:
+def identity_is_usable(config: SyncerConfig) -> Check:
     """An empty `owner` is only a problem for repos that would actually resolve through it.
 
     An all-third-party registry (every entry naming its own owner) and a freshly scaffolded
@@ -208,7 +208,7 @@ def _identity_is_usable(config: SyncerConfig) -> Check:
     )
 
 
-def _hosts_to_probe(config: SyncerConfig) -> list[tuple[str, str]]:
+def hosts_to_probe(config: SyncerConfig) -> list[tuple[str, str]]:
     """One (host, url) per distinct host, in registry order, capped."""
     seen: dict[str, str] = {}
     for repo in config.repos:
@@ -219,14 +219,14 @@ def _hosts_to_probe(config: SyncerConfig) -> list[tuple[str, str]]:
     return list(seen.items())[:MAX_HOSTS_PROBED]
 
 
-def _reachable(config: SyncerConfig) -> list[Check]:
+def reachability_checks(config: SyncerConfig) -> list[Check]:
     """Prove reachability the same way a clone would, against the URL the registry resolves to.
 
     `git ls-remote` rather than `gh auth status` or an https HEAD: it exercises the real
     transport, the real credential and the real host key, and it works identically for GitHub,
     Bitbucket Data Center, an internal GitLab and a bare SSH host.
     """
-    hosts = _hosts_to_probe(config)
+    hosts = hosts_to_probe(config)
     if not hosts:
         return [Check('reach', Status.OK, 'no repos to reach')]
 
@@ -252,7 +252,7 @@ def _reachable(config: SyncerConfig) -> list[Check]:
     return checks
 
 
-def _repos_on_disk(config: SyncerConfig, reachable: bool) -> Check:
+def repos_on_disk(config: SyncerConfig, reachable: bool) -> Check:
     """Pure stat, no git. Reports the fresh-machine case as one fact rather than N warnings."""
     active = [repo for repo in config.repos if repo.status != 'retired']
     if not active:
@@ -273,7 +273,7 @@ def _repos_on_disk(config: SyncerConfig, reachable: bool) -> Check:
     return Check('clones', Status.WARN, summary, detail=[repo.name for repo in missing[:6]], hints=hints)
 
 
-def _policies_resolve(config: SyncerConfig, tool_config: ToolConfig) -> Check:
+def policies_resolve(config: SyncerConfig, tool_config: ToolConfig) -> Check:
     policies = resolve_policies(tool_config)
     default = tool_config.default_policy or 'standard'
     if default not in policies:
@@ -298,26 +298,26 @@ def _policies_resolve(config: SyncerConfig, tool_config: ToolConfig) -> Check:
 
 def run_doctor(override: Path | None = None) -> list[Check]:
     """Every check, in prerequisite order, stopping where continuing would be meaningless."""
-    checks = [_git_present()]
+    checks = [git_present()]
     if checks[-1].status is Status.FAIL:
         return checks
 
-    tool_config_check, tool_config = _tool_config_parses()
+    tool_config_check, tool_config = tool_config_parses()
     # Paths are printed before the config verdict even though the config had to parse to resolve
     # them: on a broken machine "which files am I even reading" sits under every other question.
     location = registry_location(tool_config, override)
-    checks.append(_paths(tool_config, override))
+    checks.append(paths_in_use(tool_config, override))
     checks.append(tool_config_check)
     if tool_config_check.status is Status.FAIL:
         return checks
 
-    registry_check, config = _registry_loads(location.path, location.source)
+    registry_check, config = registry_loads(location.path, location.source)
     checks.append(registry_check)
     if config is None:
         return checks
 
-    template_check = _not_the_shipped_template(config)
-    identity_check = _identity_is_usable(config)
+    template_check = not_the_shipped_template(config)
+    identity_check = identity_is_usable(config)
     checks.extend([template_check, identity_check])
 
     # Probing URLs built from placeholders or an empty owner reports a network problem for what
@@ -328,24 +328,24 @@ def run_doctor(override: Path | None = None) -> list[Check]:
         # disk is a number about nothing.
         checks.append(Check('reach', Status.WARN, 'skipped — the registry does not name real repos yet'))
         checks.append(Check('clones', Status.WARN, 'skipped — nothing to clone until the registry is real'))
-        checks.append(_policies_resolve(config, tool_config))
+        checks.append(policies_resolve(config, tool_config))
         return checks
 
-    reach_checks = _reachable(config)
+    reach_checks = reachability_checks(config)
     checks.extend(reach_checks)
     reachable = all(check.status is Status.OK for check in reach_checks)
-    checks.append(_repos_on_disk(config, reachable))
-    checks.append(_policies_resolve(config, tool_config))
+    checks.append(repos_on_disk(config, reachable))
+    checks.append(policies_resolve(config, tool_config))
     return checks
 
 
-_MARK = {Status.OK: (ICON_OK, 'green'), Status.WARN: (ICON_WARN, 'yellow'), Status.FAIL: (ICON_ERR, 'red')}
+MARK = {Status.OK: (ICON_OK, 'green'), Status.WARN: (ICON_WARN, 'yellow'), Status.FAIL: (ICON_ERR, 'red')}
 
 
 def render_doctor(checks: list[Check]) -> None:
     """Print the report. Goes to stderr — a diagnostic is not data anyone pipes into jq."""
     for check in checks:
-        icon, color = _MARK[check.status]
+        icon, color = MARK[check.status]
         err_console.print(f'[{color}]{icon}  {check.name:9}[/{color}] {escape(check.summary)}', soft_wrap=True)
         for line in check.detail:
             hint(f'              {escape(line)}')

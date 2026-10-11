@@ -15,17 +15,17 @@ from syncer.tracking import migrate_legacy_events
 from syncer.tracking import read_events
 
 
-def _make_snapshot(name: str = 'repo1', status: RepoStatus = 'synced', uncommitted: int = 0, **kwargs) -> RepoSnapshot:
+def make_snapshot(name: str = 'repo1', status: RepoStatus = 'synced', uncommitted: int = 0, **kwargs) -> RepoSnapshot:
     return RepoSnapshot(name=name, path=f'~/code/{name}', status=status, uncommitted=uncommitted, **kwargs)
 
 
-def _make_event(
+def make_event(
     repos: list[RepoSnapshot] | None = None,
     timestamp: dt.datetime | None = None,
     config_name: str = 'default',
     **summary_overrides,
 ) -> SyncRunEvent:
-    repos = repos or [_make_snapshot()]
+    repos = repos or [make_snapshot()]
     ts = timestamp or dt.datetime.now(dt.UTC)
     defaults = {'total': len(repos), 'synced': len(repos), 'pulled': 0, 'pushed': 0, 'issues': 0, 'duration_ms': 100}
     defaults.update(summary_overrides)
@@ -87,10 +87,10 @@ class TestRepoSnapshot:
         """History is a side channel; the sync report is what the user asked for. A truncated
         write or a line from a version this one predates must not abort the whole run."""
         events_file = tmp_path / 'events.jsonl'
-        emit_event(_make_event(), events_file)
+        emit_event(make_event(), events_file)
         with events_file.open('a') as handle:
             handle.write('{"not": "an event"}\n')
-        emit_event(_make_event(config_name='after'), events_file)
+        emit_event(make_event(config_name='after'), events_file)
 
         events = read_events(events_file)
         assert len(events) == 2
@@ -103,7 +103,7 @@ class TestRepoSnapshot:
         the read side means every older syncer chokes on a stream a newer one wrote: adding one
         status member was enough to make the previous release refuse to read its own history
         file with a pydantic traceback. The write-side vocabulary is still constrained, by
-        typing _repo_status as RepoStatus so mypy checks every literal at the point it is built.
+        typing repo_status as RepoStatus so mypy checks every literal at the point it is built.
         """
         snap = RepoSnapshot(name='r', path='/r', status='a-status-from-a-future-version')
         assert snap.status == 'a-status-from-a-future-version'
@@ -118,7 +118,7 @@ class TestRunSummary:
 
 class TestSyncRunEvent:
     def test_round_trip_json(self):
-        event = _make_event()
+        event = make_event()
         json_str = event.model_dump_json()
         restored = SyncRunEvent.model_validate_json(json_str)
         assert restored.config_name == event.config_name
@@ -126,20 +126,20 @@ class TestSyncRunEvent:
         assert len(restored.repos) == len(event.repos)
 
     def test_dry_run_default_false(self):
-        event = _make_event()
+        event = make_event()
         assert event.dry_run is False
 
 
 class TestEmitAndRead:
     def test_emit_creates_file(self, tmp_path):
         events_file = tmp_path / 'events.jsonl'
-        event = _make_event()
+        event = make_event()
         emit_event(event, events_file=events_file)
         assert events_file.exists()
 
     def test_round_trip(self, tmp_path):
         events_file = tmp_path / 'events.jsonl'
-        event = _make_event(config_name='test')
+        event = make_event(config_name='test')
         emit_event(event, events_file=events_file)
         events = read_events(events_file=events_file)
         assert len(events) == 1
@@ -148,7 +148,7 @@ class TestEmitAndRead:
     def test_multiple_events_append(self, tmp_path):
         events_file = tmp_path / 'events.jsonl'
         for i in range(3):
-            emit_event(_make_event(config_name=f'run{i}'), events_file=events_file)
+            emit_event(make_event(config_name=f'run{i}'), events_file=events_file)
         events = read_events(events_file=events_file)
         assert len(events) == 3
         assert events[2].config_name == 'run2'
@@ -159,13 +159,13 @@ class TestEmitAndRead:
 
     def test_emit_creates_parent_dirs(self, tmp_path):
         events_file = tmp_path / 'deep' / 'nested' / 'events.jsonl'
-        emit_event(_make_event(), events_file=events_file)
+        emit_event(make_event(), events_file=events_file)
         assert events_file.exists()
 
     def test_preserves_repo_data(self, tmp_path):
         events_file = tmp_path / 'events.jsonl'
-        snap = _make_snapshot(name='myrepo', status='issues', uncommitted=5, branch='main', stashes=2)
-        emit_event(_make_event(repos=[snap], issues=1, synced=0), events_file=events_file)
+        snap = make_snapshot(name='myrepo', status='issues', uncommitted=5, branch='main', stashes=2)
+        emit_event(make_event(repos=[snap], issues=1, synced=0), events_file=events_file)
         events = read_events(events_file=events_file)
         restored_snap = events[0].repos[0]
         assert restored_snap.name == 'myrepo'
@@ -190,8 +190,8 @@ class TestPerRegistryEventStreams:
     def test_separate_registries_do_not_share_history(self, tmp_path):
         personal = tmp_path / 'repos-events.jsonl'
         work = tmp_path / 'work-repos-events.jsonl'
-        emit_event(_make_event(config_name='personal'), personal)
-        emit_event(_make_event(config_name='work'), work)
+        emit_event(make_event(config_name='personal'), personal)
+        emit_event(make_event(config_name='work'), work)
         assert [event.config_name for event in read_events(personal)] == ['personal']
         assert [event.config_name for event in read_events(work)] == ['work']
 
@@ -212,7 +212,7 @@ class TestLegacyStateMigration:
 
     def test_global_stream_is_adopted_by_the_default_registry(self, dirs):
         data_dir, state_dir = dirs
-        emit_event(_make_event(config_name='history'), data_dir / 'events.jsonl')
+        emit_event(make_event(config_name='history'), data_dir / 'events.jsonl')
 
         migrate_legacy_events(state_dir / 'repos-events.jsonl', adopt_global=True)
         assert not (data_dir / 'events.jsonl').exists()  # renamed, so no second registry claims it
@@ -220,7 +220,7 @@ class TestLegacyStateMigration:
 
     def test_global_stream_is_not_adopted_by_a_named_registry(self, dirs):
         data_dir, state_dir = dirs
-        emit_event(_make_event(config_name='history'), data_dir / 'events.jsonl')
+        emit_event(make_event(config_name='history'), data_dir / 'events.jsonl')
 
         migrate_legacy_events(state_dir / 'work-repos-events.jsonl', adopt_global=False)
         assert read_events(state_dir / 'work-repos-events.jsonl') == []
@@ -228,8 +228,8 @@ class TestLegacyStateMigration:
 
     def test_split_streams_move_under_their_own_names(self, dirs):
         data_dir, state_dir = dirs
-        emit_event(_make_event(config_name='personal'), data_dir / 'repos-events.jsonl')
-        emit_event(_make_event(config_name='work'), data_dir / 'work-repos-events.jsonl')
+        emit_event(make_event(config_name='personal'), data_dir / 'repos-events.jsonl')
+        emit_event(make_event(config_name='work'), data_dir / 'work-repos-events.jsonl')
 
         migrate_legacy_events(state_dir / 'repos-events.jsonl', adopt_global=True)
         assert [event.config_name for event in read_events(state_dir / 'repos-events.jsonl')] == ['personal']
@@ -237,9 +237,9 @@ class TestLegacyStateMigration:
 
     def test_never_overwrites_an_existing_stream(self, dirs):
         data_dir, state_dir = dirs
-        emit_event(_make_event(config_name='legacy'), data_dir / 'repos-events.jsonl')
-        emit_event(_make_event(config_name='legacy-global'), data_dir / 'events.jsonl')
-        emit_event(_make_event(config_name='current'), state_dir / 'repos-events.jsonl')
+        emit_event(make_event(config_name='legacy'), data_dir / 'repos-events.jsonl')
+        emit_event(make_event(config_name='legacy-global'), data_dir / 'events.jsonl')
+        emit_event(make_event(config_name='current'), state_dir / 'repos-events.jsonl')
 
         migrate_legacy_events(state_dir / 'repos-events.jsonl', adopt_global=True)
         assert [event.config_name for event in read_events(state_dir / 'repos-events.jsonl')] == ['current']
@@ -248,18 +248,18 @@ class TestLegacyStateMigration:
 
     def test_runs_exactly_once(self, dirs):
         data_dir, state_dir = dirs
-        emit_event(_make_event(config_name='history'), data_dir / 'events.jsonl')
+        emit_event(make_event(config_name='history'), data_dir / 'events.jsonl')
         target = state_dir / 'repos-events.jsonl'
 
         migrate_legacy_events(target, adopt_global=True)
-        emit_event(_make_event(config_name='after-migration'), target)
+        emit_event(make_event(config_name='after-migration'), target)
         migrate_legacy_events(target, adopt_global=True)
 
         assert [event.config_name for event in read_events(target)] == ['history', 'after-migration']
 
     def test_empty_data_dir_is_removed_so_the_migration_is_observably_done(self, dirs):
         data_dir, state_dir = dirs
-        emit_event(_make_event(), data_dir / 'events.jsonl')
+        emit_event(make_event(), data_dir / 'events.jsonl')
         migrate_legacy_events(state_dir / 'repos-events.jsonl', adopt_global=True)
         assert not data_dir.exists()
 
@@ -274,13 +274,13 @@ class TestFindStaleRepos:
         assert find_stale_repos([]) == []
 
     def test_no_stale_when_clean(self):
-        events = [_make_event(repos=[_make_snapshot()])]
+        events = [make_event(repos=[make_snapshot()])]
         assert find_stale_repos(events) == []
 
     def test_dirty_but_not_stale(self):
         """Dirty for less than threshold days is not stale."""
-        event = _make_event(
-            repos=[_make_snapshot(uncommitted=3, status='issues')],
+        event = make_event(
+            repos=[make_snapshot(uncommitted=3, status='issues')],
             timestamp=dt.datetime.now(dt.UTC) - dt.timedelta(days=1),
         )
         assert find_stale_repos([event], threshold_days=3) == []
@@ -289,10 +289,10 @@ class TestFindStaleRepos:
         """Dirty across runs for > threshold days is stale."""
         old = dt.datetime.now(dt.UTC) - dt.timedelta(days=5)
         recent = dt.datetime.now(dt.UTC) - dt.timedelta(hours=1)
-        snap = _make_snapshot(name='dirty', uncommitted=3, status='issues')
+        snap = make_snapshot(name='dirty', uncommitted=3, status='issues')
         events = [
-            _make_event(repos=[snap], timestamp=old),
-            _make_event(repos=[snap], timestamp=recent),
+            make_event(repos=[snap], timestamp=old),
+            make_event(repos=[snap], timestamp=recent),
         ]
         stale = find_stale_repos(events, threshold_days=3)
         assert len(stale) == 1
@@ -304,12 +304,12 @@ class TestFindStaleRepos:
         day1 = dt.datetime.now(dt.UTC) - dt.timedelta(days=10)
         day5 = dt.datetime.now(dt.UTC) - dt.timedelta(days=5)
         day6 = dt.datetime.now(dt.UTC) - dt.timedelta(days=4)
-        dirty = _make_snapshot(name='repo', uncommitted=2, status='issues')
-        clean = _make_snapshot(name='repo')
+        dirty = make_snapshot(name='repo', uncommitted=2, status='issues')
+        clean = make_snapshot(name='repo')
         events = [
-            _make_event(repos=[dirty], timestamp=day1),
-            _make_event(repos=[clean], timestamp=day5),
-            _make_event(repos=[dirty], timestamp=day6),
+            make_event(repos=[dirty], timestamp=day1),
+            make_event(repos=[clean], timestamp=day5),
+            make_event(repos=[dirty], timestamp=day6),
         ]
         # Dirty since day6 (4 days ago), threshold is 5
         stale = find_stale_repos(events, threshold_days=5)
@@ -318,11 +318,11 @@ class TestFindStaleRepos:
     def test_multiple_stale_sorted_by_days(self):
         old = dt.datetime.now(dt.UTC) - dt.timedelta(days=10)
         newer = dt.datetime.now(dt.UTC) - dt.timedelta(days=4)
-        snap1 = _make_snapshot(name='older', uncommitted=1, status='issues')
-        snap2 = _make_snapshot(name='newer', uncommitted=2, status='issues')
+        snap1 = make_snapshot(name='older', uncommitted=1, status='issues')
+        snap2 = make_snapshot(name='newer', uncommitted=2, status='issues')
         events = [
-            _make_event(repos=[snap1], timestamp=old),
-            _make_event(repos=[snap1, snap2], timestamp=newer),
+            make_event(repos=[snap1], timestamp=old),
+            make_event(repos=[snap1, snap2], timestamp=newer),
         ]
         stale = find_stale_repos(events, threshold_days=3)
         assert len(stale) == 2
@@ -337,8 +337,8 @@ class TestFindStaleRepos:
         old_snap = RepoSnapshot(name='myrepo', path='~/code/old-dir/myrepo', status='issues', uncommitted=1)
         new_snap = RepoSnapshot(name='myrepo', path='~/code/new-dir/myrepo', status='synced', uncommitted=0)
         events = [
-            _make_event(repos=[old_snap], timestamp=old),
-            _make_event(repos=[new_snap], timestamp=recent),
+            make_event(repos=[old_snap], timestamp=old),
+            make_event(repos=[new_snap], timestamp=recent),
         ]
         stale = find_stale_repos(events, threshold_days=3)
         assert stale == []

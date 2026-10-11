@@ -38,7 +38,7 @@ class Cause(StrEnum):
 # 'Host key verification failed' and a permission-denied line, so matching AUTH first would send
 # you to re-check a credential that was never the problem. Nothing here matches the generic
 # 'Could not read from remote repository', which accompanies every one of these.
-_PATTERNS: tuple[tuple[Cause, tuple[str, ...]], ...] = (
+PATTERNS: tuple[tuple[Cause, tuple[str, ...]], ...] = (
     (
         Cause.HOST_KEY,
         (
@@ -102,7 +102,7 @@ _PATTERNS: tuple[tuple[Cause, tuple[str, ...]], ...] = (
 )
 
 # Why a credential that works by hand can fail here, which nothing in git's own output hints at.
-_BATCH_MODE_NOTE = 'syncer runs git non-interactively, so anything that would have prompted fails instead of asking'
+BATCH_MODE_NOTE = 'syncer runs git non-interactively, so anything that would have prompted fails instead of asking'
 
 
 def remote_host(url: str) -> str:
@@ -125,7 +125,7 @@ def classify_failure(failure: GitFailure) -> Cause | None:
     if failure.timed_out:
         return Cause.TIMEOUT
     text = failure.stderr.lower()
-    for cause, fragments in _PATTERNS:
+    for cause, fragments in PATTERNS:
         if any(fragment in text for fragment in fragments):
             return cause
     return None
@@ -139,11 +139,11 @@ def hint_lines(cause: Cause | None, url: str) -> list[str]:
 
     if cause is Cause.HOST_KEY:
         return [
-            f'{_BATCH_MODE_NOTE} — an unknown host key fails rather than prompting.',
+            f'{BATCH_MODE_NOTE} — an unknown host key fails rather than prompting.',
             f'trust it once, after checking the fingerprint: ssh-keyscan {named_host} >> ~/.ssh/known_hosts',
         ]
     if cause is Cause.AUTH:
-        lines = [f'{_BATCH_MODE_NOTE}, so run the same command by hand to see what it asks for.']
+        lines = [f'{BATCH_MODE_NOTE}, so run the same command by hand to see what it asks for.']
         if is_ssh:
             lines.append(f'check a key is loaded and accepted: ssh-add -l, then ssh -T git@{named_host}')
         else:

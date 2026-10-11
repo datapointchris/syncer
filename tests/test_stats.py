@@ -6,22 +6,22 @@ from rich.console import Console
 
 from syncer.config import RepoConfig
 from syncer.config import SyncerConfig
-from syncer.stats import _format_duration
-from syncer.stats import _show_commits_graph
-from syncer.stats import _show_repo_age
-from syncer.stats import _time_ago
+from syncer.stats import format_duration
+from syncer.stats import show_commits_graph
+from syncer.stats import show_repo_age
 from syncer.stats import show_stats
+from syncer.stats import time_ago
 from syncer.tracking import RepoSnapshot
 from syncer.tracking import RunSummary
 from syncer.tracking import SyncRunEvent
 
 
-def _make_snapshot(name='repo1', status='synced', uncommitted=0, **kwargs):
+def make_snapshot(name='repo1', status='synced', uncommitted=0, **kwargs):
     return RepoSnapshot(name=name, path=f'~/code/{name}', status=status, uncommitted=uncommitted, **kwargs)
 
 
-def _make_event(repos=None, timestamp=None, config_name='default', **summary_overrides):
-    repos = repos or [_make_snapshot()]
+def make_event(repos=None, timestamp=None, config_name='default', **summary_overrides):
+    repos = repos or [make_snapshot()]
     ts = timestamp or dt.datetime.now(dt.UTC)
     defaults = {'total': len(repos), 'synced': len(repos), 'pulled': 0, 'pushed': 0, 'issues': 0, 'duration_ms': 100}
     defaults.update(summary_overrides)
@@ -30,22 +30,22 @@ def _make_event(repos=None, timestamp=None, config_name='default', **summary_ove
 
 class TestTimeAgo:
     def test_just_now(self):
-        assert _time_ago(dt.datetime.now(dt.UTC)) == 'just now'
+        assert time_ago(dt.datetime.now(dt.UTC)) == 'just now'
 
     def test_minutes(self):
-        assert _time_ago(dt.datetime.now(dt.UTC) - dt.timedelta(minutes=30)) == '30m ago'
+        assert time_ago(dt.datetime.now(dt.UTC) - dt.timedelta(minutes=30)) == '30m ago'
 
     def test_hours(self):
-        assert _time_ago(dt.datetime.now(dt.UTC) - dt.timedelta(hours=3)) == '3h ago'
+        assert time_ago(dt.datetime.now(dt.UTC) - dt.timedelta(hours=3)) == '3h ago'
 
     def test_days(self):
-        assert _time_ago(dt.datetime.now(dt.UTC) - dt.timedelta(days=5)) == '5d ago'
+        assert time_ago(dt.datetime.now(dt.UTC) - dt.timedelta(days=5)) == '5d ago'
 
     def test_months(self):
-        assert _time_ago(dt.datetime.now(dt.UTC) - dt.timedelta(days=60)) == '2mo ago'
+        assert time_ago(dt.datetime.now(dt.UTC) - dt.timedelta(days=60)) == '2mo ago'
 
     def test_years(self):
-        assert _time_ago(dt.datetime.now(dt.UTC) - dt.timedelta(days=400)) == '1y ago'
+        assert time_ago(dt.datetime.now(dt.UTC) - dt.timedelta(days=400)) == '1y ago'
 
 
 class TestShowStats:
@@ -62,18 +62,18 @@ class TestShowStats:
     def test_with_events(self, tmp_path):
         """Stats with events should render all sections."""
         events = [
-            _make_event(
+            make_event(
                 repos=[
-                    _make_snapshot(),
-                    _make_snapshot(name='dirty', status='issues', uncommitted=3),
+                    make_snapshot(),
+                    make_snapshot(name='dirty', status='issues', uncommitted=3),
                 ],
                 timestamp=dt.datetime.now(dt.UTC) - dt.timedelta(days=2),
                 issues=1,
             ),
-            _make_event(
+            make_event(
                 repos=[
-                    _make_snapshot(),
-                    _make_snapshot(name='dirty', status='issues', uncommitted=2),
+                    make_snapshot(),
+                    make_snapshot(name='dirty', status='issues', uncommitted=2),
                 ],
                 timestamp=dt.datetime.now(dt.UTC) - dt.timedelta(hours=1),
                 issues=1,
@@ -94,7 +94,7 @@ class TestShowStats:
 
     def test_summary_shows_correct_counts(self, tmp_path):
         """Verify summary section math."""
-        events = [_make_event(timestamp=dt.datetime.now(dt.UTC) - dt.timedelta(days=i), issues=i % 3) for i in range(5)]
+        events = [make_event(timestamp=dt.datetime.now(dt.UTC) - dt.timedelta(days=i), issues=i % 3) for i in range(5)]
         config = SyncerConfig(owner='test', host='https://github.com', repos=[])
         output_file = tmp_path / 'output.txt'
         console = Console(file=open(output_file, 'w'), width=120)  # noqa: SIM115
@@ -109,8 +109,8 @@ class TestShowStats:
     def test_recent_runs_shows_latest_first(self, tmp_path):
         """Recent runs should be reverse chronological."""
         events = [
-            _make_event(timestamp=dt.datetime(2025, 1, 10, tzinfo=dt.UTC), issues=2),
-            _make_event(timestamp=dt.datetime(2025, 1, 12, tzinfo=dt.UTC)),
+            make_event(timestamp=dt.datetime(2025, 1, 10, tzinfo=dt.UTC), issues=2),
+            make_event(timestamp=dt.datetime(2025, 1, 12, tzinfo=dt.UTC)),
         ]
         config = SyncerConfig(owner='test', host='https://github.com', repos=[])
         output_file = tmp_path / 'output.txt'
@@ -172,25 +172,25 @@ class TestShowStats:
 
 class TestFormatDuration:
     def test_days(self):
-        assert _format_duration(15) == '15d'
+        assert format_duration(15) == '15d'
 
     def test_zero_days(self):
-        assert _format_duration(0) == '0d'
+        assert format_duration(0) == '0d'
 
     def test_months(self):
-        assert _format_duration(60) == '2mo'
+        assert format_duration(60) == '2mo'
 
     def test_exactly_30_days(self):
-        assert _format_duration(30) == '1mo'
+        assert format_duration(30) == '1mo'
 
     def test_years_with_months(self):
-        assert _format_duration(400) == '1y 1mo'
+        assert format_duration(400) == '1y 1mo'
 
     def test_years_without_months(self):
-        assert _format_duration(365) == '1y'
+        assert format_duration(365) == '1y'
 
     def test_multiple_years(self):
-        assert _format_duration(1000) == '2y 9mo'
+        assert format_duration(1000) == '2y 9mo'
 
 
 class TestShowCommitsGraph:
@@ -221,7 +221,7 @@ class TestShowCommitsGraph:
                 return m
 
             MockRepo.side_effect = make_repo
-            _show_commits_graph(config)
+            show_commits_graph(config)
 
         output = output_file.read_text()
         assert 'Commits by Repo' in output
@@ -255,7 +255,7 @@ class TestShowCommitsGraph:
                 return m
 
             MockRepo.side_effect = make_repo
-            _show_commits_graph(config)
+            show_commits_graph(config)
 
         output = output_file.read_text()
         assert 'mine' in output
@@ -293,7 +293,7 @@ class TestShowRepoAge:
                 return m
 
             MockRepo.side_effect = make_repo
-            _show_repo_age(config)
+            show_repo_age(config)
 
         output = output_file.read_text()
         assert 'Repo Age' in output

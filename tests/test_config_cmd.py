@@ -27,12 +27,12 @@ def config_home(tmp_path, monkeypatch):
     return config_dir
 
 
-def _write(path, text):
+def write_file(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
 
 
-def _git_repo(path, origin):
+def git_repo(path, origin):
     path.mkdir(parents=True, exist_ok=True)
     subprocess.run(['git', 'init', '-q', str(path)], capture_output=True)
     subprocess.run(['git', 'remote', 'add', 'origin', origin], cwd=path, capture_output=True)
@@ -49,24 +49,24 @@ class TestTemplateRoundTrip:
     """
 
     def test_tool_config_template_parses_into_its_model(self, config_home):
-        _write(config_home / 'config.toml', TEMPLATE_TOOL_CONFIG)
-        _write(config_home / 'repos.json', TEMPLATE_REGISTRY)
+        write_file(config_home / 'config.toml', TEMPLATE_TOOL_CONFIG)
+        write_file(config_home / 'repos.json', TEMPLATE_REGISTRY)
         result = runner.invoke(app, ['config', 'validate'])
         assert result.exit_code == 0, result.output
 
     def test_registry_template_parses_into_its_model(self, config_home):
-        _write(config_home / 'repos.json', TEMPLATE_REGISTRY)
+        write_file(config_home / 'repos.json', TEMPLATE_REGISTRY)
         result = runner.invoke(app, ['config', 'validate'])
         assert result.exit_code == 0, result.output
 
     def test_starter_config_parses_into_its_model(self, config_home):
-        _write(config_home / 'config.toml', STARTER_TOOL_CONFIG)
-        _write(config_home / 'repos.json', STARTER_REGISTRY)
+        write_file(config_home / 'config.toml', STARTER_TOOL_CONFIG)
+        write_file(config_home / 'repos.json', STARTER_REGISTRY)
         result = runner.invoke(app, ['config', 'validate'])
         assert result.exit_code == 0, result.output
 
     def test_starter_registry_parses_into_its_model(self, config_home):
-        _write(config_home / 'repos.json', STARTER_REGISTRY)
+        write_file(config_home / 'repos.json', STARTER_REGISTRY)
         result = runner.invoke(app, ['config', 'validate'])
         assert result.exit_code == 0, result.output
 
@@ -109,8 +109,8 @@ class TestConfigInit:
     def test_never_overwrites_an_existing_file(self, config_home):
         """Idempotent by design: the registry may be shared with other tools, so syncer creates one
         that is absent and modifies no existing one."""
-        _write(config_home / 'config.toml', 'default_policy = "observe"\n')
-        _write(config_home / 'repos.json', '{"owner": "me", "repos": []}')
+        write_file(config_home / 'config.toml', 'default_policy = "observe"\n')
+        write_file(config_home / 'repos.json', '{"owner": "me", "repos": []}')
         result = runner.invoke(app, ['config', 'init'])
         assert result.exit_code == 0
         assert (config_home / 'config.toml').read_text() == 'default_policy = "observe"\n'
@@ -120,7 +120,7 @@ class TestConfigInit:
         """The scaffold lands at the path syncer will actually read, not at the default — a
         registry created anywhere else is a file nothing loads."""
         elsewhere = tmp_path / 'shared' / 'registry.json'
-        _write(config_home / 'config.toml', f'repos_registry = "{elsewhere}"\n')
+        write_file(config_home / 'config.toml', f'repos_registry = "{elsewhere}"\n')
         result = runner.invoke(app, ['config', 'init', 'registry'])
         assert result.exit_code == 0
         assert elsewhere.read_text() == STARTER_REGISTRY
@@ -161,8 +161,8 @@ class TestConfigScan:
 
     def test_it_finds_repos_and_derives_the_registry_identity(self, config_home, tmp_path):
         code = tmp_path / 'code'
-        _git_repo(code / 'api', 'https://github.com/me/api')
-        _git_repo(code / 'web', 'https://github.com/me/web')
+        git_repo(code / 'api', 'https://github.com/me/api')
+        git_repo(code / 'web', 'https://github.com/me/web')
         result = runner.invoke(app, ['config', 'scan', str(code)])
         registry = json.loads(result.stdout)
         assert registry['owner'] == 'me'
@@ -173,9 +173,9 @@ class TestConfigScan:
         """A directory holding both your repos and third-party clones has to scan correctly —
         that is exactly the shape of the exemplar registry."""
         code = tmp_path / 'code'
-        _git_repo(code / 'mine', 'https://github.com/me/mine')
-        _git_repo(code / 'also-mine', 'https://github.com/me/also-mine')
-        _git_repo(code / 'vuetify', 'https://github.com/vuetifyjs/vuetify')
+        git_repo(code / 'mine', 'https://github.com/me/mine')
+        git_repo(code / 'also-mine', 'https://github.com/me/also-mine')
+        git_repo(code / 'vuetify', 'https://github.com/vuetifyjs/vuetify')
         registry = json.loads(runner.invoke(app, ['config', 'scan', str(code)]).stdout)
         by_name = {repo['name']: repo for repo in registry['repos']}
         assert registry['owner'] == 'me'
@@ -184,22 +184,22 @@ class TestConfigScan:
 
     def test_the_scan_it_prints_is_a_valid_registry(self, config_home, tmp_path):
         code = tmp_path / 'code'
-        _git_repo(code / 'api', 'git@github.com:me/api.git')
-        _write(config_home / 'repos.json', runner.invoke(app, ['config', 'scan', str(code)]).stdout)
+        git_repo(code / 'api', 'git@github.com:me/api.git')
+        write_file(config_home / 'repos.json', runner.invoke(app, ['config', 'scan', str(code)]).stdout)
         assert runner.invoke(app, ['config', 'validate']).exit_code == 0
 
     def test_it_prints_rather_than_writes_by_default(self, config_home, tmp_path):
         """A review step, because the registry may be shared with other tools."""
         code = tmp_path / 'code'
-        _git_repo(code / 'api', 'https://github.com/me/api')
+        git_repo(code / 'api', 'https://github.com/me/api')
         runner.invoke(app, ['config', 'scan', str(code)])
         assert not (config_home / 'repos.json').exists()
 
     def test_write_refuses_to_clobber_a_registry_with_repos_in_it(self, config_home, tmp_path):
         code = tmp_path / 'code'
-        _git_repo(code / 'api', 'https://github.com/me/api')
+        git_repo(code / 'api', 'https://github.com/me/api')
         existing = '{"owner": "me", "repos": [{"name": "kept", "path": "~/kept"}]}'
-        _write(config_home / 'repos.json', existing)
+        write_file(config_home / 'repos.json', existing)
         result = runner.invoke(app, ['config', 'scan', str(code), '--write'])
         assert result.exit_code == 1
         assert (config_home / 'repos.json').read_text() == existing
@@ -207,13 +207,13 @@ class TestConfigScan:
     def test_a_url_the_default_shape_cannot_express_is_recorded_verbatim(self, config_home, tmp_path):
         """Better an entry carrying its real origin than one whose URL cannot be rebuilt."""
         code = tmp_path / 'code'
-        _git_repo(code / 'odd', 'ssh://git@host:7999/odd.git')
+        git_repo(code / 'odd', 'ssh://git@host:7999/odd.git')
         registry = json.loads(runner.invoke(app, ['config', 'scan', str(code)]).stdout)
         assert registry['repos'][0]['clone_url'] == 'ssh://git@host:7999/odd.git'
 
     def test_write_creates_one_that_is_absent(self, config_home, tmp_path):
         code = tmp_path / 'code'
-        _git_repo(code / 'api', 'https://github.com/me/api')
+        git_repo(code / 'api', 'https://github.com/me/api')
         assert runner.invoke(app, ['config', 'scan', str(code), '--write']).exit_code == 0
         assert json.loads((config_home / 'repos.json').read_text())['repos'][0]['name'] == 'api'
 
@@ -222,7 +222,7 @@ class TestConfigScan:
         those two steps contradict each other — the no-clobber rule guards content, not the
         empty scaffold syncer wrote seconds earlier."""
         code = tmp_path / 'code'
-        _git_repo(code / 'api', 'https://github.com/me/api')
+        git_repo(code / 'api', 'https://github.com/me/api')
         assert runner.invoke(app, ['config', 'init']).exit_code == 0
         assert runner.invoke(app, ['config', 'scan', str(code), '--write']).exit_code == 0
         assert json.loads((config_home / 'repos.json').read_text())['repos'][0]['name'] == 'api'
@@ -230,8 +230,8 @@ class TestConfigScan:
     def test_an_unreadable_registry_is_never_overwritten(self, config_home, tmp_path):
         """A file syncer cannot parse is the last one to clobber silently."""
         code = tmp_path / 'code'
-        _git_repo(code / 'api', 'https://github.com/me/api')
-        _write(config_home / 'repos.json', 'not json at all')
+        git_repo(code / 'api', 'https://github.com/me/api')
+        write_file(config_home / 'repos.json', 'not json at all')
         assert runner.invoke(app, ['config', 'scan', str(code), '--write']).exit_code == 1
         assert (config_home / 'repos.json').read_text() == 'not json at all'
 
@@ -256,12 +256,12 @@ class TestARegistryThatIsASymlink:
 
     def test_scan_writes_through_the_symlink_rather_than_over_it(self, config_home, tmp_path):
         real = tmp_path / 'shared' / 'repos.json'
-        _write(real, STARTER_REGISTRY)
+        write_file(real, STARTER_REGISTRY)
         link = config_home / 'repos.json'
         link.parent.mkdir(parents=True, exist_ok=True)
         link.symlink_to(real)
         code = tmp_path / 'code'
-        _git_repo(code / 'api', 'https://github.com/me/api')
+        git_repo(code / 'api', 'https://github.com/me/api')
 
         assert runner.invoke(app, ['config', 'scan', str(code), '--write']).exit_code == 0
 
@@ -341,7 +341,7 @@ class TestConfigEdit:
         """Resolved through registry_location, not an assumed default — the two differ on every
         machine that sets repos_registry, and editing the wrong file changes nothing."""
         elsewhere = tmp_path / 'shared' / 'registry.json'
-        _write(config_home / 'config.toml', f'repos_registry = "{elsewhere}"\n')
+        write_file(config_home / 'config.toml', f'repos_registry = "{elsewhere}"\n')
         assert runner.invoke(app, ['config', 'edit', 'registry']).exit_code == 0
         assert fake_editor.read_text().strip() == str(elsewhere)
 
@@ -369,11 +369,11 @@ class TestConfigPath:
 
 class TestConfigShow:
     def test_reports_the_resolved_policy_and_its_source_per_repo(self, config_home):
-        _write(
+        write_file(
             config_home / 'config.toml',
             'default_policy = "standard"\n\n[repo_overrides]\n"overridden" = "observe"\n',
         )
-        _write(
+        write_file(
             config_home / 'repos.json',
             json.dumps(
                 {
@@ -394,8 +394,8 @@ class TestConfigShow:
         assert repos['overridden']['source'] == 'repo_overrides'
 
     def test_flags_a_policy_that_does_not_resolve(self, config_home):
-        _write(config_home / 'config.toml', 'default_policy = "standard"\n')
-        _write(
+        write_file(config_home / 'config.toml', 'default_policy = "standard"\n')
+        write_file(
             config_home / 'repos.json',
             json.dumps({'owner': 'me', 'repos': [{'name': 'r', 'path': '~/code/r', 'sync_policy': 'nonexistent'}]}),
         )
@@ -408,8 +408,8 @@ class TestConfigValidate:
     failure class, each asserting the message names the offending key."""
 
     def _run(self, config_home, toml='', registry=None):
-        _write(config_home / 'config.toml', toml)
-        _write(config_home / 'repos.json', registry if registry is not None else json.dumps({'owner': 'me', 'repos': []}))
+        write_file(config_home / 'config.toml', toml)
+        write_file(config_home / 'repos.json', registry if registry is not None else json.dumps({'owner': 'me', 'repos': []}))
         return runner.invoke(app, ['config', 'validate'])
 
     def test_valid_config_exits_zero(self, config_home):
@@ -480,7 +480,7 @@ class TestConfigValidate:
         assert 'not a built-in' in result.output
 
     def test_missing_registry_points_at_the_scaffolding_command(self, config_home):
-        _write(config_home / 'config.toml', '')
+        write_file(config_home / 'config.toml', '')
         result = runner.invoke(app, ['config', 'validate'])
         assert result.exit_code == 1
         assert 'config init registry' in result.output

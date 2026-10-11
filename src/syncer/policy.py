@@ -188,7 +188,7 @@ def matching_protection(branch: str, policy: Policy) -> str | None:
     return next((pattern for pattern in policy.protected if fnmatch.fnmatch(branch, pattern)), None)
 
 
-def _matching_globs(branch: str, policy: Policy) -> list[str]:
+def matching_globs(branch: str, policy: Policy) -> list[str]:
     """Glob selectors in the policy that match `branch`, most-specific first.
 
     Specificity tie-break is (longer pattern, then alphabetical) so precedence is
@@ -204,13 +204,13 @@ def _matching_globs(branch: str, policy: Policy) -> list[str]:
     return sorted(matches, key=lambda selector: (-len(selector), selector))
 
 
-def _selector_precedence(state: BranchState, policy: Policy):
+def selector_precedence(state: BranchState, policy: Policy):
     """Yield the selectors that apply to `state`, highest precedence first:
 
     exact-name  >  glob  >  role(default > current)  >  "*"
     """
     yield state.branch
-    yield from _matching_globs(state.branch, policy)
+    yield from matching_globs(state.branch, policy)
     if state.is_default:
         yield 'default'
     if state.is_current:
@@ -225,7 +225,7 @@ def deciding_selector(state: BranchState, policy: Policy) -> str | None:
     decision came from, and a second copy of the precedence walk is a second thing to keep in step
     with the first.
     """
-    for selector in _selector_precedence(state, policy):
+    for selector in selector_precedence(state, policy):
         if f'{selector}:{state.primary.value}' in policy.rules:
             return selector
     return None

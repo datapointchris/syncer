@@ -16,7 +16,7 @@ from syncer.policy import matching_protection
 ALL_STATES = list(PrimaryState)
 
 
-def _state(primary, *, branch='feature/x', is_default=False, is_current=False, dirty=False, stashed=False):
+def branch_state(primary, *, branch='feature/x', is_default=False, is_current=False, dirty=False, stashed=False):
     return BranchState(
         branch=branch,
         primary=primary,
@@ -29,7 +29,7 @@ def _state(primary, *, branch='feature/x', is_default=False, is_current=False, d
 
 # Expected action for the built-in `standard` policy, indexed by (is_default, primary).
 # This is the reference truth table asserted against decide() below.
-_STANDARD_DEFAULT = {
+STANDARD_DEFAULT = {
     PrimaryState.SYNCED: Action.SKIP,
     PrimaryState.AHEAD: Action.PUSH,
     PrimaryState.BEHIND: Action.FAST_FORWARD,
@@ -38,7 +38,7 @@ _STANDARD_DEFAULT = {
     PrimaryState.GONE: Action.REPORT,
     PrimaryState.DETACHED: Action.REPORT,  # no rule anywhere → fallback
 }
-_STANDARD_FEATURE = {
+STANDARD_FEATURE = {
     PrimaryState.SYNCED: Action.REPORT,  # no *:synced rule → fallback
     PrimaryState.AHEAD: Action.REPORT,
     PrimaryState.BEHIND: Action.FAST_FORWARD,
@@ -47,7 +47,7 @@ _STANDARD_FEATURE = {
     PrimaryState.GONE: Action.REPORT,
     PrimaryState.DETACHED: Action.REPORT,
 }
-_MIRROR_DEFAULT = {
+MIRROR_DEFAULT = {
     PrimaryState.SYNCED: Action.REPORT,  # no default:synced and no *:synced → fallback
     PrimaryState.AHEAD: Action.PUSH,  # falls through to *:ahead
     PrimaryState.BEHIND: Action.FAST_FORWARD,
@@ -56,7 +56,7 @@ _MIRROR_DEFAULT = {
     PrimaryState.GONE: Action.DELETE_LOCAL,
     PrimaryState.DETACHED: Action.REPORT,
 }
-_MIRROR_FEATURE = {
+MIRROR_FEATURE = {
     PrimaryState.SYNCED: Action.REPORT,
     PrimaryState.AHEAD: Action.PUSH,
     PrimaryState.BEHIND: Action.FAST_FORWARD,
@@ -70,32 +70,32 @@ _MIRROR_FEATURE = {
 class TestDecideStandard:
     @pytest.mark.parametrize('primary', ALL_STATES)
     def test_default_branch(self, primary):
-        state = _state(primary, branch='main', is_default=True, is_current=True)
-        assert decide(state, BUILTIN_POLICIES['standard']) == _STANDARD_DEFAULT[primary]
+        state = branch_state(primary, branch='main', is_default=True, is_current=True)
+        assert decide(state, BUILTIN_POLICIES['standard']) == STANDARD_DEFAULT[primary]
 
     @pytest.mark.parametrize('primary', ALL_STATES)
     def test_feature_branch(self, primary):
-        state = _state(primary)
-        assert decide(state, BUILTIN_POLICIES['standard']) == _STANDARD_FEATURE[primary]
+        state = branch_state(primary)
+        assert decide(state, BUILTIN_POLICIES['standard']) == STANDARD_FEATURE[primary]
 
 
 class TestDecideMirror:
     @pytest.mark.parametrize('primary', ALL_STATES)
     def test_default_branch(self, primary):
-        state = _state(primary, branch='main', is_default=True, is_current=True)
-        assert decide(state, BUILTIN_POLICIES['mirror']) == _MIRROR_DEFAULT[primary]
+        state = branch_state(primary, branch='main', is_default=True, is_current=True)
+        assert decide(state, BUILTIN_POLICIES['mirror']) == MIRROR_DEFAULT[primary]
 
     @pytest.mark.parametrize('primary', ALL_STATES)
     def test_feature_branch(self, primary):
-        state = _state(primary)
-        assert decide(state, BUILTIN_POLICIES['mirror']) == _MIRROR_FEATURE[primary]
+        state = branch_state(primary)
+        assert decide(state, BUILTIN_POLICIES['mirror']) == MIRROR_FEATURE[primary]
 
 
 class TestDecideObserve:
     @pytest.mark.parametrize('primary', ALL_STATES)
     @pytest.mark.parametrize('is_default', [True, False])
     def test_everything_is_report(self, primary, is_default):
-        state = _state(primary, is_default=is_default, is_current=is_default)
+        state = branch_state(primary, is_default=is_default, is_current=is_default)
         assert decide(state, BUILTIN_POLICIES['observe']) == Action.REPORT
 
 
@@ -113,7 +113,7 @@ class TestBuiltinsNameIntentNotMechanism:
     def test_no_builtin_decides_a_mechanism_action(self, policy_name, primary):
         policy = BUILTIN_POLICIES[policy_name]
         for is_default, is_current in itertools.product([True, False], repeat=2):
-            state = _state(primary, branch='main', is_default=is_default, is_current=is_current)
+            state = branch_state(primary, branch='main', is_default=is_default, is_current=is_current)
             assert decide(state, policy) not in MECHANISM_ACTIONS
 
 
@@ -126,9 +126,9 @@ class TestDecideModifierInvariance:
     def test_dirty_stashed_do_not_affect_decision(self, policy_name, primary):
         policy = BUILTIN_POLICIES[policy_name]
         for is_default, is_current in itertools.product([True, False], repeat=2):
-            baseline = decide(_state(primary, branch='main', is_default=is_default, is_current=is_current), policy)
+            baseline = decide(branch_state(primary, branch='main', is_default=is_default, is_current=is_current), policy)
             for dirty, stashed in itertools.product([True, False], repeat=2):
-                state = _state(
+                state = branch_state(
                     primary,
                     branch='main',
                     is_default=is_default,
@@ -147,7 +147,7 @@ class TestDecideModifierInvariance:
         happens to live, which is not a property of the branch."""
         policy = BUILTIN_POLICIES[policy_name]
         for is_default, is_current in itertools.product([True, False], repeat=2):
-            state = _state(primary, branch='main', is_default=is_default, is_current=is_current)
+            state = branch_state(primary, branch='main', is_default=is_default, is_current=is_current)
             assert decide(state.model_copy(update={'worktree': '/elsewhere/wt'}), policy) == decide(state, policy)
 
 
@@ -161,33 +161,33 @@ class TestSelectorPrecedence:
                 '*:ahead': 'report',
             },
         )
-        state = _state(PrimaryState.AHEAD, branch='release/1.0')
+        state = branch_state(PrimaryState.AHEAD, branch='release/1.0')
         assert decide(state, policy) == Action.PUSH
 
     def test_glob_beats_star(self):
         policy = Policy(name='p', rules={'release/*:ahead': 'ff_ref', '*:ahead': 'report'})
-        state = _state(PrimaryState.AHEAD, branch='release/1.0')
+        state = branch_state(PrimaryState.AHEAD, branch='release/1.0')
         assert decide(state, policy) == Action.FF_REF
 
     def test_more_specific_glob_wins(self):
         policy = Policy(name='p', rules={'release/*:ahead': 'report', 'release/v*:ahead': 'push'})
         # 'release/v*' is longer/more specific than 'release/*'
-        state = _state(PrimaryState.AHEAD, branch='release/v2')
+        state = branch_state(PrimaryState.AHEAD, branch='release/v2')
         assert decide(state, policy) == Action.PUSH
 
     def test_role_default_beats_star(self):
         policy = Policy(name='p', rules={'default:ahead': 'push', '*:ahead': 'report'})
-        state = _state(PrimaryState.AHEAD, branch='main', is_default=True)
+        state = branch_state(PrimaryState.AHEAD, branch='main', is_default=True)
         assert decide(state, policy) == Action.PUSH
 
     def test_default_role_beats_current_role(self):
         policy = Policy(name='p', rules={'default:ahead': 'push', 'current:ahead': 'report'})
-        state = _state(PrimaryState.AHEAD, branch='main', is_default=True, is_current=True)
+        state = branch_state(PrimaryState.AHEAD, branch='main', is_default=True, is_current=True)
         assert decide(state, policy) == Action.PUSH
 
     def test_falls_through_to_fallback(self):
         policy = Policy(name='p', rules={'default:behind': 'pull_ff'}, fallback=Action.SKIP)
-        state = _state(PrimaryState.AHEAD)
+        state = branch_state(PrimaryState.AHEAD)
         assert decide(state, policy) == Action.SKIP
 
 

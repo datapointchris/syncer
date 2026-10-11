@@ -8,7 +8,7 @@ independent of any policy:
 1. Never --force / -f / --force-with-lease (no such argv is ever constructed).
 2. Never mutate a branch whose working tree is dirty — or whose cleanliness cannot be verified.
    `git status` failing used to read as a clean tree, i.e. as permission to mutate. The exemptions
-   are the actions that touch no tree at all (_TREE_INDEPENDENT), each refusing under invariant 9
+   are the actions that touch no tree at all (TREE_INDEPENDENT), each refusing under invariant 9
    first so that "checked out nowhere" is verified rather than assumed.
 3. fast_forward / pull_ff / ff_ref require strict ancestry (upstream strictly ahead), re-checked here.
 4. rebase_push aborts on conflict and downgrades to a refusal — never a half-rebase.
@@ -80,7 +80,7 @@ class Refusal(StrEnum):
     PROTECTED = 'protected'
 
 
-# The single source of refusal wording. Fields come from _refused's keyword arguments.
+# The single source of refusal wording. Fields come from refused's keyword arguments.
 REFUSAL_TEXT: dict[Refusal, str] = {
     Refusal.NOT_CURRENT: '{verb} requires the branch to be current',
     Refusal.IS_CURRENT: 'ff_ref is for non-current branches; use pull_ff',
@@ -107,7 +107,7 @@ REFUSAL_TEXT: dict[Refusal, str] = {
 
 # Stand-ins for the runtime values a refusal template interpolates, used when a reason is being
 # *documented* rather than reported and there is no actual value to show.
-_DOC_FIELDS = {'target': '<target>', 'verb': 'this action', 'pattern': '<glob>'}
+DOC_FIELDS = {'target': '<target>', 'verb': 'this action', 'pattern': '<glob>'}
 
 # Every refusal decided by which branch happens to be checked out, and so every one
 # checkout_refusal owes the reporter a prediction of. Naming the set is what turns the mirror test
@@ -119,7 +119,7 @@ CHECKOUT_REFUSALS = frozenset({Refusal.NOT_CURRENT, Refusal.IS_CURRENT, Refusal.
 
 def describe_refusal(reason: Refusal) -> str:
     """A refusal's wording for reference output, with generic stand-ins for runtime values."""
-    return REFUSAL_TEXT[reason].format_map(_DOC_FIELDS)
+    return REFUSAL_TEXT[reason].format_map(DOC_FIELDS)
 
 
 class Outcome(BaseModel):
@@ -141,7 +141,7 @@ class Outcome(BaseModel):
     reason: Refusal | None = None
 
 
-def _refused(state: BranchState, action: Action, reason: Refusal, **fields: object) -> Outcome:
+def refused(state: BranchState, action: Action, reason: Refusal, **fields: object) -> Outcome:
     return Outcome(
         branch=state.branch,
         action=action,
@@ -151,7 +151,7 @@ def _refused(state: BranchState, action: Action, reason: Refusal, **fields: obje
     )
 
 
-def _is_strictly_behind(repo: Repo, branch: str, upstream: str) -> bool:
+def is_strictly_behind(repo: Repo, branch: str, upstream: str) -> bool:
     """Invariant 3. False when the counts cannot be read at all — unverified is not permission."""
     counts = repo.ahead_behind(branch, upstream)
     if counts is None:
@@ -160,45 +160,45 @@ def _is_strictly_behind(repo: Repo, branch: str, upstream: str) -> bool:
     return behind > 0 and ahead == 0
 
 
-def _pull_ff(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
+def pull_ff(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     if not state.is_current:
-        return _refused(state, Action.PULL_FF, Refusal.NOT_CURRENT, verb='pull_ff')
+        return refused(state, Action.PULL_FF, Refusal.NOT_CURRENT, verb='pull_ff')
     if not state.upstream:
-        return _refused(state, Action.PULL_FF, Refusal.NO_UPSTREAM)
+        return refused(state, Action.PULL_FF, Refusal.NO_UPSTREAM)
     if repo.is_dirty:  # invariant 2, re-checked live
-        return _refused(state, Action.PULL_FF, Refusal.DIRTY_TREE)
-    if not _is_strictly_behind(repo, state.branch, state.upstream):  # invariant 3
-        return _refused(state, Action.PULL_FF, Refusal.NOT_STRICTLY_BEHIND)
+        return refused(state, Action.PULL_FF, Refusal.DIRTY_TREE)
+    if not is_strictly_behind(repo, state.branch, state.upstream):  # invariant 3
+        return refused(state, Action.PULL_FF, Refusal.NOT_STRICTLY_BEHIND)
     ok, err = repo.merge_ff_only(state.upstream)
     if ok:
         return Outcome(branch=state.branch, action=Action.PULL_FF, status='done', message='fast-forwarded')
     return Outcome(branch=state.branch, action=Action.PULL_FF, status='failed', message=err)
 
 
-def _ff_ref(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
+def ff_ref(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     if state.is_current:
-        return _refused(state, Action.FF_REF, Refusal.IS_CURRENT)
+        return refused(state, Action.FF_REF, Refusal.IS_CURRENT)
     # Invariant 9. `is_current` is this checkout's HEAD only, so a branch live in a linked
     # worktree reads as "not checked out" here and update-ref — plumbing, and the one mechanism
     # on the menu git does not protect — would move it under a tree syncer never measured.
     if repo.held_by_worktree(state.branch):
-        return _refused(state, Action.FF_REF, Refusal.WORKTREE_CHECKOUT)
+        return refused(state, Action.FF_REF, Refusal.WORKTREE_CHECKOUT)
     if not state.upstream:
-        return _refused(state, Action.FF_REF, Refusal.NO_UPSTREAM)
-    if not _is_strictly_behind(repo, state.branch, state.upstream):  # invariant 3
-        return _refused(state, Action.FF_REF, Refusal.NOT_STRICTLY_BEHIND)
+        return refused(state, Action.FF_REF, Refusal.NO_UPSTREAM)
+    if not is_strictly_behind(repo, state.branch, state.upstream):  # invariant 3
+        return refused(state, Action.FF_REF, Refusal.NOT_STRICTLY_BEHIND)
     ok, err = repo.update_ref(state.branch, state.upstream)
     if ok:
         return Outcome(branch=state.branch, action=Action.FF_REF, status='done', message=f'advanced to {state.upstream}')
     return Outcome(branch=state.branch, action=Action.FF_REF, status='failed', message=err)
 
 
-def _ff_worktree(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
+def ff_worktree(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     """Fast-forward a branch a linked worktree holds, by merging inside that worktree.
 
     Invariant 9 forbids writing such a branch's ref from *outside*, because update-ref moves the
     ref while the worktree's index stays where it was. Running the merge in the worktree is the
-    opposite operation: git moves ref, index and tree together, exactly as it does for _pull_ff
+    opposite operation: git moves ref, index and tree together, exactly as it does for pull_ff
     on the current branch. So this adds a location, not a primitive — same argv, same strict
     ancestry check, and a dirty guard against the tree it actually writes into.
 
@@ -208,20 +208,20 @@ def _ff_worktree(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     """
     worktree = repo.worktree_for(state.branch)
     if worktree is None:
-        return _refused(state, Action.FF_WORKTREE, Refusal.NO_WORKTREE)
+        return refused(state, Action.FF_WORKTREE, Refusal.NO_WORKTREE)
     if repo.worktree_is_dirty(worktree):  # invariant 2, against the tree this actually writes
-        return _refused(state, Action.FF_WORKTREE, Refusal.WORKTREE_DIRTY)
+        return refused(state, Action.FF_WORKTREE, Refusal.WORKTREE_DIRTY)
     if not state.upstream:
-        return _refused(state, Action.FF_WORKTREE, Refusal.NO_UPSTREAM)
-    if not _is_strictly_behind(repo, state.branch, state.upstream):  # invariant 3
-        return _refused(state, Action.FF_WORKTREE, Refusal.NOT_STRICTLY_BEHIND)
+        return refused(state, Action.FF_WORKTREE, Refusal.NO_UPSTREAM)
+    if not is_strictly_behind(repo, state.branch, state.upstream):  # invariant 3
+        return refused(state, Action.FF_WORKTREE, Refusal.NOT_STRICTLY_BEHIND)
     ok, err = repo.merge_ff_only_in(worktree, state.upstream)
     if ok:
         return Outcome(branch=state.branch, action=Action.FF_WORKTREE, status='done', message=f'fast-forwarded in {worktree}')
     return Outcome(branch=state.branch, action=Action.FF_WORKTREE, status='failed', message=err)
 
 
-def _fast_forward(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
+def fast_forward(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     """Advance a branch to its upstream by whichever mechanism its checkout state allows.
 
     Three places a branch can be checked out, three mechanisms: here (merge), in a linked
@@ -231,114 +231,114 @@ def _fast_forward(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
 
     Dispatch reads git rather than `state.worktree`, per invariant 6 — a worktree added or
     removed since classify time would otherwise pick a mechanism that is now the wrong one. A
-    failed `git worktree list` lands on _ff_ref, whose own guard refuses what it cannot verify.
+    failed `git worktree list` lands on ff_ref, whose own guard refuses what it cannot verify.
     """
     if state.is_current:
-        delegate = _pull_ff
+        delegate = pull_ff
     elif repo.worktree_for(state.branch) is not None:
-        delegate = _ff_worktree
+        delegate = ff_worktree
     else:
-        delegate = _ff_ref
+        delegate = ff_ref
     return delegate(state, repo, policy).model_copy(update={'action': Action.FAST_FORWARD})
 
 
-def _push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
+def push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     if repo.is_dirty:
-        return _refused(state, Action.PUSH, Refusal.DIRTY_TREE)
+        return refused(state, Action.PUSH, Refusal.DIRTY_TREE)
     if not state.upstream:
-        return _refused(state, Action.PUSH, Refusal.NO_UPSTREAM)
+        return refused(state, Action.PUSH, Refusal.NO_UPSTREAM)
     counts = repo.ahead_behind(state.branch, state.upstream)
     if counts is None:
-        return _refused(state, Action.PUSH, Refusal.COUNTS_UNREADABLE)
+        return refused(state, Action.PUSH, Refusal.COUNTS_UNREADABLE)
     ahead, behind = counts
     if ahead == 0:
-        return _refused(state, Action.PUSH, Refusal.NOTHING_TO_PUSH)
+        return refused(state, Action.PUSH, Refusal.NOTHING_TO_PUSH)
     if behind > 0:
-        return _refused(state, Action.PUSH, Refusal.DIVERGED)
+        return refused(state, Action.PUSH, Refusal.DIVERGED)
     ok, err = repo.push_branch(state.branch)
     if ok:
         return Outcome(branch=state.branch, action=Action.PUSH, status='done', message=f'pushed {ahead} commit(s)')
     return Outcome(branch=state.branch, action=Action.PUSH, status='failed', message=err)
 
 
-def _rebase_push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
+def rebase_push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     if not state.is_current:
-        return _refused(state, Action.REBASE_PUSH, Refusal.NOT_CURRENT, verb='rebase_push')
+        return refused(state, Action.REBASE_PUSH, Refusal.NOT_CURRENT, verb='rebase_push')
     if repo.is_dirty:  # invariant 2
-        return _refused(state, Action.REBASE_PUSH, Refusal.DIRTY_TREE)
+        return refused(state, Action.REBASE_PUSH, Refusal.DIRTY_TREE)
     if not state.upstream:
-        return _refused(state, Action.REBASE_PUSH, Refusal.NO_UPSTREAM)
+        return refused(state, Action.REBASE_PUSH, Refusal.NO_UPSTREAM)
     counts = repo.ahead_behind(state.branch, state.upstream)
     if counts is None:
-        return _refused(state, Action.REBASE_PUSH, Refusal.COUNTS_UNREADABLE)
+        return refused(state, Action.REBASE_PUSH, Refusal.COUNTS_UNREADABLE)
     ahead, behind = counts
     if not (ahead > 0 and behind > 0):
-        return _refused(state, Action.REBASE_PUSH, Refusal.NOT_DIVERGED)
+        return refused(state, Action.REBASE_PUSH, Refusal.NOT_DIVERGED)
     if not repo.pull_rebase():  # invariant 4: conflict → abort → refuse, never half-rebase
         repo.rebase_abort()
-        return _refused(state, Action.REBASE_PUSH, Refusal.REBASE_CONFLICT)
+        return refused(state, Action.REBASE_PUSH, Refusal.REBASE_CONFLICT)
     ok, err = repo.push_branch(state.branch)
     if ok:
         return Outcome(branch=state.branch, action=Action.REBASE_PUSH, status='done', message='rebased and pushed')
     return Outcome(branch=state.branch, action=Action.REBASE_PUSH, status='failed', message=err)
 
 
-def _set_upstream_push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
+def set_upstream_push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     if state.upstream:
-        return _refused(state, Action.SET_UPSTREAM_PUSH, Refusal.HAS_UPSTREAM)
+        return refused(state, Action.SET_UPSTREAM_PUSH, Refusal.HAS_UPSTREAM)
     if repo.is_dirty:
-        return _refused(state, Action.SET_UPSTREAM_PUSH, Refusal.DIRTY_TREE)
+        return refused(state, Action.SET_UPSTREAM_PUSH, Refusal.DIRTY_TREE)
     ok, err = repo.push_branch(state.branch, set_upstream=True)
     if ok:
         return Outcome(branch=state.branch, action=Action.SET_UPSTREAM_PUSH, status='done', message='pushed and set upstream')
     return Outcome(branch=state.branch, action=Action.SET_UPSTREAM_PUSH, status='failed', message=err)
 
 
-def _delete_local(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
+def delete_local(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     # Full guard (invariant 5), every clause re-verified live.
-    # The checkout clause runs first, as it does in _pull_ff and _ff_ref, so that
+    # The checkout clause runs first, as it does in pull_ff and ff_ref, so that
     # checkout_refusal can predict it for every state rather than only for a gone branch. A gate
     # the reporter cannot evaluate is a gate the arrow does not know about, which is how
     # mirror's `*:gone = delete_local` printed a delete arrow on the branch you were standing on.
     if state.is_current:
-        return _refused(state, Action.DELETE_LOCAL, Refusal.DELETE_CURRENT)
+        return refused(state, Action.DELETE_LOCAL, Refusal.DELETE_CURRENT)
     if state.primary != 'gone':
-        return _refused(state, Action.DELETE_LOCAL, Refusal.NOT_GONE)
+        return refused(state, Action.DELETE_LOCAL, Refusal.NOT_GONE)
     # Invariant 9, stated rather than inherited. git refuses this itself, but a refusal only git
     # knows about arrives as a `failed` outcome carrying prose, which nothing joins on and the
     # reporter cannot predict — so the row promised an arrow apply was never going to follow.
     if repo.held_by_worktree(state.branch):
-        return _refused(state, Action.DELETE_LOCAL, Refusal.WORKTREE_CHECKOUT)
+        return refused(state, Action.DELETE_LOCAL, Refusal.WORKTREE_CHECKOUT)
     if state.is_default:
-        return _refused(state, Action.DELETE_LOCAL, Refusal.DELETE_DEFAULT)
+        return refused(state, Action.DELETE_LOCAL, Refusal.DELETE_DEFAULT)
     target = policy.merge_target or repo.default_branch
     if not target:
-        return _refused(state, Action.DELETE_LOCAL, Refusal.NO_MERGE_TARGET)
+        return refused(state, Action.DELETE_LOCAL, Refusal.NO_MERGE_TARGET)
     if state.branch == target:
-        return _refused(state, Action.DELETE_LOCAL, Refusal.DELETE_MERGE_TARGET, target=target)
+        return refused(state, Action.DELETE_LOCAL, Refusal.DELETE_MERGE_TARGET, target=target)
     if not repo.contains_branch(state.branch, target):
-        return _refused(state, Action.DELETE_LOCAL, Refusal.NOT_INTEGRATED, target=target)
+        return refused(state, Action.DELETE_LOCAL, Refusal.NOT_INTEGRATED, target=target)
     ok, err = repo.delete_local_branch(state.branch)
     if ok:
         return Outcome(branch=state.branch, action=Action.DELETE_LOCAL, status='done', message=f'deleted; integrated into {target}')
     return Outcome(branch=state.branch, action=Action.DELETE_LOCAL, status='failed', message=err)
 
 
-_MUTATORS: dict[Action, Callable[[BranchState, Repo, Policy], Outcome]] = {
-    Action.FAST_FORWARD: _fast_forward,
-    Action.PULL_FF: _pull_ff,
-    Action.FF_WORKTREE: _ff_worktree,
-    Action.FF_REF: _ff_ref,
-    Action.PUSH: _push,
-    Action.REBASE_PUSH: _rebase_push,
-    Action.SET_UPSTREAM_PUSH: _set_upstream_push,
-    Action.DELETE_LOCAL: _delete_local,
+MUTATORS: dict[Action, Callable[[BranchState, Repo, Policy], Outcome]] = {
+    Action.FAST_FORWARD: fast_forward,
+    Action.PULL_FF: pull_ff,
+    Action.FF_WORKTREE: ff_worktree,
+    Action.FF_REF: ff_ref,
+    Action.PUSH: push,
+    Action.REBASE_PUSH: rebase_push,
+    Action.SET_UPSTREAM_PUSH: set_upstream_push,
+    Action.DELETE_LOCAL: delete_local,
 }
 
 # The actions syncer performs, as opposed to the ones that only surface something (skip, report,
-# prompt). Derived from _MUTATORS rather than listed again, so the reporter's notion of "syncer
+# prompt). Derived from MUTATORS rather than listed again, so the reporter's notion of "syncer
 # will handle this" cannot drift from the set of things that actually have a mutator.
-MUTATING_ACTIONS: frozenset[Action] = frozenset(_MUTATORS)
+MUTATING_ACTIONS: frozenset[Action] = frozenset(MUTATORS)
 
 # The mutators that never read or write a working tree at all: both move a ref whose branch is
 # checked out nowhere, so no repo's dirtiness bears on them. The premise holds only because
@@ -347,15 +347,15 @@ MUTATING_ACTIONS: frozenset[Action] = frozenset(_MUTATORS)
 # exemptions read as impossible. Uncommitted changes belong to a tree, never to a branch, so a
 # dirty tree cannot be evidence about the ref being deleted; refusing on it protected nothing and
 # left every merged branch in a repo with work in progress uncollectable.
-_TREE_INDEPENDENT = frozenset({Action.FF_REF, Action.DELETE_LOCAL})
+TREE_INDEPENDENT = frozenset({Action.FF_REF, Action.DELETE_LOCAL})
 
 
 class ActionDoc(NamedTuple):
     """What `syncer policy actions show` renders for one action.
 
-    `applies_to` is declared rather than derived, and that is deliberate. Only _delete_local tests
-    `state.primary`; every other mutator checks the live facts instead — _push wants ahead > 0 and
-    behind == 0, _rebase_push wants both non-zero, the fast-forward pair wants behind > 0 and
+    `applies_to` is declared rather than derived, and that is deliberate. Only delete_local tests
+    `state.primary`; every other mutator checks the live facts instead — push wants ahead > 0 and
+    behind == 0, rebase_push wants both non-zero, the fast-forward pair wants behind > 0 and
     ahead == 0. Those *are* the definitions of AHEAD / DIVERGED / BEHIND, so the mapping is real,
     but there is no primary check to read it off. Adding one would break invariant 6's whole
     point: a guard consulting the classify-time state instead of git is trusting a value that may
@@ -496,7 +496,7 @@ def dirty_refusal(action: Action, state: BranchState, dirty: bool) -> Refusal | 
     """
     if not dirty or action not in MUTATING_ACTIONS:
         return None
-    if action in _TREE_INDEPENDENT:
+    if action in TREE_INDEPENDENT:
         return None
     # ff_worktree does write a tree, just never this one — `dirty` is the main checkout's, and the
     # point of a worktree is that the two are independent. Its own tree is gated by
@@ -593,12 +593,12 @@ def blocking_refusal(action: Action, state: BranchState, policy: Policy, dirty: 
 def describe_block(reason: Refusal, action: Action, state: BranchState, policy: Policy) -> str:
     """A blocking refusal's wording, with the runtime values its template needs filled in.
 
-    The action supplies `{verb}`. Left to _DOC_FIELDS it renders as 'this action', which is the
+    The action supplies `{verb}`. Left to DOC_FIELDS it renders as 'this action', which is the
     right stand-in for a reference page listing refusals in the abstract and the wrong one on a
     row that already names the action two words earlier.
     """
     pattern = matching_protection(state.branch, policy)
-    return REFUSAL_TEXT[reason].format_map({**_DOC_FIELDS, 'verb': action.value, 'pattern': pattern or '<glob>'})
+    return REFUSAL_TEXT[reason].format_map({**DOC_FIELDS, 'verb': action.value, 'pattern': pattern or '<glob>'})
 
 
 def execute(action: Action, state: BranchState, repo: Repo, policy: Policy) -> Outcome:
@@ -610,7 +610,7 @@ def execute(action: Action, state: BranchState, repo: Repo, policy: Policy) -> O
     """
     # Invariant 8, before dispatch so it covers every action, including any added later.
     if protection_refusal(action, state, policy) is not None:
-        return _refused(state, action, Refusal.PROTECTED, pattern=matching_protection(state.branch, policy))
+        return refused(state, action, Refusal.PROTECTED, pattern=matching_protection(state.branch, policy))
 
     if action == Action.SKIP:
         return Outcome(branch=state.branch, action=action, status='skipped')
@@ -619,4 +619,4 @@ def execute(action: Action, state: BranchState, repo: Repo, policy: Policy) -> O
     if action == Action.PROMPT:
         # Interactive traverse is deferred to a later slice; degrade to a report.
         return Outcome(branch=state.branch, action=action, status='reported', message='interactive prompt not implemented (v1)')
-    return _MUTATORS[action](state, repo, policy)
+    return MUTATORS[action](state, repo, policy)

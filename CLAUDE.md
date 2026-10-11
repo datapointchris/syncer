@@ -30,7 +30,7 @@ report fully in sync. Three rules follow:
   added later is visible without opting in. `probe=True` is only for calls whose non-zero exit
   *is* the answer (`merge-base --is-ancestor`, the `rev-parse --verify` probes, `git cherry`).
 - **An unmeasurable repo is an error, not a state.** `refresh_remote()` returns the fetch's
-  failure, and `_build_repo_report` returns a `_failed_report` **before** `build_branch_rows`,
+  failure, and `build_repo_report` returns a `failed_report` **before** `build_branch_rows`,
   which also means no `execute()` call is constructed. Such a report carries **zero rows**: a row
   is a claim about a branch, and none can be made. There is deliberately no
   `PrimaryState.UNKNOWN` — every policy's rule for it would be `report`, and a state name cannot
@@ -64,7 +64,7 @@ unreadable counts) stays out of `blocked`.
 declines, and a one-directional test cannot see that. `CHECKOUT_REFUSALS` names every refusal
 decided by which branch is checked out (`NOT_CURRENT`, `IS_CURRENT`, `DELETE_CURRENT`), and a
 mutator returning one while the mirror is silent fails a test. So every checkout-gated mutator
-tests the checkout **first**. `_delete_local` answering `NOT_GONE` before `DELETE_CURRENT` would
+tests the checkout **first**. `delete_local` answering `NOT_GONE` before `DELETE_CURRENT` would
 make the guard unreachable, since `decide()` only routes `delete_local` at a gone branch.
 
 **Refusals are keyed, never matched by text.** `Refusal` is a `StrEnum` and `REFUSAL_TEXT` holds
@@ -81,12 +81,12 @@ Two notions of "needs attention" in one report means neither gets trusted.
   `apply` clears it without you. `behind → fast_forward` is queued work, not damage.
 - **A dirty tree outranks the action band**, whatever the branch state. syncer never resolves
   one, and it refuses every mutator that touches the tree.
-- **`_row_severity` is checked before the state's own severity**, so `MUTATING_ACTIONS` (derived
-  from `_MUTATORS`, never listed twice) defines "syncer will handle this".
+- **`row_severity` is checked before the state's own severity**, so `MUTATING_ACTIONS` (derived
+  from `MUTATORS`, never listed twice) defines "syncer will handle this".
 - **Icon from the state, color from the severity.** Only the benign tick can understate a
-  severity, so it is the only icon `_SEVERITY_ICON` substitutes.
+  severity, so it is the only icon `SEVERITY_ICON` substitutes.
 - **The action arrow renders only for a mutating action, on both surfaces.** `skip`, `report`
-  and `prompt` all mean "syncer changes nothing". `_apply_line` defers to `_branch_line` whenever
+  and `prompt` all mean "syncer changes nothing". `apply_line` defers to `branch_line` whenever
   the action does not mutate. Such an action's `message` is still kept, since only an executed
   run can know one.
 
@@ -109,7 +109,7 @@ checks a subset of the registry.
 live display and the summary line what `Refusal`/`REFUSAL_TEXT` does for refusals.
 `attention_tally` picks the counter, and it cannot be severity alone: ERROR spans a genuinely
 wrong branch and a repo git could not be asked about. `is_unverified` is that split, and
-`_repo_status` reads it too.
+`repo_status` reads it too.
 
 ## Two surfaces, one core
 
@@ -150,7 +150,7 @@ any policy:
 1. Never `--force`/`-f`/`--force-with-lease`. No such argv is ever constructed.
 2. Never mutate a branch whose working tree is dirty **or whose cleanliness cannot be verified**.
    `repo.is_dirty` answers `True` when `git status` fails; a `list | None` cannot express that
-   polarity, because `None` is falsy. `_TREE_INDEPENDENT` exempts `_ff_ref` and `_delete_local`,
+   polarity, because `None` is falsy. `TREE_INDEPENDENT` exempts `ff_ref` and `delete_local`,
    which move or remove a ref checked out nowhere (each verifies that first, per invariant 9).
    A dirty tree is no evidence about a ref being deleted. **syncer never resolves a dirty tree**:
    there is no commit or stash action, and there will not be one.
@@ -173,11 +173,11 @@ any policy:
 9. Never write the ref of a branch another worktree has checked out. `is_current` is *this*
    checkout's HEAD alone. `update-ref` is plumbing git does not check, so it would move a live
    worktree's HEAD and leave its index staging the new commit as deletions.
-   `repo.held_by_worktree` answers True when `git worktree list` fails. `_delete_local` guards
+   `repo.held_by_worktree` answers True when `git worktree list` fails. `delete_local` guards
    this explicitly even though `branch -D` refuses on its own: git's refusal is a `failed`
    outcome carrying prose, with no `Outcome.reason` to join on and nothing the reporter can predict.
 
-Any new `Action` must be added to the `Action` enum, mapped in `_MUTATORS`, and given a mutator
+Any new `Action` must be added to the `Action` enum, mapped in `MUTATORS`, and given a mutator
 that re-checks its own preconditions live. Never add an unsafe primitive to the menu.
 
 **Rules name intents, not mechanisms.** A rule naming a mechanism is refused whenever the branch
@@ -262,7 +262,7 @@ nothing. Patching a built-in and defining a policy are one syntax:
 "*:gone" = "delete_local"
 ```
 
-`rules` merges cell by cell, at the **raw-dict** level in `_build_policies`. Constructing a
+`rules` merges cell by cell, at the **raw-dict** level in `build_policies`. Constructing a
 `Policy` first would fill absent fields with model defaults and clobber the base: patching
 `[policies.mirror.rules]` would reset mirror's `scope` from `all` to `tracked`. `extend` names a
 base only when the table's name is not a built-in's. Unknown keys are rejected explicitly, because
@@ -289,9 +289,9 @@ will not act on into one. Its rules:
 - **Every command names its directory**: `state.worktree` when one holds the branch. `DIRTY_TREE`
   is the repo's own tree, so its `status` runs in the repo; `WORKTREE_DIRTY` runs it in the
   worktree. `NO_WORKTREE` is in `NO_REMEDY`.
-- **A refusal is not one errand**, so `_refusal_remedy` takes the action. `WORKTREE_CHECKOUT` on
+- **A refusal is not one errand**, so `refusal_remedy` takes the action. `WORKTREE_CHECKOUT` on
   `ff_ref` means merge inside the worktree; on `delete_local` it means dispose of the worktree first.
-- **`_tracks_own_remote` decides the wording** for `diverged`. Tracking `origin/main` is work on a
+- **`tracks_own_remote` decides the wording** for `diverged`. Tracking `origin/main` is work on a
   moved base; tracking `origin/<itself>` is two machines disagreeing.
 - **syncer never says what to do with uncommitted work.** The dirty remedy is `git status --short`.
 - **The policy note names the rule key that would change the decision.** Candidates come from
@@ -320,7 +320,7 @@ Both are report-only and stay out of `decide()`.
 `policy actions show <action>` renders one record from `ACTION_DOCS` (`execute.py`, beside the
 guards). Its protection line and `decided_by` are computed, not declared.
 
-**`applies_to` is declared, not derived, and cannot be.** Only `_delete_local` tests
+**`applies_to` is declared, not derived, and cannot be.** Only `delete_local` tests
 `state.primary`. Every other mutator checks live facts that *are* the definitions of AHEAD,
 DIVERGED and BEHIND. Adding a `primary` check to make it derivable would break invariant 6.
 `TestActionDocs` proves it instead: it drives every mutator against a repo genuinely in each state
@@ -394,7 +394,7 @@ non-zero result and is never raised, so one wedged call loses only itself. Never
 **`GIT_TERMINAL_PROMPT=0` disables git's own terminal prompt and nothing else.** An askpass
 program and a credential helper are separate mechanisms git prefers over the terminal, and
 neither reads it. With an expired token and a GUI credential manager, syncer spawned one helper
-window per repo at once and printed nothing. `_noninteractive_env` closes each path: an empty
+window per repo at once and printed nothing. `noninteractive_env` closes each path: an empty
 `GIT_ASKPASS` (git takes the first of `GIT_ASKPASS`/`core.askpass`/`SSH_ASKPASS` that is *set*,
 so an empty one short-circuits the chain), `SSH_ASKPASS_REQUIRE=never`, and Git Credential
 Manager's two switches, `GCM_INTERACTIVE=never` and `credential.interactive=false`. The helper

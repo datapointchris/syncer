@@ -59,7 +59,7 @@ config_app = typer.Typer(
 FILES = ('config', 'registry')
 
 
-def _requested_files(which: str | None) -> tuple[str, ...]:
+def requested_files(which: str | None) -> tuple[str, ...]:
     """The files a command was asked about. Naming none means both, matching `config path`."""
     if which is None:
         return FILES
@@ -85,7 +85,7 @@ def config_init(
     rewritten — the registry is shared infrastructure other tools may also read, and syncer
     creates one that is absent but modifies no existing one.
     """
-    files = _requested_files(which)
+    files = requested_files(which)
 
     if 'config' in files:
         if TOOL_CONFIG_PATH.exists():
@@ -106,7 +106,7 @@ def config_init(
             hint('every option, annotated: syncer config example registry')
 
 
-def _registry_has_repos(path: Path) -> bool:
+def registry_has_repos(path: Path) -> bool:
     """Whether a registry holds anything worth protecting.
 
     The no-clobber rule guards *content* — a registry other tools may also read — not the empty
@@ -120,7 +120,7 @@ def _registry_has_repos(path: Path) -> bool:
         return True
 
 
-def _entry_from(path: Path) -> tuple[dict[str, str], str, str]:
+def entry_from(path: Path) -> tuple[dict[str, str], str, str]:
     """One registry entry for a repo on disk, plus the (host, owner) its origin implies.
 
     Derived from the clone's own origin rather than assumed, so a scan across a directory
@@ -167,9 +167,9 @@ def config_scan(
             raise typer.Exit(2)
         found.extend(find_untracked_repos(expanded, known_paths=set()))
 
-    # One pass — each _entry_from shells out to git, so re-deriving would double the cost of a
+    # One pass — each entry_from shells out to git, so re-deriving would double the cost of a
     # scan over a directory holding seventy repos.
-    scanned = [_entry_from(repo_path) for repo_path in sorted(found)]
+    scanned = [entry_from(repo_path) for repo_path in sorted(found)]
     hosts = Counter(host for _, host, _ in scanned if host)
     owners = Counter(owner for _, _, owner in scanned if owner)
 
@@ -197,7 +197,7 @@ def config_scan(
         return
 
     location = registry_location(load_tool_config())
-    if location.path.exists() and _registry_has_repos(location.path):
+    if location.path.exists() and registry_has_repos(location.path):
         error(f'registry already lists repos at {location.path}{registry_source_note(location.source)} — not overwriting')
         hint('review the scan and merge it by hand: syncer config scan <paths>')
         raise typer.Exit(1)
@@ -217,7 +217,7 @@ def config_example(
     Syntax-highlighted on a terminal, plain text when redirected, so
     `syncer config example registry > repos.json` stays clean.
     """
-    _requested_files(which)
+    requested_files(which)
     template, lexer = (TEMPLATE_REGISTRY, 'json') if which == 'registry' else (TEMPLATE_TOOL_CONFIG, 'toml')
     if console.is_terminal:
         console.print(Syntax(template, lexer, background_color='default', word_wrap=True))
@@ -292,7 +292,7 @@ def config_show(
                 'path': repo_config.path,
                 'status': repo_config.status,
                 'policy': policy_name,
-                'source': _policy_source(repo_config, tool_config),
+                'source': policy_source(repo_config, tool_config),
                 'resolves': policy_name in known_policies,
             }
         )
@@ -339,7 +339,7 @@ def config_show(
         console.print(f'  {repo["name"]:<{width}}  {repo["policy"]} [cyan]({repo["source"]})[/cyan]{marker}')
 
 
-def _policy_source(repo_config, tool_config: ToolConfig) -> str:
+def policy_source(repo_config, tool_config: ToolConfig) -> str:
     """Which precedence tier supplied this repo's policy."""
     if repo_config.name in tool_config.repo_overrides:
         return 'repo_overrides'
@@ -366,7 +366,7 @@ def config_edit(
     terminal editor blocks until you close it; a GUI editor returns immediately unless you
     configured it to wait (e.g. EDITOR="code --wait").
     """
-    _requested_files(which)
+    requested_files(which)
     if which == 'registry':
         # Resolved through registry_location so this opens what syncer actually reads, not an
         # assumed default — the two differ on every machine that sets repos_registry.
@@ -409,10 +409,10 @@ def config_validate(
     — validate checks the files, issues checks reality.
     """
     problems: list[str] = []
-    tool_config = _validate_tool_config(problems)
+    tool_config = validate_tool_config(problems)
     # Resolved from the config just parsed, not re-read: load_tool_config exits on a broken file,
     # which would abort the very command whose job is to explain what is broken about it.
-    _validate_registry(registry_location(tool_config, repos_file), tool_config, problems)
+    validate_registry(registry_location(tool_config, repos_file), tool_config, problems)
 
     if problems:
         error(f'{len(problems)} problem(s) found:')
@@ -422,7 +422,7 @@ def config_validate(
     success('config is valid')
 
 
-def _validate_tool_config(problems: list[str]) -> ToolConfig:
+def validate_tool_config(problems: list[str]) -> ToolConfig:
     """Parse config.toml and check every policy name it uses resolves. Returns what it could
     parse, so registry checks still run against a partially broken tool config."""
     if not TOOL_CONFIG_PATH.exists():
@@ -451,7 +451,7 @@ def _validate_tool_config(problems: list[str]) -> ToolConfig:
     return tool_config
 
 
-def _validate_registry(location: RegistryLocation, tool_config: ToolConfig, problems: list[str]) -> None:
+def validate_registry(location: RegistryLocation, tool_config: ToolConfig, problems: list[str]) -> None:
     registry_path = location.path
     if not registry_path.exists():
         problems.append(

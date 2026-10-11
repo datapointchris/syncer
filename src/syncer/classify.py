@@ -30,7 +30,7 @@ class ClassifyError(Exception):
         self.failure = failure
 
 
-def _primary_from_counts(ahead: int, behind: int) -> PrimaryState:
+def primary_from_counts(ahead: int, behind: int) -> PrimaryState:
     if ahead == behind == 0:
         return PrimaryState.SYNCED
     if behind == 0:
@@ -75,7 +75,7 @@ def classify_branch(
         if counts is None:
             raise ClassifyError(branch, repo.failures[-1])
         ahead, behind = counts
-        primary = _primary_from_counts(ahead, behind)
+        primary = primary_from_counts(ahead, behind)
 
     return BranchState(
         branch=branch,
@@ -93,7 +93,7 @@ def classify_branch(
     )
 
 
-def _branches_in_scope(repo: Repo, scope: Scope, default: str | None, current: str, detached: bool) -> list[str]:
+def branches_in_scope(repo: Repo, scope: Scope, default: str | None, current: str, detached: bool) -> list[str]:
     if scope == Scope.DEFAULT:
         return [default] if default else []
     if scope == Scope.CURRENT:
@@ -143,7 +143,7 @@ def classify_repo(repo: Repo, policy: Policy, *, fetched: bool = False) -> list[
             stashed=stashed,
             merge_target=policy.merge_target,
         )
-        for branch in _branches_in_scope(repo, policy.scope, default, current, detached)
+        for branch in branches_in_scope(repo, policy.scope, default, current, detached)
     ]
 
     if detached and policy.scope in (Scope.CURRENT, Scope.ALL):

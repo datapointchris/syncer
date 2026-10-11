@@ -60,7 +60,7 @@ class Remedy:
         return bool(self.commands or self.notes)
 
 
-def _in(directory: str, *commands: str) -> tuple[str, ...]:
+def in_directory(directory: str, *commands: str) -> tuple[str, ...]:
     """The directory once, then the commands as you would type them standing in it.
 
     Honesty rule 3 wants every command anchored somewhere; `git -C <dir>` anchored each one
@@ -70,7 +70,7 @@ def _in(directory: str, *commands: str) -> tuple[str, ...]:
     return (f'cd {directory}', *commands)
 
 
-def _tracks_own_remote(state: BranchState) -> bool:
+def tracks_own_remote(state: BranchState) -> bool:
     """Whether the upstream is this branch's own counterpart rather than some base branch.
 
     The difference decides both commands below. A branch tracking `origin/main` is diverged the
@@ -80,15 +80,15 @@ def _tracks_own_remote(state: BranchState) -> bool:
     return state.upstream is not None and state.upstream.rpartition('/')[2] == state.branch
 
 
-def _diverged(state: BranchState, where: str) -> Remedy:
+def diverged(state: BranchState, where: str) -> Remedy:
     upstream = state.upstream or ''
-    if _tracks_own_remote(state):
+    if tracks_own_remote(state):
         return Remedy(
-            commands=_in(where, f'git rebase {upstream}', f'git push origin {state.branch}'),
+            commands=in_directory(where, f'git rebase {upstream}', f'git push origin {state.branch}'),
             notes=(f'replays your {state.ahead} commit(s) onto {upstream}, leaving an ordinary push — no force needed.',),
         )
     return Remedy(
-        commands=_in(where, f'git rebase {upstream}'),
+        commands=in_directory(where, f'git rebase {upstream}'),
         notes=(
             f'{state.branch} tracks {upstream}, not origin/{state.branch} — so this is your work sitting on a base that moved,',
             f'not two machines disagreeing. Publish it separately with: git push -u origin {state.branch}',
@@ -96,31 +96,31 @@ def _diverged(state: BranchState, where: str) -> Remedy:
     )
 
 
-def _state_remedy(state: BranchState, where: str) -> Remedy:
+def state_remedy(state: BranchState, where: str) -> Remedy:
     """What to run for a branch state syncer has decided not to act on."""
     if state.primary is PrimaryState.DIVERGED:
-        return _diverged(state, where)
+        return diverged(state, where)
     if state.primary is PrimaryState.AHEAD:
-        if _tracks_own_remote(state):
-            return Remedy(commands=_in(where, f'git push origin {state.branch}'))
+        if tracks_own_remote(state):
+            return Remedy(commands=in_directory(where, f'git push origin {state.branch}'))
         return Remedy(
-            commands=_in(where, f'git push -u origin {state.branch}'),
+            commands=in_directory(where, f'git push -u origin {state.branch}'),
             notes=(f'{state.branch} tracks {state.upstream}, so this publishes it under its own name and retargets it there.',),
         )
     if state.primary is PrimaryState.BEHIND:
-        return Remedy(commands=_in(where, f'git merge --ff-only {state.upstream or ""}'))
+        return Remedy(commands=in_directory(where, f'git merge --ff-only {state.upstream or ""}'))
     if state.primary is PrimaryState.NO_UPSTREAM:
-        return Remedy(commands=_in(where, f'git push -u origin {state.branch}'))
+        return Remedy(commands=in_directory(where, f'git push -u origin {state.branch}'))
     if state.primary is PrimaryState.GONE:
         # -d, never -D. syncer uses -D behind a guard that proves the target holds the work by
         # ancestry or patch equivalence; run by hand there is no such guard, and -d is git's own.
         return Remedy(
-            commands=_in(where, f'git branch -d {state.branch}'),
+            commands=in_directory(where, f'git branch -d {state.branch}'),
             notes=('-d refuses unless the work is merged, which is the check syncer runs for itself before using -D.',),
         )
     if state.primary is PrimaryState.DETACHED:
         return Remedy(
-            commands=_in(where, 'git switch -'),
+            commands=in_directory(where, 'git switch -'),
             notes=('a commit made here belongs to no branch — `git switch -` returns to the last one you were on.',),
         )
     return Remedy()
@@ -129,7 +129,7 @@ def _state_remedy(state: BranchState, where: str) -> Remedy:
 # Refusals with deliberately nothing to suggest, listed rather than left to fall through. Each is
 # either syncer describing its own dispatch (the branch was not in the state this action is for)
 # or a git read that failed, where the actionable text is git's own stderr and the failure summary
-# already carries it. A new Refusal in neither this set nor _refusal_remedy fails a test rather
+# already carries it. A new Refusal in neither this set nor refusal_remedy fails a test rather
 # than silently rendering blank — the direction ACTION_DOCS and PROTECTED_ALLOWED both take.
 NO_REMEDY = frozenset(
     {
@@ -151,7 +151,7 @@ NO_REMEDY = frozenset(
 )
 
 
-def _worktree_checkout(state: BranchState, action: Action, repo_path: str) -> Remedy:
+def worktree_checkout(state: BranchState, action: Action, repo_path: str) -> Remedy:
     """What a linked worktree holding the branch leaves the reader to do, per action.
 
     The two are opposite errands and one command cannot serve both. Advancing the branch happens
@@ -160,7 +160,7 @@ def _worktree_checkout(state: BranchState, action: Action, repo_path: str) -> Re
     """
     if action is Action.DELETE_LOCAL:
         return Remedy(
-            commands=_in(repo_path, f'git worktree remove {state.worktree or ""}', f'git branch -d {state.branch}'),
+            commands=in_directory(repo_path, f'git worktree remove {state.worktree or ""}', f'git branch -d {state.branch}'),
             notes=(
                 f'{state.branch} is merged, but the worktree at {state.worktree} still holds the ref, which git will not delete.',
                 'Neither command can lose work: `git worktree remove` refuses a tree with modified or untracked files,',
@@ -168,28 +168,28 @@ def _worktree_checkout(state: BranchState, action: Action, repo_path: str) -> Re
             ),
         )
     return Remedy(
-        commands=_in(state.worktree or repo_path, f'git merge --ff-only {state.upstream or ""}'),
+        commands=in_directory(state.worktree or repo_path, f'git merge --ff-only {state.upstream or ""}'),
         notes=(f'{state.branch} is checked out at {state.worktree} — run it there, where the tree moves with the ref.',),
     )
 
 
-def _refusal_remedy(reason: Refusal, state: BranchState, action: Action, repo_path: str) -> Remedy:
+def refusal_remedy(reason: Refusal, state: BranchState, action: Action, repo_path: str) -> Remedy:
     where = state.worktree or repo_path
     if reason is Refusal.DIRTY_TREE:
         # Honesty rule 4: where the changes are, and nothing about what to do with them. Rule 3
         # inverts here — the tree syncer measured is the repo's own, never the worktree's, so
         # naming `where` sent the reader to run `status` somewhere it prints nothing.
         return Remedy(
-            commands=_in(repo_path, 'git status --short'),
+            commands=in_directory(repo_path, 'git status --short'),
             notes=('syncer refuses every action that touches a dirty tree, and has no action that would clear one.',),
         )
     if reason is Refusal.WORKTREE_CHECKOUT:
-        return _worktree_checkout(state, action, repo_path)
+        return worktree_checkout(state, action, repo_path)
     if reason is Refusal.WORKTREE_DIRTY:
         # Honesty rule 4 again, and rule 3 the other way from DIRTY_TREE: this tree really is the
         # worktree's, and it is the one thing between the branch and an ordinary fast-forward.
         return Remedy(
-            commands=_in(state.worktree or repo_path, 'git status --short'),
+            commands=in_directory(state.worktree or repo_path, 'git status --short'),
             notes=(
                 f'syncer would fast-forward {state.branch} in {state.worktree}, but will not merge into a tree with changes in it.',
                 'Deal with them however you like and the next run clears the branch.',
@@ -204,7 +204,7 @@ def _refusal_remedy(reason: Refusal, state: BranchState, action: Action, repo_pa
         )
     if reason is Refusal.REBASE_CONFLICT:
         return Remedy(
-            commands=_in(where, f'git rebase {state.upstream or ""}'),
+            commands=in_directory(where, f'git rebase {state.upstream or ""}'),
             notes=('syncer aborted the rebase rather than leave it half-finished, so the tree is exactly as it was.',),
         )
     if reason is Refusal.NOT_INTEGRATED:
@@ -222,7 +222,7 @@ def _refusal_remedy(reason: Refusal, state: BranchState, action: Action, repo_pa
     return Remedy()
 
 
-def _policy_note(state: BranchState, action: Action) -> tuple[str, ...]:
+def policy_note(state: BranchState, action: Action) -> tuple[str, ...]:
     """The rule that decided this row, when a safe action exists for the state and was not chosen.
 
     The other half of "why did syncer not do this": not every unresolved row is a limitation, and
@@ -258,12 +258,12 @@ def remedy_for(state: BranchState, action: Action, repo_path: str, blocked: Refu
     where = state.worktree or repo_path
     reason = refused or blocked
     if reason is not None:
-        remedy = _refusal_remedy(reason, state, action, repo_path)
+        remedy = refusal_remedy(reason, state, action, repo_path)
         if remedy:
             return remedy
     if action in MUTATING_ACTIONS and blocked is None and refused is None:
         return Remedy()
     if state.primary is PrimaryState.SYNCED:
         return Remedy()
-    remedy = _state_remedy(state, where)
-    return Remedy(commands=remedy.commands, notes=remedy.notes + _policy_note(state, action))
+    remedy = state_remedy(state, where)
+    return Remedy(commands=remedy.commands, notes=remedy.notes + policy_note(state, action))

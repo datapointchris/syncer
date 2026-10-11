@@ -31,25 +31,25 @@ FORCE_FLAGS = ('--force', '-f', '--force-with-lease')
 POLICY = Policy(name='test')
 
 
-def _git(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def git(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(['git', *args], cwd=path, capture_output=True, text=True)
 
 
-def _make_repo(path: Path) -> Repo:
+def make_repo(path: Path) -> Repo:
     return Repo(name='test-repo', path=path, owner='user', host='https://github.com')
 
 
-def _commit(path: Path, filename: str, message: str, content: str | None = None) -> None:
+def commit(path: Path, filename: str, message: str, content: str | None = None) -> None:
     (path / filename).write_text(content if content is not None else f'{filename}\n')
-    _git(path, 'add', '.')
-    _git(path, 'commit', '-m', message)
+    git(path, 'add', '.')
+    git(path, 'commit', '-m', message)
 
 
-def _head(repo: Repo) -> str:
+def head(repo: Repo) -> str:
     return repo._git('rev-parse', 'HEAD').stdout.strip()
 
 
-def _state_for(repo: Repo, branch: str) -> BranchState:
+def state_for(repo: Repo, branch: str) -> BranchState:
     return classify_branch(
         repo,
         branch,
@@ -67,24 +67,24 @@ def cloned_repo(tmp_path):
     subprocess.run(['git', 'init', '--bare', '-b', 'main', str(bare)], capture_output=True)
     repo_path = tmp_path / 'repo'
     subprocess.run(['git', 'clone', str(bare), str(repo_path)], capture_output=True)
-    _git(repo_path, 'config', 'user.email', 'test@test.com')
-    _git(repo_path, 'config', 'user.name', 'Test')
+    git(repo_path, 'config', 'user.email', 'test@test.com')
+    git(repo_path, 'config', 'user.name', 'Test')
     (repo_path / 'README.md').write_text('# Test\n')
-    _git(repo_path, 'add', '.')
-    _git(repo_path, 'commit', '-m', 'init')
-    _git(repo_path, 'push', '-u', 'origin', 'main')
+    git(repo_path, 'add', '.')
+    git(repo_path, 'commit', '-m', 'init')
+    git(repo_path, 'push', '-u', 'origin', 'main')
     return repo_path
 
 
-def _second_clone_pushes(tmp_path: Path, filename: str = 'remote.txt', content: str | None = None) -> None:
+def second_clone_pushes(tmp_path: Path, filename: str = 'remote.txt', content: str | None = None) -> None:
     bare = tmp_path / 'remote.git'
     second = tmp_path / 'second'
     if not second.exists():
         subprocess.run(['git', 'clone', str(bare), str(second)], capture_output=True)
-        _git(second, 'config', 'user.email', 'test@test.com')
-        _git(second, 'config', 'user.name', 'Test')
-    _commit(second, filename, 'remote change', content)
-    _git(second, 'push')
+        git(second, 'config', 'user.email', 'test@test.com')
+        git(second, 'config', 'user.name', 'Test')
+    commit(second, filename, 'remote change', content)
+    git(second, 'push')
 
 
 class GitSpy:
@@ -112,75 +112,75 @@ class GitSpy:
 
 class TestExecuteEffects:
     def test_pull_ff_fast_forwards_current(self, cloned_repo, tmp_path):
-        _second_clone_pushes(tmp_path)
-        repo = _make_repo(cloned_repo)
+        second_clone_pushes(tmp_path)
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
-        state = _state_for(repo, 'main')
+        state = state_for(repo, 'main')
         assert state.primary == PrimaryState.BEHIND
         outcome = execute(Action.PULL_FF, state, repo, POLICY)
         assert outcome.status == 'done'
-        assert _state_for(repo, 'main').primary == PrimaryState.SYNCED
+        assert state_for(repo, 'main').primary == PrimaryState.SYNCED
 
     def test_ff_ref_advances_noncurrent_branch(self, cloned_repo, tmp_path):
         # Create and push a feature branch, move it ahead on the remote, then leave main current.
-        _git(cloned_repo, 'checkout', '-b', 'feature')
-        _git(cloned_repo, 'push', '-u', 'origin', 'feature')
+        git(cloned_repo, 'checkout', '-b', 'feature')
+        git(cloned_repo, 'push', '-u', 'origin', 'feature')
         bare = tmp_path / 'remote.git'
         second = tmp_path / 'second'
         subprocess.run(['git', 'clone', '-b', 'feature', str(bare), str(second)], capture_output=True)
-        _git(second, 'config', 'user.email', 'test@test.com')
-        _git(second, 'config', 'user.name', 'Test')
-        _commit(second, 'f.txt', 'feature work')
-        _git(second, 'push')
-        _git(cloned_repo, 'checkout', 'main')
-        repo = _make_repo(cloned_repo)
+        git(second, 'config', 'user.email', 'test@test.com')
+        git(second, 'config', 'user.name', 'Test')
+        commit(second, 'f.txt', 'feature work')
+        git(second, 'push')
+        git(cloned_repo, 'checkout', 'main')
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
-        state = _state_for(repo, 'feature')
+        state = state_for(repo, 'feature')
         assert state.primary == PrimaryState.BEHIND
         assert state.is_current is False
         outcome = execute(Action.FF_REF, state, repo, POLICY)
         assert outcome.status == 'done'
-        assert _state_for(repo, 'feature').primary == PrimaryState.SYNCED
+        assert state_for(repo, 'feature').primary == PrimaryState.SYNCED
 
     def test_push_publishes_ahead_commits(self, cloned_repo):
-        _commit(cloned_repo, 'new.py', 'feat')
-        repo = _make_repo(cloned_repo)
-        state = _state_for(repo, 'main')
+        commit(cloned_repo, 'new.py', 'feat')
+        repo = make_repo(cloned_repo)
+        state = state_for(repo, 'main')
         assert state.primary == PrimaryState.AHEAD
         outcome = execute(Action.PUSH, state, repo, POLICY)
         assert outcome.status == 'done'
         # After a successful push the remote-tracking ref advances → back to synced.
-        assert _state_for(repo, 'main').primary == PrimaryState.SYNCED
+        assert state_for(repo, 'main').primary == PrimaryState.SYNCED
 
     def test_rebase_push_resolves_diverged_without_conflict(self, cloned_repo, tmp_path):
-        _commit(cloned_repo, 'local.py', 'local work')  # local ahead on its own file
-        _second_clone_pushes(tmp_path, 'remote.py')  # remote ahead on a different file
-        repo = _make_repo(cloned_repo)
+        commit(cloned_repo, 'local.py', 'local work')  # local ahead on its own file
+        second_clone_pushes(tmp_path, 'remote.py')  # remote ahead on a different file
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
-        state = _state_for(repo, 'main')
+        state = state_for(repo, 'main')
         assert state.primary == PrimaryState.DIVERGED
         outcome = execute(Action.REBASE_PUSH, state, repo, POLICY)
         assert outcome.status == 'done'
-        assert _state_for(repo, 'main').primary == PrimaryState.SYNCED
+        assert state_for(repo, 'main').primary == PrimaryState.SYNCED
 
     def test_set_upstream_push_sets_tracking(self, cloned_repo):
-        _git(cloned_repo, 'checkout', '-b', 'feature/new')
-        _commit(cloned_repo, 'x.py', 'wip')
-        repo = _make_repo(cloned_repo)
-        state = _state_for(repo, 'feature/new')
+        git(cloned_repo, 'checkout', '-b', 'feature/new')
+        commit(cloned_repo, 'x.py', 'wip')
+        repo = make_repo(cloned_repo)
+        state = state_for(repo, 'feature/new')
         assert state.primary == PrimaryState.NO_UPSTREAM
         outcome = execute(Action.SET_UPSTREAM_PUSH, state, repo, POLICY)
         assert outcome.status == 'done'
         assert repo.branch_upstream('feature/new')[0] == 'origin/feature/new'
 
     def test_delete_local_removes_merged_gone_branch(self, cloned_repo):
-        _git(cloned_repo, 'checkout', '-b', 'feature/merged')
-        _git(cloned_repo, 'push', '-u', 'origin', 'feature/merged')
-        _git(cloned_repo, 'push', 'origin', '--delete', 'feature/merged')
-        _git(cloned_repo, 'checkout', 'main')
-        repo = _make_repo(cloned_repo)
+        git(cloned_repo, 'checkout', '-b', 'feature/merged')
+        git(cloned_repo, 'push', '-u', 'origin', 'feature/merged')
+        git(cloned_repo, 'push', 'origin', '--delete', 'feature/merged')
+        git(cloned_repo, 'checkout', 'main')
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
-        state = _state_for(repo, 'feature/merged')
+        state = state_for(repo, 'feature/merged')
         assert state.primary == PrimaryState.GONE
         assert state.merged_into_target is True
         outcome = execute(Action.DELETE_LOCAL, state, repo, POLICY)
@@ -193,58 +193,58 @@ class TestFastForwardDispatchesOnCheckoutState:
     checkout states, which is precisely where naming either mechanism directly fails."""
 
     def test_advances_the_current_branch(self, cloned_repo, tmp_path):
-        _second_clone_pushes(tmp_path)
-        repo = _make_repo(cloned_repo)
+        second_clone_pushes(tmp_path)
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
-        state = _state_for(repo, 'main')
+        state = state_for(repo, 'main')
         assert state.is_current is True
         assert state.primary == PrimaryState.BEHIND
         outcome = execute(Action.FAST_FORWARD, state, repo, POLICY)
         assert outcome.status == 'done'
         assert outcome.action == Action.FAST_FORWARD
-        assert _state_for(repo, 'main').primary == PrimaryState.SYNCED
+        assert state_for(repo, 'main').primary == PrimaryState.SYNCED
 
     def test_advances_a_non_current_branch(self, cloned_repo, tmp_path):
-        _git(cloned_repo, 'checkout', '-b', 'feature')
-        _git(cloned_repo, 'push', '-u', 'origin', 'feature')
+        git(cloned_repo, 'checkout', '-b', 'feature')
+        git(cloned_repo, 'push', '-u', 'origin', 'feature')
         bare = tmp_path / 'remote.git'
         second = tmp_path / 'second'
         subprocess.run(['git', 'clone', '-b', 'feature', str(bare), str(second)], capture_output=True)
-        _git(second, 'config', 'user.email', 'test@test.com')
-        _git(second, 'config', 'user.name', 'Test')
-        _commit(second, 'f.txt', 'feature work')
-        _git(second, 'push')
-        _git(cloned_repo, 'checkout', 'main')
-        repo = _make_repo(cloned_repo)
+        git(second, 'config', 'user.email', 'test@test.com')
+        git(second, 'config', 'user.name', 'Test')
+        commit(second, 'f.txt', 'feature work')
+        git(second, 'push')
+        git(cloned_repo, 'checkout', 'main')
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
-        state = _state_for(repo, 'feature')
+        state = state_for(repo, 'feature')
         assert state.is_current is False
         assert state.primary == PrimaryState.BEHIND
         outcome = execute(Action.FAST_FORWARD, state, repo, POLICY)
         assert outcome.status == 'done'
         assert outcome.action == Action.FAST_FORWARD
-        assert _state_for(repo, 'feature').primary == PrimaryState.SYNCED
+        assert state_for(repo, 'feature').primary == PrimaryState.SYNCED
 
     def test_refuses_a_dirty_current_branch(self, cloned_repo, tmp_path):
-        _second_clone_pushes(tmp_path)
-        repo = _make_repo(cloned_repo)
+        second_clone_pushes(tmp_path)
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
         (cloned_repo / 'README.md').write_text('# dirty edit\n')
-        before = _head(repo)
-        outcome = execute(Action.FAST_FORWARD, _state_for(repo, 'main'), repo, POLICY)
+        before = head(repo)
+        outcome = execute(Action.FAST_FORWARD, state_for(repo, 'main'), repo, POLICY)
         assert outcome.status == 'refused'
         assert outcome.reason is Refusal.DIRTY_TREE
-        assert _head(repo) == before
+        assert head(repo) == before
 
     def test_refuses_when_not_strictly_behind(self, cloned_repo, tmp_path):
-        _commit(cloned_repo, 'local.py', 'local')
-        _second_clone_pushes(tmp_path, 'remote.py')
-        repo = _make_repo(cloned_repo)
+        commit(cloned_repo, 'local.py', 'local')
+        second_clone_pushes(tmp_path, 'remote.py')
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
-        before = _head(repo)
-        outcome = execute(Action.FAST_FORWARD, _state_for(repo, 'main'), repo, POLICY)
+        before = head(repo)
+        outcome = execute(Action.FAST_FORWARD, state_for(repo, 'main'), repo, POLICY)
         assert outcome.status == 'refused'
-        assert _head(repo) == before
+        assert head(repo) == before
 
 
 class TestDeleteLocalIntegrationProof:
@@ -253,21 +253,21 @@ class TestDeleteLocalIntegrationProof:
     accept the squash merges that Bitbucket and GitHub perform by default."""
 
     def _develop_flow(self, cloned_repo) -> None:
-        _git(cloned_repo, 'checkout', '-b', 'develop')
-        _git(cloned_repo, 'push', '-u', 'origin', 'develop')
-        _git(cloned_repo, 'checkout', '-b', 'feature/x')
-        _commit(cloned_repo, 'feature.py', 'feat')
-        _git(cloned_repo, 'push', '-u', 'origin', 'feature/x')
-        _git(cloned_repo, 'checkout', 'develop')
+        git(cloned_repo, 'checkout', '-b', 'develop')
+        git(cloned_repo, 'push', '-u', 'origin', 'develop')
+        git(cloned_repo, 'checkout', '-b', 'feature/x')
+        commit(cloned_repo, 'feature.py', 'feat')
+        git(cloned_repo, 'push', '-u', 'origin', 'feature/x')
+        git(cloned_repo, 'checkout', 'develop')
 
     def test_merged_into_target_but_not_into_default(self, cloned_repo):
         self._develop_flow(cloned_repo)
-        _git(cloned_repo, 'merge', '--no-ff', '-m', 'merge feature/x', 'feature/x')
-        _git(cloned_repo, 'push')
-        _git(cloned_repo, 'push', 'origin', '--delete', 'feature/x')
-        repo = _make_repo(cloned_repo)
+        git(cloned_repo, 'merge', '--no-ff', '-m', 'merge feature/x', 'feature/x')
+        git(cloned_repo, 'push')
+        git(cloned_repo, 'push', 'origin', '--delete', 'feature/x')
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
-        state = _state_for(repo, 'feature/x')
+        state = state_for(repo, 'feature/x')
         assert state.primary == PrimaryState.GONE
         # Default target is the repo default (main), which the branch never reaches in this flow.
         assert execute(Action.DELETE_LOCAL, state, repo, POLICY).status == 'refused'
@@ -278,24 +278,24 @@ class TestDeleteLocalIntegrationProof:
 
     def test_squash_merged_into_target(self, cloned_repo):
         self._develop_flow(cloned_repo)
-        _git(cloned_repo, 'merge', '--squash', 'feature/x')
-        _git(cloned_repo, 'commit', '-m', 'squash feature/x')
-        _git(cloned_repo, 'push')
-        _git(cloned_repo, 'push', 'origin', '--delete', 'feature/x')
-        repo = _make_repo(cloned_repo)
+        git(cloned_repo, 'merge', '--squash', 'feature/x')
+        git(cloned_repo, 'commit', '-m', 'squash feature/x')
+        git(cloned_repo, 'push')
+        git(cloned_repo, 'push', 'origin', '--delete', 'feature/x')
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
         assert repo.is_merged_into('feature/x', 'develop') is False  # ancestry cannot see a squash
-        state = _state_for(repo, 'feature/x')
+        state = state_for(repo, 'feature/x')
         outcome = execute(Action.DELETE_LOCAL, state, repo, Policy(name='work', merge_target='develop'))
         assert outcome.status == 'done'
         assert 'feature/x' not in repo.local_branches()
 
     def test_refused_when_absent_from_the_target(self, cloned_repo):
         self._develop_flow(cloned_repo)
-        _git(cloned_repo, 'push', 'origin', '--delete', 'feature/x')  # deleted without merging
-        repo = _make_repo(cloned_repo)
+        git(cloned_repo, 'push', 'origin', '--delete', 'feature/x')  # deleted without merging
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
-        state = _state_for(repo, 'feature/x')
+        state = state_for(repo, 'feature/x')
         outcome = execute(Action.DELETE_LOCAL, state, repo, Policy(name='work', merge_target='develop'))
         assert outcome.status == 'refused'
         assert outcome.reason is Refusal.NOT_INTEGRATED and 'develop' in outcome.message
@@ -305,11 +305,11 @@ class TestDeleteLocalIntegrationProof:
         """contains_branch(develop, develop) is trivially true, so without an explicit guard a
         deleted origin/develop would take the local trunk with it."""
         self._develop_flow(cloned_repo)
-        _git(cloned_repo, 'checkout', 'main')
-        _git(cloned_repo, 'push', 'origin', '--delete', 'develop')
-        repo = _make_repo(cloned_repo)
+        git(cloned_repo, 'checkout', 'main')
+        git(cloned_repo, 'push', 'origin', '--delete', 'develop')
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
-        state = _state_for(repo, 'develop')
+        state = state_for(repo, 'develop')
         assert state.primary == PrimaryState.GONE
         outcome = execute(Action.DELETE_LOCAL, state, repo, Policy(name='work', merge_target='develop'))
         assert outcome.status == 'refused'
@@ -322,71 +322,71 @@ class TestDeleteLocalIntegrationProof:
 
 class TestExecuteRefusals:
     def test_pull_ff_refused_when_dirty(self, cloned_repo, tmp_path):
-        _second_clone_pushes(tmp_path)
-        repo = _make_repo(cloned_repo)
+        second_clone_pushes(tmp_path)
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
         (cloned_repo / 'README.md').write_text('# dirty edit\n')
-        before = _head(repo)
-        state = _state_for(repo, 'main')
+        before = head(repo)
+        state = state_for(repo, 'main')
         outcome = execute(Action.PULL_FF, state, repo, POLICY)
         assert outcome.status == 'refused'
         assert outcome.reason is Refusal.DIRTY_TREE
-        assert _head(repo) == before  # invariant 2: tree/HEAD untouched
+        assert head(repo) == before  # invariant 2: tree/HEAD untouched
 
     def test_pull_ff_refused_when_diverged(self, cloned_repo, tmp_path):
-        _commit(cloned_repo, 'local.py', 'local')
-        _second_clone_pushes(tmp_path, 'remote.py')
-        repo = _make_repo(cloned_repo)
+        commit(cloned_repo, 'local.py', 'local')
+        second_clone_pushes(tmp_path, 'remote.py')
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
-        before = _head(repo)
-        state = _state_for(repo, 'main')
+        before = head(repo)
+        state = state_for(repo, 'main')
         outcome = execute(Action.PULL_FF, state, repo, POLICY)
         assert outcome.status == 'refused'  # invariant 3: not strictly behind
-        assert _head(repo) == before
+        assert head(repo) == before
 
     def test_ff_ref_refused_on_current_branch(self, cloned_repo, tmp_path):
-        _second_clone_pushes(tmp_path)
-        repo = _make_repo(cloned_repo)
+        second_clone_pushes(tmp_path)
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
-        state = _state_for(repo, 'main')  # main is current and behind
+        state = state_for(repo, 'main')  # main is current and behind
         outcome = execute(Action.FF_REF, state, repo, POLICY)
         assert outcome.status == 'refused'
 
     def test_push_refused_when_diverged(self, cloned_repo, tmp_path):
-        _commit(cloned_repo, 'local.py', 'local')
-        _second_clone_pushes(tmp_path, 'remote.py')
-        repo = _make_repo(cloned_repo)
+        commit(cloned_repo, 'local.py', 'local')
+        second_clone_pushes(tmp_path, 'remote.py')
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
-        state = _state_for(repo, 'main')
+        state = state_for(repo, 'main')
         outcome = execute(Action.PUSH, state, repo, POLICY)
         assert outcome.status == 'refused'
 
     def test_push_refused_when_dirty(self, cloned_repo):
-        _commit(cloned_repo, 'new.py', 'feat')
+        commit(cloned_repo, 'new.py', 'feat')
         (cloned_repo / 'dirty.txt').write_text('uncommitted\n')
-        _git(cloned_repo, 'add', 'dirty.txt')
-        repo = _make_repo(cloned_repo)
-        state = _state_for(repo, 'main')
+        git(cloned_repo, 'add', 'dirty.txt')
+        repo = make_repo(cloned_repo)
+        state = state_for(repo, 'main')
         outcome = execute(Action.PUSH, state, repo, POLICY)
         assert outcome.status == 'refused'
         assert outcome.reason is Refusal.DIRTY_TREE
 
     def test_delete_local_refused_when_not_merged(self, cloned_repo):
-        _git(cloned_repo, 'checkout', '-b', 'feature/unmerged')
-        _commit(cloned_repo, 'extra.py', 'extra')  # diverges from main
-        _git(cloned_repo, 'push', '-u', 'origin', 'feature/unmerged')
-        _git(cloned_repo, 'push', 'origin', '--delete', 'feature/unmerged')
-        _git(cloned_repo, 'checkout', 'main')
-        repo = _make_repo(cloned_repo)
+        git(cloned_repo, 'checkout', '-b', 'feature/unmerged')
+        commit(cloned_repo, 'extra.py', 'extra')  # diverges from main
+        git(cloned_repo, 'push', '-u', 'origin', 'feature/unmerged')
+        git(cloned_repo, 'push', 'origin', '--delete', 'feature/unmerged')
+        git(cloned_repo, 'checkout', 'main')
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
-        state = _state_for(repo, 'feature/unmerged')
+        state = state_for(repo, 'feature/unmerged')
         assert state.primary == PrimaryState.GONE
         outcome = execute(Action.DELETE_LOCAL, state, repo, POLICY)
         assert outcome.status == 'refused'
         assert 'feature/unmerged' in repo.local_branches()  # not deleted
 
     def test_delete_local_refused_on_default_branch(self, cloned_repo):
-        repo = _make_repo(cloned_repo)
+        repo = make_repo(cloned_repo)
         # Hand-build a GONE state for main to prove the ¬default guard holds.
         state = BranchState(branch='main', primary=PrimaryState.GONE, is_default=True, merged_into_target=True)
         outcome = execute(Action.DELETE_LOCAL, state, repo, POLICY)
@@ -400,11 +400,11 @@ class TestExecuteRefusals:
 class TestInvariants:
     def test_rebase_push_conflict_aborts_clean(self, cloned_repo, tmp_path):
         # Local and remote edit the SAME file differently → rebase must conflict.
-        _commit(cloned_repo, 'README.md', 'local edit', content='local\n')
-        _second_clone_pushes(tmp_path, 'README.md', content='remote\n')
-        repo = _make_repo(cloned_repo)
+        commit(cloned_repo, 'README.md', 'local edit', content='local\n')
+        second_clone_pushes(tmp_path, 'README.md', content='remote\n')
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
-        state = _state_for(repo, 'main')
+        state = state_for(repo, 'main')
         assert state.primary == PrimaryState.DIVERGED
         outcome = execute(Action.REBASE_PUSH, state, repo, POLICY)
         assert outcome.status == 'refused'
@@ -417,18 +417,18 @@ class TestInvariants:
     def test_no_force_flag_ever_issued(self, cloned_repo, tmp_path):
         """Sweep every action against a battery of real states; assert git never sees --force*."""
         # Build a diverged main and a gone feature branch in one repo.
-        _git(cloned_repo, 'checkout', '-b', 'feature/gone')
-        _git(cloned_repo, 'push', '-u', 'origin', 'feature/gone')
-        _git(cloned_repo, 'push', 'origin', '--delete', 'feature/gone')
-        _git(cloned_repo, 'checkout', 'main')
-        _commit(cloned_repo, 'README.md', 'local', content='local\n')
-        _second_clone_pushes(tmp_path, 'README.md', content='remote\n')
-        repo = _make_repo(cloned_repo)
+        git(cloned_repo, 'checkout', '-b', 'feature/gone')
+        git(cloned_repo, 'push', '-u', 'origin', 'feature/gone')
+        git(cloned_repo, 'push', 'origin', '--delete', 'feature/gone')
+        git(cloned_repo, 'checkout', 'main')
+        commit(cloned_repo, 'README.md', 'local', content='local\n')
+        second_clone_pushes(tmp_path, 'README.md', content='remote\n')
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
         spy = GitSpy(repo)
 
         for branch in ('main', 'feature/gone'):
-            state = _state_for(repo, branch)
+            state = state_for(repo, branch)
             for action in Action:
                 execute(action, state, repo, POLICY)
 
@@ -438,17 +438,17 @@ class TestInvariants:
 
     def test_dirty_tree_never_mutated_across_actions(self, cloned_repo, tmp_path):
         """With a dirty current tree, no mutating action may change HEAD or the tree."""
-        _second_clone_pushes(tmp_path)
-        repo = _make_repo(cloned_repo)
+        second_clone_pushes(tmp_path)
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
         (cloned_repo / 'README.md').write_text('# dirty\n')
-        before_head = _head(repo)
+        before_head = head(repo)
         before_dirty = repo.uncommitted_changes
-        state = _state_for(repo, 'main')
+        state = state_for(repo, 'main')
         for action in (Action.FAST_FORWARD, Action.PULL_FF, Action.REBASE_PUSH, Action.PUSH):
             outcome = execute(action, state, repo, POLICY)
             assert outcome.status == 'refused'
-        assert _head(repo) == before_head
+        assert head(repo) == before_head
         assert repo.uncommitted_changes == before_dirty
 
 
@@ -457,18 +457,18 @@ class TestInvariants:
 
 class TestNonMutatingActions:
     def test_skip(self, cloned_repo):
-        repo = _make_repo(cloned_repo)
-        outcome = execute(Action.SKIP, _state_for(repo, 'main'), repo, POLICY)
+        repo = make_repo(cloned_repo)
+        outcome = execute(Action.SKIP, state_for(repo, 'main'), repo, POLICY)
         assert outcome.status == 'skipped'
 
     def test_report(self, cloned_repo):
-        repo = _make_repo(cloned_repo)
-        outcome = execute(Action.REPORT, _state_for(repo, 'main'), repo, POLICY)
+        repo = make_repo(cloned_repo)
+        outcome = execute(Action.REPORT, state_for(repo, 'main'), repo, POLICY)
         assert outcome.status == 'reported'
 
     def test_prompt_degrades_to_report(self, cloned_repo):
-        repo = _make_repo(cloned_repo)
-        outcome = execute(Action.PROMPT, _state_for(repo, 'main'), repo, POLICY)
+        repo = make_repo(cloned_repo)
+        outcome = execute(Action.PROMPT, state_for(repo, 'main'), repo, POLICY)
         assert outcome.status == 'reported'
         assert isinstance(outcome, Outcome)
 
@@ -486,9 +486,9 @@ class TestDirtyRefusalMatchesExecute:
         (repo_path / 'README.md').write_text('# Test\nuncommitted\n')
 
     def test_no_action_refuses_for_dirt_the_reporter_would_not_predict(self, cloned_repo):
-        repo = _make_repo(cloned_repo)
+        repo = make_repo(cloned_repo)
         self._dirty(cloned_repo)
-        state = _state_for(repo, 'main')
+        state = state_for(repo, 'main')
         for action in MUTATING_ACTIONS:
             outcome = execute(action, state, repo, POLICY)
             if outcome.reason is Refusal.DIRTY_TREE:
@@ -499,20 +499,20 @@ class TestDirtyRefusalMatchesExecute:
     def test_ff_ref_really_is_indifferent_to_the_tree(self, cloned_repo, tmp_path):
         """The one exemption in _WORKTREE_SAFE, proved rather than asserted: update-ref moves a
         ref that is not checked out, so it succeeds on a tree every other mutator refuses."""
-        _git(cloned_repo, 'checkout', '-b', 'feature')
-        _git(cloned_repo, 'push', '-u', 'origin', 'feature')
-        _git(cloned_repo, 'checkout', 'main')
+        git(cloned_repo, 'checkout', '-b', 'feature')
+        git(cloned_repo, 'push', '-u', 'origin', 'feature')
+        git(cloned_repo, 'checkout', 'main')
         second = tmp_path / 'second'
         subprocess.run(['git', 'clone', '-b', 'feature', str(tmp_path / 'remote.git'), str(second)], capture_output=True)
-        _git(second, 'config', 'user.email', 'test@test.com')
-        _git(second, 'config', 'user.name', 'Test')
-        _commit(second, 'remote.txt', 'remote change')
-        _git(second, 'push')
+        git(second, 'config', 'user.email', 'test@test.com')
+        git(second, 'config', 'user.name', 'Test')
+        commit(second, 'remote.txt', 'remote change')
+        git(second, 'push')
 
-        repo = _make_repo(cloned_repo)
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
         self._dirty(cloned_repo)
-        state = _state_for(repo, 'feature')
+        state = state_for(repo, 'feature')
         assert state.primary == PrimaryState.BEHIND
         assert repo.is_dirty
 
@@ -521,19 +521,19 @@ class TestDirtyRefusalMatchesExecute:
         assert execute(Action.FAST_FORWARD, state, repo, POLICY).status == 'done'
 
     def test_delete_local_really_is_indifferent_to_the_tree(self, cloned_repo):
-        """The second exemption in _TREE_INDEPENDENT, proved the same way. Uncommitted changes
+        """The second exemption in TREE_INDEPENDENT, proved the same way. Uncommitted changes
         belong to a tree, never to a branch, so a dirty tree is no evidence about the ref being
         deleted — and refusing on it left every merged branch in a repo with work in progress
         uncollectable, which on a repo somebody works in daily is permanently."""
-        _git(cloned_repo, 'checkout', '-b', 'merged-then-deleted')
-        _git(cloned_repo, 'push', '-u', 'origin', 'merged-then-deleted')
-        _git(cloned_repo, 'checkout', 'main')
-        _git(cloned_repo, 'push', 'origin', '--delete', 'merged-then-deleted')
+        git(cloned_repo, 'checkout', '-b', 'merged-then-deleted')
+        git(cloned_repo, 'push', '-u', 'origin', 'merged-then-deleted')
+        git(cloned_repo, 'checkout', 'main')
+        git(cloned_repo, 'push', 'origin', '--delete', 'merged-then-deleted')
 
-        repo = _make_repo(cloned_repo)
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
         self._dirty(cloned_repo)
-        state = _state_for(repo, 'merged-then-deleted')
+        state = state_for(repo, 'merged-then-deleted')
         assert state.primary == PrimaryState.GONE
         assert repo.is_dirty
         before_dirty = repo.uncommitted_changes
@@ -544,17 +544,17 @@ class TestDirtyRefusalMatchesExecute:
         assert repo.uncommitted_changes == before_dirty  # the work in the tree is untouched
 
     def test_a_clean_tree_blocks_nothing(self, cloned_repo):
-        repo = _make_repo(cloned_repo)
-        state = _state_for(repo, 'main')
+        repo = make_repo(cloned_repo)
+        state = state_for(repo, 'main')
         assert all(dirty_refusal(action, state, dirty=False) is None for action in Action)
 
     def test_non_mutating_actions_are_never_blocked_by_dirt(self, cloned_repo):
         """skip/report/prompt write nothing, so a dirty tree has no bearing on them — marking
         them 'would refuse' would put a refusal on the row of every dirty repo that is otherwise
         perfectly synced."""
-        repo = _make_repo(cloned_repo)
+        repo = make_repo(cloned_repo)
         self._dirty(cloned_repo)
-        state = _state_for(repo, 'main')
+        state = state_for(repo, 'main')
         for action in set(Action) - MUTATING_ACTIONS:
             assert dirty_refusal(action, state, dirty=True) is None, action
 
@@ -562,46 +562,46 @@ class TestDirtyRefusalMatchesExecute:
 # ---------- linked worktrees (invariant 9) ---------- #
 
 
-def _worktree_behind(cloned_repo: Path, tmp_path: Path, branch: str = 'wt-branch') -> tuple[Repo, Path]:
+def worktree_behind(cloned_repo: Path, tmp_path: Path, branch: str = 'wt-branch') -> tuple[Repo, Path]:
     """A branch checked out in a linked worktree, one commit behind its upstream.
 
     The exact shape the fast-forward path meets on a machine that uses worktrees at all: from the
-    main checkout the branch is not current, which is the condition _ff_ref reads as 'no tree to
+    main checkout the branch is not current, which is the condition ff_ref reads as 'no tree to
     disturb'.
     """
-    _git(cloned_repo, 'push', 'origin', f'main:refs/heads/{branch}')
-    _git(cloned_repo, 'fetch')
-    _git(cloned_repo, 'branch', branch, f'origin/{branch}')
+    git(cloned_repo, 'push', 'origin', f'main:refs/heads/{branch}')
+    git(cloned_repo, 'fetch')
+    git(cloned_repo, 'branch', branch, f'origin/{branch}')
     worktree = tmp_path / 'linked'
-    _git(cloned_repo, 'worktree', 'add', str(worktree), branch)
+    git(cloned_repo, 'worktree', 'add', str(worktree), branch)
 
     second = tmp_path / 'second'
     subprocess.run(['git', 'clone', '-b', branch, str(tmp_path / 'remote.git'), str(second)], capture_output=True)
-    _git(second, 'config', 'user.email', 'test@test.com')
-    _git(second, 'config', 'user.name', 'Test')
-    _commit(second, 'remote.txt', 'remote change')
-    _git(second, 'push')
+    git(second, 'config', 'user.email', 'test@test.com')
+    git(second, 'config', 'user.name', 'Test')
+    commit(second, 'remote.txt', 'remote change')
+    git(second, 'push')
 
-    repo = _make_repo(cloned_repo)
+    repo = make_repo(cloned_repo)
     repo.fetch_prune()
     return repo, worktree
 
 
-def _worktree_gone(cloned_repo: Path, tmp_path: Path, branch: str = 'wt-gone') -> tuple[Repo, Path]:
+def worktree_gone(cloned_repo: Path, tmp_path: Path, branch: str = 'wt-gone') -> tuple[Repo, Path]:
     """A merged branch whose remote is deleted, still checked out in a linked worktree.
 
     The shape a worktree-per-branch workflow leaves behind on every merged PR: nothing is wrong
     with the branch, delete_local's whole guard passes, and the only thing standing in the way is
     the worktree still holding the ref.
     """
-    _git(cloned_repo, 'push', 'origin', f'main:refs/heads/{branch}')
-    _git(cloned_repo, 'fetch')
-    _git(cloned_repo, 'branch', branch, f'origin/{branch}')
+    git(cloned_repo, 'push', 'origin', f'main:refs/heads/{branch}')
+    git(cloned_repo, 'fetch')
+    git(cloned_repo, 'branch', branch, f'origin/{branch}')
     worktree = tmp_path / 'linked-gone'
-    _git(cloned_repo, 'worktree', 'add', str(worktree), branch)
-    _git(cloned_repo, 'push', 'origin', '--delete', branch)
+    git(cloned_repo, 'worktree', 'add', str(worktree), branch)
+    git(cloned_repo, 'push', 'origin', '--delete', branch)
 
-    repo = _make_repo(cloned_repo)
+    repo = make_repo(cloned_repo)
     repo.fetch_prune()
     return repo, worktree
 
@@ -618,42 +618,42 @@ class TestWorktreeCheckout:
     """
 
     def test_ff_ref_refuses_and_the_worktree_is_untouched(self, cloned_repo, tmp_path):
-        repo, worktree = _worktree_behind(cloned_repo, tmp_path)
-        state = _state_for(repo, 'wt-branch')
+        repo, worktree = worktree_behind(cloned_repo, tmp_path)
+        state = state_for(repo, 'wt-branch')
         assert state.primary == PrimaryState.BEHIND
-        before = _git(worktree, 'rev-parse', 'HEAD').stdout.strip()
+        before = git(worktree, 'rev-parse', 'HEAD').stdout.strip()
 
         outcome = execute(Action.FF_REF, state, repo, POLICY)
 
         assert outcome.status == 'refused'
         assert outcome.reason is Refusal.WORKTREE_CHECKOUT
-        assert _git(worktree, 'rev-parse', 'HEAD').stdout.strip() == before
+        assert git(worktree, 'rev-parse', 'HEAD').stdout.strip() == before
         # The real damage was never the ref — it was the tree left describing a commit it no
         # longer pointed at, which a bare HEAD check would not have caught.
-        assert _git(worktree, 'status', '--porcelain').stdout == ''
+        assert git(worktree, 'status', '--porcelain').stdout == ''
 
     def test_fast_forward_dispatches_into_the_worktree_instead_of_refusing(self, cloned_repo, tmp_path):
         """The intent takes the mechanism that fits where the branch is checked out, and for a
         linked worktree that is a merge inside it. The ref moving is the easy half — the half
         that matters is the index and tree moving with it, which is exactly what update-ref
         failed to do and why writing the ref from outside is still forbidden."""
-        repo, worktree = _worktree_behind(cloned_repo, tmp_path)
-        state = _state_for(repo, 'wt-branch')
+        repo, worktree = worktree_behind(cloned_repo, tmp_path)
+        state = state_for(repo, 'wt-branch')
         assert state.primary == PrimaryState.BEHIND
 
         outcome = execute(Action.FAST_FORWARD, state, repo, POLICY)
 
         assert outcome.status == 'done'
-        upstream = _git(cloned_repo, 'rev-parse', 'origin/wt-branch').stdout.strip()
-        assert _git(worktree, 'rev-parse', 'HEAD').stdout.strip() == upstream
-        assert _git(worktree, 'status', '--porcelain').stdout == ''
+        upstream = git(cloned_repo, 'rev-parse', 'origin/wt-branch').stdout.strip()
+        assert git(worktree, 'rev-parse', 'HEAD').stdout.strip() == upstream
+        assert git(worktree, 'status', '--porcelain').stdout == ''
         assert (worktree / 'remote.txt').exists()  # the new commit's file is really on disk
 
     def test_the_report_predicts_the_ff_ref_refusal_and_not_the_intent(self, cloned_repo, tmp_path):
         """The mirror splits where the dispatch does. Writing the ref from outside is still
         refused; the intent is not, because it no longer takes that route."""
-        repo, _ = _worktree_behind(cloned_repo, tmp_path)
-        state = _state_for(repo, 'wt-branch')
+        repo, _ = worktree_behind(cloned_repo, tmp_path)
+        state = state_for(repo, 'wt-branch')
         assert state.worktree is not None
         assert state.worktree_dirty is False
         assert worktree_refusal(Action.FF_REF, state) is Refusal.WORKTREE_CHECKOUT
@@ -663,10 +663,10 @@ class TestWorktreeCheckout:
         """The one gate between a worktree-held branch and an ordinary fast-forward. It is the
         worktree's own tree — the main checkout's dirtiness has no bearing either way, which is
         the whole reason a worktree exists."""
-        repo, worktree = _worktree_behind(cloned_repo, tmp_path)
+        repo, worktree = worktree_behind(cloned_repo, tmp_path)
         (worktree / 'scratch.txt').write_text('work in progress\n')
-        state = _state_for(repo, 'wt-branch')
-        before = _git(worktree, 'rev-parse', 'HEAD').stdout.strip()
+        state = state_for(repo, 'wt-branch')
+        before = git(worktree, 'rev-parse', 'HEAD').stdout.strip()
 
         assert state.worktree_dirty is True
         assert worktree_refusal(Action.FAST_FORWARD, state) is Refusal.WORKTREE_DIRTY
@@ -675,14 +675,14 @@ class TestWorktreeCheckout:
 
         assert outcome.status == 'refused'
         assert outcome.reason is Refusal.WORKTREE_DIRTY
-        assert _git(worktree, 'rev-parse', 'HEAD').stdout.strip() == before
+        assert git(worktree, 'rev-parse', 'HEAD').stdout.strip() == before
         assert (worktree / 'scratch.txt').read_text() == 'work in progress\n'
 
     def test_ff_worktree_refuses_a_branch_no_worktree_holds(self, cloned_repo, tmp_path):
         """The mechanism's own side of the split, so naming it in a rule cannot reach a branch
         it does not cover — the reason rules name the intent."""
-        repo, _ = _worktree_behind(cloned_repo, tmp_path)
-        state = _state_for(repo, 'main')
+        repo, _ = worktree_behind(cloned_repo, tmp_path)
+        state = state_for(repo, 'main')
         assert state.worktree is None
         assert worktree_refusal(Action.FF_WORKTREE, state) is Refusal.NO_WORKTREE
         assert execute(Action.FF_WORKTREE, state, repo, POLICY).reason is Refusal.NO_WORKTREE
@@ -690,31 +690,31 @@ class TestWorktreeCheckout:
     def test_a_dirty_main_checkout_does_not_block_the_worktree(self, cloned_repo, tmp_path):
         """The inverse of the guard above, and the case that makes it worth having: syncer's own
         repo had 16 uncommitted files in the main checkout while every worktree was clean."""
-        repo, worktree = _worktree_behind(cloned_repo, tmp_path)
+        repo, worktree = worktree_behind(cloned_repo, tmp_path)
         (cloned_repo / 'README.md').write_text('# uncommitted, in the main checkout\n')
-        state = _state_for(repo, 'wt-branch')
+        state = state_for(repo, 'wt-branch')
         assert repo.is_dirty
         assert state.worktree_dirty is False
 
         assert dirty_refusal(Action.FF_WORKTREE, state, dirty=True) is None
         assert execute(Action.FAST_FORWARD, state, repo, POLICY).status == 'done'
-        assert _git(worktree, 'status', '--porcelain').stdout == ''
+        assert git(worktree, 'status', '--porcelain').stdout == ''
 
     def test_an_ordinary_non_current_branch_still_fast_forwards(self, cloned_repo, tmp_path):
         """The guard must cost nothing where no worktree is involved — otherwise it would refuse
         every non-current branch and disable ff_ref outright."""
-        _git(cloned_repo, 'checkout', '-b', 'feature')
-        _git(cloned_repo, 'push', '-u', 'origin', 'feature')
-        _git(cloned_repo, 'checkout', 'main')
-        _second_clone_pushes(tmp_path)
+        git(cloned_repo, 'checkout', '-b', 'feature')
+        git(cloned_repo, 'push', '-u', 'origin', 'feature')
+        git(cloned_repo, 'checkout', 'main')
+        second_clone_pushes(tmp_path)
         second = tmp_path / 'second'
-        _git(second, 'checkout', '-b', 'feature', 'origin/feature')
-        _commit(second, 'more.txt', 'on feature')
-        _git(second, 'push', 'origin', 'feature')
+        git(second, 'checkout', '-b', 'feature', 'origin/feature')
+        commit(second, 'more.txt', 'on feature')
+        git(second, 'push', 'origin', 'feature')
 
-        repo = _make_repo(cloned_repo)
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
-        state = _state_for(repo, 'feature')
+        state = state_for(repo, 'feature')
         assert state.worktree is None
         assert worktree_refusal(Action.FF_REF, state) is None
         assert execute(Action.FF_REF, state, repo, POLICY).status == 'done'
@@ -722,31 +722,31 @@ class TestWorktreeCheckout:
     def test_unreadable_worktree_list_refuses_rather_than_proceeds(self, cloned_repo, tmp_path):
         """Cannot-verify has to answer the way that refuses, the same polarity as is_dirty. The
         opposite reading is what made a failed `git status` mean permission to mutate."""
-        repo, worktree = _worktree_behind(cloned_repo, tmp_path)
-        state = _state_for(repo, 'wt-branch')
-        before = _git(worktree, 'rev-parse', 'HEAD').stdout.strip()
+        repo, worktree = worktree_behind(cloned_repo, tmp_path)
+        state = state_for(repo, 'wt-branch')
+        before = git(worktree, 'rev-parse', 'HEAD').stdout.strip()
         repo.__dict__['linked_worktree_branches'] = None  # as if `git worktree list` had failed
 
         outcome = execute(Action.FF_REF, state, repo, POLICY)
 
         assert outcome.reason is Refusal.WORKTREE_CHECKOUT
-        assert _git(worktree, 'rev-parse', 'HEAD').stdout.strip() == before
+        assert git(worktree, 'rev-parse', 'HEAD').stdout.strip() == before
 
     def test_git_refuses_the_destructive_paths_too(self, cloned_repo, tmp_path):
         """git's own refusal, established rather than assumed. It is why the ref never moves —
         and, on its own, not why syncer refuses: see the delete_local tests below."""
-        repo, worktree = _worktree_behind(cloned_repo, tmp_path)
-        assert _git(cloned_repo, 'branch', '-D', 'wt-branch').returncode != 0
-        assert _git(cloned_repo, 'branch', '-f', 'wt-branch', 'origin/wt-branch').returncode != 0
-        assert _git(worktree, 'rev-parse', '--abbrev-ref', 'HEAD').stdout.strip() == 'wt-branch'
+        repo, worktree = worktree_behind(cloned_repo, tmp_path)
+        assert git(cloned_repo, 'branch', '-D', 'wt-branch').returncode != 0
+        assert git(cloned_repo, 'branch', '-f', 'wt-branch', 'origin/wt-branch').returncode != 0
+        assert git(worktree, 'rev-parse', '--abbrev-ref', 'HEAD').stdout.strip() == 'wt-branch'
 
     def test_delete_local_refuses_a_branch_a_worktree_holds(self, cloned_repo, tmp_path):
         """Inheriting git's refusal is not the same as making one. git returns it as a failure
         carrying prose, so the outcome was `failed` with no key on it — and the reporter, which
         runs no git at all, could not predict it, printing `gone → delete_local` on a row apply
         was always going to bounce."""
-        repo, worktree = _worktree_gone(cloned_repo, tmp_path)
-        state = _state_for(repo, 'wt-gone')
+        repo, worktree = worktree_gone(cloned_repo, tmp_path)
+        state = state_for(repo, 'wt-gone')
         assert state.primary == PrimaryState.GONE
 
         outcome = execute(Action.DELETE_LOCAL, state, repo, POLICY)
@@ -754,45 +754,45 @@ class TestWorktreeCheckout:
         assert outcome.status == 'refused'
         assert outcome.reason is Refusal.WORKTREE_CHECKOUT
         assert 'wt-gone' in repo.local_branches()
-        assert _git(worktree, 'rev-parse', '--abbrev-ref', 'HEAD').stdout.strip() == 'wt-gone'
+        assert git(worktree, 'rev-parse', '--abbrev-ref', 'HEAD').stdout.strip() == 'wt-gone'
 
     def test_the_report_predicts_the_delete_refusal(self, cloned_repo, tmp_path):
-        repo, _ = _worktree_gone(cloned_repo, tmp_path)
-        state = _state_for(repo, 'wt-gone')
+        repo, _ = worktree_gone(cloned_repo, tmp_path)
+        state = state_for(repo, 'wt-gone')
         assert worktree_refusal(Action.DELETE_LOCAL, state) is Refusal.WORKTREE_CHECKOUT
 
     def test_removing_the_worktree_is_all_that_stands_in_the_way(self, cloned_repo, tmp_path):
         """The rest of the guard passes, which is what makes the refusal worth a remedy rather
         than a full stop: the branch is merged and the remote is gone."""
-        repo, worktree = _worktree_gone(cloned_repo, tmp_path)
-        assert _git(cloned_repo, 'worktree', 'remove', str(worktree)).returncode == 0
+        repo, worktree = worktree_gone(cloned_repo, tmp_path)
+        assert git(cloned_repo, 'worktree', 'remove', str(worktree)).returncode == 0
 
-        repo = _make_repo(cloned_repo)
-        outcome = execute(Action.DELETE_LOCAL, _state_for(repo, 'wt-gone'), repo, POLICY)
+        repo = make_repo(cloned_repo)
+        outcome = execute(Action.DELETE_LOCAL, state_for(repo, 'wt-gone'), repo, POLICY)
 
         assert outcome.status == 'done'
         assert 'wt-gone' not in repo.local_branches()
 
 
-def _current_and_gone(cloned_repo: Path, tmp_path: Path) -> tuple[Repo, BranchState]:
+def current_and_gone(cloned_repo: Path, tmp_path: Path) -> tuple[Repo, BranchState]:
     """A branch whose remote was deleted, still checked out here. Its own clone, so the caller's
     checkout stays on main and the other states in a battery keep their meaning.
 
     This is the only shape that reaches DELETE_CURRENT. On any branch that is not gone, NOT_GONE
     answers first, so a fixture on `main` walks past the guard without ever testing it.
     """
-    origin = _git(cloned_repo, 'remote', 'get-url', 'origin').stdout.strip()
+    origin = git(cloned_repo, 'remote', 'get-url', 'origin').stdout.strip()
     second = tmp_path / 'gone-clone'
     subprocess.run(['git', 'clone', origin, str(second)], capture_output=True)
-    _git(second, 'config', 'user.email', 'test@test.com')
-    _git(second, 'config', 'user.name', 'Test')
-    _git(second, 'checkout', '-b', 'feature/gone')
-    _git(second, 'push', '-u', 'origin', 'feature/gone')
-    _git(second, 'push', 'origin', '--delete', 'feature/gone')
+    git(second, 'config', 'user.email', 'test@test.com')
+    git(second, 'config', 'user.name', 'Test')
+    git(second, 'checkout', '-b', 'feature/gone')
+    git(second, 'push', '-u', 'origin', 'feature/gone')
+    git(second, 'push', 'origin', '--delete', 'feature/gone')
 
-    repo = _make_repo(second)
+    repo = make_repo(second)
     repo.fetch_prune()
-    return repo, _state_for(repo, 'feature/gone')
+    return repo, state_for(repo, 'feature/gone')
 
 
 class TestCheckoutRefusal:
@@ -801,22 +801,22 @@ class TestCheckoutRefusal:
     refused all of them at execute time."""
 
     def test_rebase_push_is_predicted_refused_off_the_current_branch(self, cloned_repo):
-        repo = _make_repo(cloned_repo)
-        state = _state_for(repo, 'main').model_copy(update={'is_current': False})
+        repo = make_repo(cloned_repo)
+        state = state_for(repo, 'main').model_copy(update={'is_current': False})
         assert checkout_refusal(Action.REBASE_PUSH, state) is Refusal.NOT_CURRENT
         assert checkout_refusal(Action.PULL_FF, state) is Refusal.NOT_CURRENT
 
     def test_ff_ref_is_predicted_refused_on_it(self, cloned_repo):
-        repo = _make_repo(cloned_repo)
-        state = _state_for(repo, 'main')
+        repo = make_repo(cloned_repo)
+        state = state_for(repo, 'main')
         assert state.is_current
         assert checkout_refusal(Action.FF_REF, state) is Refusal.IS_CURRENT
 
     def test_fast_forward_is_never_gated_on_checkout(self, cloned_repo):
         """It dispatches between the mechanisms precisely so neither side of the split refuses
         it, which is why policies name the intent."""
-        repo = _make_repo(cloned_repo)
-        current = _state_for(repo, 'main')
+        repo = make_repo(cloned_repo)
+        current = state_for(repo, 'main')
         assert checkout_refusal(Action.FAST_FORWARD, current) is None
         assert checkout_refusal(Action.FAST_FORWARD, current.model_copy(update={'is_current': False})) is None
 
@@ -827,7 +827,7 @@ class TestCheckoutRefusal:
         `gone → delete_local` and apply refused every time — the arrow that promises an action
         apply never makes, which is the failure this whole gate exists to prevent.
         """
-        repo, state = _current_and_gone(cloned_repo, tmp_path)
+        repo, state = current_and_gone(cloned_repo, tmp_path)
 
         assert state.is_current
         assert state.primary == 'gone'
@@ -848,11 +848,11 @@ class TestCheckoutRefusal:
         and no other fixture reaches it. Without it the guard is unreachable behind NOT_GONE, and
         the loop passes over a branch that was never the shape in question.
         """
-        plain = _make_repo(cloned_repo)
-        gone_repo, gone_state = _current_and_gone(cloned_repo, tmp_path)
+        plain = make_repo(cloned_repo)
+        gone_repo, gone_state = current_and_gone(cloned_repo, tmp_path)
         batteries = [
-            (plain, _state_for(plain, 'main')),
-            (plain, _state_for(plain, 'main').model_copy(update={'is_current': False})),
+            (plain, state_for(plain, 'main')),
+            (plain, state_for(plain, 'main').model_copy(update={'is_current': False})),
             (gone_repo, gone_state),
             (gone_repo, gone_state.model_copy(update={'is_current': False})),
         ]
@@ -876,42 +876,42 @@ class TestProtectedBranches:
     guard that makes it structural, checked centrally before any action dispatches."""
 
     def test_push_is_refused_and_the_remote_is_untouched(self, cloned_repo, tmp_path):
-        _git(cloned_repo, 'checkout', '-b', 'develop')
-        _git(cloned_repo, 'push', '-u', 'origin', 'develop')
-        _commit(cloned_repo, 'local.txt', 'local work')
-        repo = _make_repo(cloned_repo)
+        git(cloned_repo, 'checkout', '-b', 'develop')
+        git(cloned_repo, 'push', '-u', 'origin', 'develop')
+        commit(cloned_repo, 'local.txt', 'local work')
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
-        state = _state_for(repo, 'develop')
+        state = state_for(repo, 'develop')
         assert state.primary == PrimaryState.AHEAD
-        remote_head_before = _git(tmp_path / 'remote.git', 'rev-parse', 'develop').stdout.strip()
+        remote_head_before = git(tmp_path / 'remote.git', 'rev-parse', 'develop').stdout.strip()
 
         outcome = execute(Action.PUSH, state, repo, Policy(name='p', protected=['develop']))
         assert outcome.status == 'refused'
         assert outcome.reason is Refusal.PROTECTED and 'develop' in outcome.message
-        assert _git(tmp_path / 'remote.git', 'rev-parse', 'develop').stdout.strip() == remote_head_before
+        assert git(tmp_path / 'remote.git', 'rev-parse', 'develop').stdout.strip() == remote_head_before
 
     def test_fast_forward_still_runs(self, cloned_repo, tmp_path):
         """Protection stops publishing and destroying, not catching up. Advancing to what the
         upstream already contains does neither — and refusing it would make the setting useless
         for exactly the long-lived branches it exists to protect."""
-        _second_clone_pushes(tmp_path)
-        repo = _make_repo(cloned_repo)
+        second_clone_pushes(tmp_path)
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
-        state = _state_for(repo, 'main')
+        state = state_for(repo, 'main')
         assert state.primary == PrimaryState.BEHIND
 
         outcome = execute(Action.FAST_FORWARD, state, repo, Policy(name='p', protected=['main']))
         assert outcome.status == 'done'
-        assert _state_for(repo, 'main').primary == PrimaryState.SYNCED
+        assert state_for(repo, 'main').primary == PrimaryState.SYNCED
 
     def test_delete_local_is_refused_on_a_protected_branch(self, cloned_repo, tmp_path):
-        _git(cloned_repo, 'checkout', '-b', 'release/1.0')
-        _git(cloned_repo, 'push', '-u', 'origin', 'release/1.0')
-        _git(cloned_repo, 'push', 'origin', '--delete', 'release/1.0')
-        _git(cloned_repo, 'checkout', 'main')
-        repo = _make_repo(cloned_repo)
+        git(cloned_repo, 'checkout', '-b', 'release/1.0')
+        git(cloned_repo, 'push', '-u', 'origin', 'release/1.0')
+        git(cloned_repo, 'push', 'origin', '--delete', 'release/1.0')
+        git(cloned_repo, 'checkout', 'main')
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
-        state = _state_for(repo, 'release/1.0')
+        state = state_for(repo, 'release/1.0')
         assert state.primary == PrimaryState.GONE
 
         outcome = execute(Action.DELETE_LOCAL, state, repo, Policy(name='p', protected=['release/*']))
@@ -920,8 +920,8 @@ class TestProtectedBranches:
         assert 'release/1.0' in repo.local_branches()
 
     def test_glob_patterns_match_like_rule_selectors(self, cloned_repo):
-        repo = _make_repo(cloned_repo)
-        state = _state_for(repo, 'main')
+        repo = make_repo(cloned_repo)
+        state = state_for(repo, 'main')
         assert execute(Action.PUSH, state, repo, Policy(name='p', protected=['ma*'])).reason is Refusal.PROTECTED
         # A non-matching pattern leaves the action to its own preconditions, whatever they say.
         assert execute(Action.PUSH, state, repo, Policy(name='p', protected=['release/*'])).reason is not Refusal.PROTECTED
@@ -929,14 +929,14 @@ class TestProtectedBranches:
     def test_every_publishing_action_is_refused(self, cloned_repo, tmp_path):
         """Iterate Action rather than listing the mutators: PROTECTED_ALLOWED is an allowlist, so
         an action added later is refused by default and this test proves it stays that way."""
-        _git(cloned_repo, 'checkout', '-b', 'develop')
-        _commit(cloned_repo, 'local.txt', 'local work')
-        repo = _make_repo(cloned_repo)
+        git(cloned_repo, 'checkout', '-b', 'develop')
+        commit(cloned_repo, 'local.txt', 'local work')
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
         spy = GitSpy(repo)
-        state = _state_for(repo, 'develop')
+        state = state_for(repo, 'develop')
         policy = Policy(name='p', protected=['develop'])
-        head_before = _head(repo)
+        head_before = head(repo)
 
         for action in Action:
             outcome = execute(action, state, repo, policy)
@@ -946,15 +946,15 @@ class TestProtectedBranches:
                 assert outcome.status == 'refused', action
                 assert outcome.reason is Refusal.PROTECTED, action
 
-        assert _head(repo) == head_before
+        assert head(repo) == head_before
         # A refusal is decided before dispatch, so no mutating git command is even attempted.
         assert not any(arg in ('push', 'branch', 'update-ref', 'rebase') for arg in spy.flat_args)
 
     def test_an_unprotected_policy_changes_nothing(self, cloned_repo, tmp_path):
-        _second_clone_pushes(tmp_path)
-        repo = _make_repo(cloned_repo)
+        second_clone_pushes(tmp_path)
+        repo = make_repo(cloned_repo)
         repo.fetch_prune()
-        state = _state_for(repo, 'main')
+        state = state_for(repo, 'main')
         assert execute(Action.FAST_FORWARD, state, repo, POLICY).status == 'done'
 
 
@@ -977,8 +977,8 @@ class TestActionDocs:
     def _clone(self, tmp_path: Path, tag: str) -> Path:
         path = tmp_path / f'c-{tag}'
         subprocess.run(['git', 'clone', str(tmp_path / 'remote.git'), str(path)], capture_output=True)
-        _git(path, 'config', 'user.email', 'test@test.com')
-        _git(path, 'config', 'user.name', 'Test')
+        git(path, 'config', 'user.email', 'test@test.com')
+        git(path, 'config', 'user.name', 'Test')
         return path
 
     def _advance_origin(self, path: Path, tag: str) -> str:
@@ -988,11 +988,11 @@ class TestActionDocs:
         pushes main from a different clone, that helper is behind and its push is rejected — with
         output captured, so it fails silently and the next fixture is quietly the wrong state.
         """
-        _git(path, 'fetch', 'origin')
-        _git(path, 'checkout', '-B', 'main', 'origin/main')
-        before = _git(path, 'rev-parse', 'HEAD').stdout.strip()
-        _commit(path, f'adv-{tag}.txt', 'advance')
-        _git(path, 'push', 'origin', 'main')
+        git(path, 'fetch', 'origin')
+        git(path, 'checkout', '-B', 'main', 'origin/main')
+        before = git(path, 'rev-parse', 'HEAD').stdout.strip()
+        commit(path, f'adv-{tag}.txt', 'advance')
+        git(path, 'push', 'origin', 'main')
         return before
 
     def _case(self, state: PrimaryState, tmp_path: Path, tag: str) -> tuple[Repo, str]:
@@ -1001,34 +1001,34 @@ class TestActionDocs:
         so every (state, action) pair needs its own."""
         path = self._clone(tmp_path, tag)
         if state is PrimaryState.NO_UPSTREAM:
-            _git(path, 'checkout', '-b', 'orphan')
-            _commit(path, 'orphan.txt', 'orphan')
-            return _make_repo(path), 'orphan'
+            git(path, 'checkout', '-b', 'orphan')
+            commit(path, 'orphan.txt', 'orphan')
+            return make_repo(path), 'orphan'
         if state is PrimaryState.GONE:
-            _git(path, 'checkout', '-b', 'feature')
-            _commit(path, 'feature.txt', 'feature')
-            _git(path, 'push', '-u', 'origin', 'feature')
-            _git(path, 'checkout', 'main')
-            _git(path, 'merge', 'feature')
-            _git(path, 'push', 'origin', 'main')
-            _git(path, 'push', 'origin', '--delete', 'feature')
-            _git(path, 'fetch', '--prune', 'origin')
-            return _make_repo(path), 'feature'
+            git(path, 'checkout', '-b', 'feature')
+            commit(path, 'feature.txt', 'feature')
+            git(path, 'push', '-u', 'origin', 'feature')
+            git(path, 'checkout', 'main')
+            git(path, 'merge', 'feature')
+            git(path, 'push', 'origin', 'main')
+            git(path, 'push', 'origin', '--delete', 'feature')
+            git(path, 'fetch', '--prune', 'origin')
+            return make_repo(path), 'feature'
         if state in (PrimaryState.BEHIND, PrimaryState.DIVERGED):
             before = self._advance_origin(path, tag)
-            _git(path, 'checkout', '-B', 'main', before)
+            git(path, 'checkout', '-B', 'main', before)
         if state in (PrimaryState.AHEAD, PrimaryState.DIVERGED):
-            _commit(path, f'local-{tag}.txt', 'local')
-        return _make_repo(path), 'main'
+            commit(path, f'local-{tag}.txt', 'local')
+        return make_repo(path), 'main'
 
     def _behind_noncurrent(self, tmp_path: Path, tag: str) -> tuple[Repo, str]:
         """A behind branch that is *not* checked out — the only shape ff_ref can act on, and
         without it applies_to={behind} would look unreachable for it."""
         path = self._clone(tmp_path, tag)
         before = self._advance_origin(path, tag)
-        _git(path, 'branch', 'stale', before)
-        _git(path, 'branch', '--set-upstream-to=origin/main', 'stale')
-        return _make_repo(path), 'stale'
+        git(path, 'branch', 'stale', before)
+        git(path, 'branch', '--set-upstream-to=origin/main', 'stale')
+        return make_repo(path), 'stale'
 
     def _behind_worktree(self, tmp_path: Path, tag: str) -> tuple[Repo, str]:
         """The same branch, checked out in a clean linked worktree — the only shape ff_worktree
@@ -1036,10 +1036,10 @@ class TestActionDocs:
         committed to yet: made off origin/main, tracking it, drifting as main moves."""
         path = self._clone(tmp_path, tag)
         before = self._advance_origin(path, tag)
-        _git(path, 'branch', 'parked', before)
-        _git(path, 'branch', '--set-upstream-to=origin/main', 'parked')
-        _git(path, 'worktree', 'add', str(tmp_path / f'wt-{tag}'), 'parked')
-        return _make_repo(path), 'parked'
+        git(path, 'branch', 'parked', before)
+        git(path, 'branch', '--set-upstream-to=origin/main', 'parked')
+        git(path, 'worktree', 'add', str(tmp_path / f'wt-{tag}'), 'parked')
+        return make_repo(path), 'parked'
 
     # Every state, plus the checkout variants that change which mechanism can act. There is one
     # per place a branch can be checked out, so this list grows with the dispatch.
@@ -1067,7 +1067,7 @@ class TestActionDocs:
         for case in self.CASES:
             for action in MUTATING_ACTIONS:
                 repo, branch, state = self._build(case, tmp_path, f'{case}-{action.value}')
-                classified = _state_for(repo, branch)
+                classified = state_for(repo, branch)
                 assert classified.primary == state, f'fixture {case} classified as {classified.primary}'
                 outcome = execute(action, classified, repo, POLICY)
                 if outcome.status != 'refused':
@@ -1089,7 +1089,7 @@ class TestActionDocs:
         for case in self.CASES:
             for action in MUTATING_ACTIONS:
                 repo, branch, _ = self._build(case, tmp_path, f'r-{case}-{action.value}')
-                outcome = execute(action, _state_for(repo, branch), repo, POLICY)
+                outcome = execute(action, state_for(repo, branch), repo, POLICY)
                 if outcome.status != 'refused':
                     continue
                 assert outcome.reason in ACTION_DOCS[action].refuses, f'{action} on {case}: undocumented refusal {outcome.reason}'
@@ -1097,7 +1097,7 @@ class TestActionDocs:
     def test_every_refusal_key_renders(self):
         """Every key has wording, and no template is missing a field it needs at render time."""
         assert set(REFUSAL_TEXT) == set(Refusal)
-        # describe_refusal fills every template field from _DOC_FIELDS, so a template growing a
+        # describe_refusal fills every template field from DOC_FIELDS, so a template growing a
         # new placeholder without a stand-in raises KeyError here rather than in the CLI.
         for reason in Refusal:
             assert describe_refusal(reason)

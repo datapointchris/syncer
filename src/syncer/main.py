@@ -25,9 +25,9 @@ from syncer.doctor import render_doctor
 from syncer.doctor import run_doctor
 from syncer.output import ICON_MOVE
 from syncer.output import ICON_WARN
-from syncer.output import _status_line
 from syncer.output import console
 from syncer.output import error
+from syncer.output import status_line
 from syncer.report import DEFAULT_JOBS
 from syncer.report import exit_code_for
 from syncer.report import report_branches
@@ -48,7 +48,7 @@ app.add_typer(policy_app, name='policy', rich_help_panel='Inspect')
 # the notice cannot name a release the update command would not install.
 UPDATE_CONFIG = Config(tool='syncer', owner='datapointchris')
 
-_EPILOG = (
+EPILOG = (
     '[bold]Examples[/bold]\n\n'
     '[cyan]syncer check[/cyan] — report the repos that need something; never writes\n\n'
     '[cyan]syncer check -v[/cyan] — the same run, listing every repo including the synced ones\n\n'
@@ -60,7 +60,7 @@ _EPILOG = (
 )
 
 
-def _events_file(repos_path: Path, override: Path | None) -> Path:
+def events_file(repos_path: Path, override: Path | None) -> Path:
     """Event stream for the registry in play. The pre-split global stream is adopted only when
     no --repos-file was given, since it is the default registry's history and nobody else's."""
     events_file = events_file_for(repos_path)
@@ -68,17 +68,17 @@ def _events_file(repos_path: Path, override: Path | None) -> Path:
     return events_file
 
 
-def _version_callback(value: bool) -> None:
+def version_callback(value: bool) -> None:
     if value:
         console.print(f'syncer {importlib.metadata.version("syncer")}')
         raise typer.Exit()
 
 
-@app.callback(epilog=_EPILOG)
+@app.callback(epilog=EPILOG)
 def main(
     ctx: typer.Context,
     version: Annotated[
-        bool, typer.Option('--version', '-V', callback=_version_callback, is_eager=True, help='Show the installed version and exit')
+        bool, typer.Option('--version', '-V', callback=version_callback, is_eager=True, help='Show the installed version and exit')
     ] = False,
 ) -> None:
     """Check whether local git repos are synced, across every branch.
@@ -113,7 +113,7 @@ Verbose = Annotated[bool, typer.Option('--verbose', '-v', help='Show every repo,
 INTERRUPTED_EXIT_CODE = 130
 
 
-def _run(*, apply: bool, per_branch: bool, policy: str | None, jobs: int, repos_file: Path | None, as_json: bool, verbose: bool) -> None:
+def run(*, apply: bool, per_branch: bool, policy: str | None, jobs: int, repos_file: Path | None, as_json: bool, verbose: bool) -> None:
     """Both verbs are the same run; only whether it writes and how it is grouped differ."""
     try:
         if per_branch:
@@ -131,7 +131,7 @@ def _run(*, apply: bool, per_branch: bool, policy: str | None, jobs: int, repos_
             reports = run_sync(
                 syncer_config,
                 load_tool_config(),
-                _events_file(repos_path, repos_file),
+                events_file(repos_path, repos_file),
                 cli_policy=policy,
                 apply=apply,
                 jobs=jobs,
@@ -164,7 +164,7 @@ def check(
 
     Exits 1 if any repo reached an error state, so it can gate a script.
     """
-    _run(apply=False, per_branch=per_branch, policy=policy, jobs=jobs, repos_file=repos_file, as_json=json_output, verbose=verbose)
+    run(apply=False, per_branch=per_branch, policy=policy, jobs=jobs, repos_file=repos_file, as_json=json_output, verbose=verbose)
 
 
 @app.command(rich_help_panel='Sync')
@@ -186,7 +186,7 @@ def apply(
 
     Exits 1 if any repo reached an error state, so it can gate a script.
     """
-    _run(apply=True, per_branch=per_branch, policy=policy, jobs=jobs, repos_file=repos_file, as_json=json_output, verbose=verbose)
+    run(apply=True, per_branch=per_branch, policy=policy, jobs=jobs, repos_file=repos_file, as_json=json_output, verbose=verbose)
 
 
 @app.command(rich_help_panel='Inspect')
@@ -217,10 +217,10 @@ def issues(
         if not path.exists():
             found = find_repo_in_search_paths(repo_config.name, search_paths, claimed_paths)
             if found:
-                console.print(_status_line(ICON_MOVE, label, 'path mismatch', 'yellow'))
+                console.print(status_line(ICON_MOVE, label, 'path mismatch', 'yellow'))
                 console.print(f'    found at {found} (update repos.json manually)')
             else:
-                console.print(_status_line(ICON_WARN, label, 'missing', 'yellow'))
+                console.print(status_line(ICON_WARN, label, 'missing', 'yellow'))
             issues_found += 1
             console.print()
             continue
@@ -229,7 +229,7 @@ def issues(
             # A directory with no repo in it. Skipping it silently printed 'registry matches the
             # filesystem' for a machine mid-setup, where every path is in this state — the same
             # unmeasured all-clear the line at the bottom was rewritten to stop.
-            console.print(_status_line(ICON_WARN, label, 'not cloned', 'yellow'))
+            console.print(status_line(ICON_WARN, label, 'not cloned', 'yellow'))
             console.print('    a directory is here but holds no repo — syncer apply clones into it')
             issues_found += 1
             console.print()
@@ -256,7 +256,7 @@ def issues(
         # only — a deliberate fork is indistinguishable from a mistake without asking.
         actual_origin = origin_mismatch(repo)
         if actual_origin:
-            console.print(_status_line(ICON_WARN, label, 'origin mismatch', 'yellow'))
+            console.print(status_line(ICON_WARN, label, 'origin mismatch', 'yellow'))
             console.print(f'    origin is {actual_origin}')
             console.print(f'    registry expects {repo.url} (fix the remote or repos.json manually)')
             issues_found += 1
@@ -268,9 +268,9 @@ def issues(
         is_ours = bool(syncer_config.owner) and owner == syncer_config.owner
         if syncer_config.owns_branch_naming and is_ours and repo.default_branch == 'master':
             if repo.is_fork:
-                console.print(_status_line(ICON_WARN, label, 'using master (fork)', 'yellow', branch='master'))
+                console.print(status_line(ICON_WARN, label, 'using master (fork)', 'yellow', branch='master'))
             else:
-                console.print(_status_line(ICON_WARN, label, 'using master', 'yellow', branch='master'))
+                console.print(status_line(ICON_WARN, label, 'using master', 'yellow', branch='master'))
             issues_found += 1
             console.print()
 
@@ -280,7 +280,7 @@ def issues(
     for search_path in search_paths:
         for found in find_untracked_repos(search_path, known_paths, excluded):
             item_path = str(found).replace(str(Path.home()), '~')
-            console.print(_status_line(ICON_WARN, item_path, 'untracked (not in the registry)', 'yellow'))
+            console.print(status_line(ICON_WARN, item_path, 'untracked (not in the registry)', 'yellow'))
             console.print()
             issues_found += 1
 
@@ -310,7 +310,7 @@ def stats(
     History is per registry, so this reports on the same working set the sync run used.
     """
     syncer_config, repos_path = resolve_registry(repos_file)
-    show_stats(syncer_config, _events_file(repos_path, repos_file))
+    show_stats(syncer_config, events_file(repos_path, repos_file))
 
 
 @app.command(rich_help_panel='Inspect')
@@ -350,11 +350,11 @@ def update(
     run_update(UPDATE_CONFIG, check_only=check_only)
 
 
-def _git(path: Path, *args: str) -> None:
+def git(path: Path, *args: str) -> None:
     subprocess.run(['git', *args], cwd=path, capture_output=True, text=True)  # nosec B607
 
 
-def _setup_demo_repos(base: Path) -> SyncerConfig:
+def setup_demo_repos(base: Path) -> SyncerConfig:
     """Create real git repos in various states for demo."""
 
     def make_repo(name: str) -> Path:
@@ -363,12 +363,12 @@ def _setup_demo_repos(base: Path) -> SyncerConfig:
         subprocess.run(['git', 'init', '--bare', str(bare)], capture_output=True)  # nosec B607
         repo = base / 'repos' / name
         subprocess.run(['git', 'clone', str(bare), str(repo)], capture_output=True)  # nosec B607
-        _git(repo, 'config', 'user.email', 'demo@syncer')
-        _git(repo, 'config', 'user.name', 'Demo')
+        git(repo, 'config', 'user.email', 'demo@syncer')
+        git(repo, 'config', 'user.name', 'Demo')
         (repo / 'README.md').write_text(f'# {name}\n')
-        _git(repo, 'add', '.')
-        _git(repo, 'commit', '-m', 'init')
-        _git(repo, 'push')
+        git(repo, 'add', '.')
+        git(repo, 'commit', '-m', 'init')
+        git(repo, 'push')
         return repo
 
     # 1. Synced — clean, up to date
@@ -379,37 +379,37 @@ def _setup_demo_repos(base: Path) -> SyncerConfig:
     (repo / 'src').mkdir()
     (repo / 'src' / 'main.py').write_text('print("hello")\n')
     (repo / 'new_file.txt').write_text('untracked\n')
-    _git(repo, 'add', 'src/main.py')
+    git(repo, 'add', 'src/main.py')
 
     # 3. Unpushed commits
     repo = make_repo('unpushed-repo')
     (repo / 'feature.py').write_text('def feature(): pass\n')
-    _git(repo, 'add', '.')
-    _git(repo, 'commit', '-m', 'feat: add new feature')
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-m', 'feat: add new feature')
     (repo / 'fix.py').write_text('def fix(): pass\n')
-    _git(repo, 'add', '.')
-    _git(repo, 'commit', '-m', 'fix: resolve bug')
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-m', 'fix: resolve bug')
 
     # 4. Behind remote (push from a second clone)
     make_repo('behind-repo')
     second = base / 'second-clone'
     bare = base / 'remotes' / 'behind-repo.git'
     subprocess.run(['git', 'clone', str(bare), str(second)], capture_output=True)  # nosec B607
-    _git(second, 'config', 'user.email', 'demo@syncer')
-    _git(second, 'config', 'user.name', 'Demo')
+    git(second, 'config', 'user.email', 'demo@syncer')
+    git(second, 'config', 'user.name', 'Demo')
     (second / 'update.txt').write_text('remote change\n')
-    _git(second, 'add', '.')
-    _git(second, 'commit', '-m', 'chore: update deps')
-    _git(second, 'push')
+    git(second, 'add', '.')
+    git(second, 'commit', '-m', 'chore: update deps')
+    git(second, 'push')
 
     # 5. Stashes
     repo = make_repo('stashed-repo')
     (repo / 'wip.txt').write_text('work in progress\n')
-    _git(repo, 'add', '.')
-    _git(repo, 'stash', 'push', '-m', 'saving work')
+    git(repo, 'add', '.')
+    git(repo, 'stash', 'push', '-m', 'saving work')
     (repo / 'wip2.txt').write_text('more wip\n')
-    _git(repo, 'add', '.')
-    _git(repo, 'stash', 'push', '-m', 'saving more work')
+    git(repo, 'add', '.')
+    git(repo, 'stash', 'push', '-m', 'saving more work')
 
     # 6. A directory standing where a repo belongs, holding files that arrived before the clone
     #    did — what a restore tool leaves on a machine being set up. apply clones into it.
@@ -427,11 +427,11 @@ def _setup_demo_repos(base: Path) -> SyncerConfig:
     no_remote = base / 'repos' / 'no-remote-repo'
     no_remote.mkdir(parents=True)
     subprocess.run(['git', 'init', str(no_remote)], capture_output=True)  # nosec B607
-    _git(no_remote, 'config', 'user.email', 'demo@syncer')
-    _git(no_remote, 'config', 'user.name', 'Demo')
+    git(no_remote, 'config', 'user.email', 'demo@syncer')
+    git(no_remote, 'config', 'user.name', 'Demo')
     (no_remote / 'README.md').write_text('# no remote\n')
-    _git(no_remote, 'add', '.')
-    _git(no_remote, 'commit', '-m', 'init')
+    git(no_remote, 'add', '.')
+    git(no_remote, 'commit', '-m', 'init')
 
     # 9. Missing repo (not yet cloned)
     missing_path = base / 'repos' / 'missing-repo'
@@ -461,7 +461,7 @@ def demo() -> None:
     """Run a full sync against throwaway temp repos to show every status state."""
     tmp = Path(tempfile.mkdtemp(prefix='syncer-demo-'))
     try:
-        config = _setup_demo_repos(tmp)
+        config = setup_demo_repos(tmp)
         # Demo history is throwaway; it must never land in a real registry's event stream.
         run_sync(config, load_tool_config(), tmp / 'events.jsonl', apply=True, jitter=0.0)
     finally:
