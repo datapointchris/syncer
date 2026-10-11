@@ -133,9 +133,10 @@ touches a working tree, the index, HEAD or a local branch, and never pushes or c
   fetch reports through `unfetched`, which is `failed_report` without the local counts.
 - **A missing clone is `not_cloned`, an ERROR.** `would_clone` is a WARNING because `apply` clears
   it, and `fetch` never will.
-- **Tags keep invariant 1.** A moved tag lands in `moved_tags` and is never forced; new tags still
-  arrive, because git refuses only the moved one. A floating `v1` moves on every release of its
-  repo, so a stale tag is a count on the summary line, and only `-v` names it.
+- **Tags keep invariant 1.** A moved tag is never forced, and new tags still arrive. Git names
+  the moved one only where `fetch.pruneTags` adds a tag refspec; plain auto-follow skips it
+  silently. A named one lands in `moved_tags`. A floating `v1` moves on every release of its repo,
+  so a stale tag is a count on the summary line, and only `-v` names it.
 - **No run event.** `stats` reads events as branch state, and `fetch` measures none.
 - **A clean run prints one summary line.** It is built to run unattended on a short interval, and
   every line it prints lands in a log.
