@@ -14,5 +14,4 @@ build/
 htmlcov/
 .DS_Store
 TESTING.*
-.planning
 coverage.xml
