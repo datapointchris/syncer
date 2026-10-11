@@ -981,7 +981,7 @@ class TestAskpassIsNeverLaunched:
 
 @pytest.fixture
 def seeded_origin(tmp_path):
-    """A bare origin tracking README.md and a .gitignore covering `*.env` and `.planning/`.
+    """A bare origin tracking README.md and a .gitignore covering `*.env` and `.scratch/`.
 
     That is the shape a restore tool leaves behind on a new machine: the files it puts at a repo
     path before the repo exists are exactly the ones the repo ignores.
@@ -993,7 +993,7 @@ def seeded_origin(tmp_path):
     git(seed, 'config', 'user.email', 'test@test.com')
     git(seed, 'config', 'user.name', 'Test')
     (seed / 'README.md').write_text('# Test\n')
-    (seed / '.gitignore').write_text('*.env\n.planning/\n')
+    (seed / '.gitignore').write_text('*.env\n.scratch/\n')
     git(seed, 'add', 'README.md', '.gitignore')
     git(seed, 'commit', '-m', 'init')
     git(seed, 'push', '-u', 'origin', 'main')
@@ -1017,7 +1017,7 @@ class TestCloneIntoExisting:
         return Repo(name='target', path=target, owner='user', host='https://github.com', url=str(origin))
 
     def test_clones_around_files_the_repo_ignores(self, tmp_path, seeded_origin):
-        target = occupied(tmp_path, **{'local.env': 'SECRET\n', '.planning__status.md': 'notes\n'})
+        target = occupied(tmp_path, **{'local.env': 'SECRET\n', '.scratch__notes.md': 'notes\n'})
         repo = self._repo(target, seeded_origin)
 
         ok, err = repo.clone_into_existing()
@@ -1025,7 +1025,7 @@ class TestCloneIntoExisting:
         assert (ok, err) == (True, '')
         assert (target / 'README.md').read_text() == '# Test\n'
         assert (target / 'local.env').read_text() == 'SECRET\n'
-        assert (target / '.planning' / 'status.md').read_text() == 'notes\n'
+        assert (target / '.scratch' / 'notes.md').read_text() == 'notes\n'
         # Indistinguishable from a fresh clone: clean tree, tracking upstream.
         assert repo.is_dirty is False
         assert repo.current_branch == 'main'

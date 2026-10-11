@@ -144,7 +144,7 @@ touches a working tree, the index, HEAD or a local branch, and never pushes or c
 ### A directory where a repo belongs is a repo waiting to be cloned
 
 `git clone` refuses a non-empty destination. On a machine being set up every repo path is
-non-empty, because the gitignored files a machine cannot rebuild (`.env`, `.planning/`) are
+non-empty, because the gitignored files a machine cannot rebuild, such as `.env`, are
 restored before anything is cloned. `Repo.clone_into_existing` builds the repo around what is
 there: `init`, `remote add`, `fetch`, then `checkout` of the remote's default. The mechanism is
 chosen because **checkout will not write over a file already present, and aborts whole rather
