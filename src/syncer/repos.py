@@ -53,6 +53,37 @@ class GitFailure:
         return ' '.join(('git', *self.argv))
 
 
+REMOTES_PREFIX = 'refs/remotes/'
+TAGS_PREFIX = 'refs/tags/'
+
+
+@dataclass(frozen=True, slots=True)
+class RefMoves:
+    """What one fetch changed, read by comparing `Repo.remote_refs` before and after it.
+
+    Short names throughout: `origin/main` for a remote-tracking ref and `v1.2.0` for a tag. A tag
+    only ever appears here as new, because the fetch never forces one and never prunes one.
+    """
+
+    updated: tuple[str, ...] = ()
+    pruned: tuple[str, ...] = ()
+    tags: tuple[str, ...] = ()
+
+    @classmethod
+    def between(cls, before: dict[str, str], after: dict[str, str]) -> RefMoves:
+        changed = sorted(name for name, sha in after.items() if before.get(name) != sha)
+        return cls(
+            updated=tuple(name.removeprefix(REMOTES_PREFIX) for name in changed if name.startswith(REMOTES_PREFIX)),
+            pruned=tuple(
+                sorted(name.removeprefix(REMOTES_PREFIX) for name in before.keys() - after.keys() if name.startswith(REMOTES_PREFIX))
+            ),
+            tags=tuple(name.removeprefix(TAGS_PREFIX) for name in changed if name.startswith(TAGS_PREFIX)),
+        )
+
+    def __bool__(self) -> bool:
+        return bool(self.updated or self.pruned or self.tags)
+
+
 def normalize_remote_url(url: str) -> str:
     """Reduce a clone URL to `host/path` so equivalent forms compare equal.
 
@@ -577,6 +608,23 @@ class Repo:
         self.moved_tags = MOVED_TAG.findall(result.stderr)
         if not self.moved_tags:
             self.tag_fetch_error = result.stderr.strip() or f'git fetch exited {result.returncode}'
+
+    def remote_refs(self) -> dict[str, str] | None:
+        """Every remote-tracking ref and tag, by name, mapped to the object it points at.
+
+        A symbolic ref is left out. `origin/HEAD` names the default branch, so counting it would
+        report one moved branch twice. None when git could not list them, because an empty dict
+        would read as a repo with no refs at all.
+        """
+        result = self._git('for-each-ref', '--format=%(refname) %(objectname) %(symref)', 'refs/remotes', 'refs/tags')
+        if result.returncode != 0:
+            return None
+        refs: dict[str, str] = {}
+        for line in result.stdout.splitlines():
+            name, sha, symref = line.split(' ', 2)
+            if not symref:
+                refs[name] = sha
+        return refs
 
     def set_head_auto(self) -> None:
         """Repoint origin/HEAD to the remote's real default (fixes stale ref after a

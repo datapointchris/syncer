@@ -29,6 +29,7 @@ from __future__ import annotations
 import random
 import time
 from collections import Counter
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import as_completed
 from dataclasses import dataclass
@@ -84,6 +85,7 @@ from syncer.progress import RunProgress
 from syncer.remedy import Remedy
 from syncer.remedy import remedy_for
 from syncer.repos import GitFailure
+from syncer.repos import RefMoves
 from syncer.repos import Repo
 from syncer.repos import abort_running_commands
 from syncer.repos import find_repo_in_search_paths
@@ -120,6 +122,8 @@ LIFECYCLE_STYLE = {
     'path_mismatch': (ICON_MOVE, 'yellow', 'path mismatch', Severity.WARNING),
     'not_git': (ICON_ERR, 'red', 'not a git repository', Severity.ERROR),
     'no_remote': (ICON_ERR, 'red', 'no remote', Severity.ERROR),
+    # `fetch` only. It never clones, so a missing clone is a repo it could not fetch.
+    'not_cloned': (ICON_ERR, 'red', 'not cloned', Severity.ERROR),
 }
 
 # Icon says *what* the branch is; color says *who has to act* (below). Splitting the two is
@@ -210,6 +214,8 @@ class RepoBranchReport:
     # From the tag fetch, which runs after the branches were measured, so neither affects severity.
     moved_tags: list[str] = field(default_factory=list)
     tag_fetch_error: str | None = None
+    # Set by `syncer fetch` alone, which reports what moved rather than any branch state.
+    ref_moves: RefMoves | None = None
     # Repo-level counts captured for event snapshots (0 for lifecycle reports).
     uncommitted: int = 0
     stashes: int = 0
@@ -635,7 +641,37 @@ def gather_reports(
     include_lifecycle: bool = False,
     show_progress: bool = False,
 ) -> list[RepoBranchReport]:
-    """Process every active repo concurrently and return the reports sorted by
+    """Classify every active repo concurrently, and return the reports `run_pool` sorted."""
+    active_repos = active_repo_configs(config)
+    if not active_repos:
+        return []
+    worker = partial(
+        build_repo_report,
+        config=config,
+        tool_config=tool_config,
+        policies=resolve_policies(tool_config),
+        cli_policy=cli_policy,
+        apply=apply,
+        jitter=jitter,
+        include_lifecycle=include_lifecycle,
+        search_paths=[Path(p).expanduser() for p in config.search_paths],
+        claimed_paths={Path(rc.path).expanduser() for rc in active_repos},
+        breaker=HostBreaker(),
+    )
+    return run_pool(active_repos, worker, jobs, show_progress)
+
+
+def active_repo_configs(config: SyncerConfig) -> list[RepoConfig]:
+    return [repo for repo in config.repos if repo.status != 'retired']
+
+
+def run_pool(
+    repo_configs: list[RepoConfig],
+    worker: Callable[[RepoConfig], RepoBranchReport | None],
+    jobs: int,
+    show_progress: bool,
+) -> list[RepoBranchReport]:
+    """Run `worker` over every repo on a bounded pool, and return the reports sorted by
     (severity ascending, path) — synced first, errors last, path-sorted within each group.
 
     Results are collected as each repo finishes rather than in submission order, purely so the
@@ -646,31 +682,9 @@ def gather_reports(
     event is written: a partial sweep recorded as a run is a fact about a machine that was never
     measured, and `stats` would read it back as one.
     """
-    policies = resolve_policies(tool_config)
-    active_repos = [repo for repo in config.repos if repo.status != 'retired']
-    if not active_repos:
-        return []
-    search_paths = [Path(p).expanduser() for p in config.search_paths]
-    claimed_paths = {Path(rc.path).expanduser() for rc in active_repos}
-
-    breaker = HostBreaker()
-    worker = partial(
-        build_repo_report,
-        config=config,
-        tool_config=tool_config,
-        policies=policies,
-        cli_policy=cli_policy,
-        apply=apply,
-        jitter=jitter,
-        include_lifecycle=include_lifecycle,
-        search_paths=search_paths,
-        claimed_paths=claimed_paths,
-        breaker=breaker,
-    )
-
     reset_abort()
     reports: list[RepoBranchReport] = []
-    with RunProgress(len(active_repos), enabled=show_progress) as progress:
+    with RunProgress(len(repo_configs), enabled=show_progress) as progress:
 
         def run_one(repo_config: RepoConfig) -> RepoBranchReport | None:
             # The bare name, not the report's label: a label is a path so the report says where
@@ -686,8 +700,8 @@ def gather_reports(
                 progress.finish(token, attention_tally(report) if report is not None else None)
             return report
 
-        pool = ThreadPoolExecutor(max_workers=max(1, min(jobs, len(active_repos))))
-        futures = [pool.submit(run_one, repo_config) for repo_config in active_repos]
+        pool = ThreadPoolExecutor(max_workers=max(1, min(jobs, len(repo_configs))))
+        futures = [pool.submit(run_one, repo_config) for repo_config in repo_configs]
         try:
             for future in as_completed(futures):
                 report = future.result()
@@ -797,6 +811,20 @@ def collect_failures(reports: list[RepoBranchReport]) -> list[FailureGroup]:
     for report in reports:
         failures.extend((report.label, report.origin_mismatch or report.expected_url, failure) for failure in report.failures)
     return group_failures(failures)
+
+
+def failures_json(reports: list[RepoBranchReport]) -> list[dict]:
+    """The grouped failure summary as plain data, for every verb's --json."""
+    return [
+        {
+            'cause': group.cause.value if group.cause else None,
+            'host': group.host,
+            'repos': list(group.repos),
+            'stderr': group.stderr,
+            'hints': list(group.hints),
+        }
+        for group in collect_failures(reports)
+    ]
 
 
 def render_failure_summary(reports: list[RepoBranchReport]) -> None:
@@ -917,13 +945,18 @@ def render_report(report: RepoBranchReport, apply: bool) -> None:
     for branch, age in report.remote_only:
         # No local copy, so nothing to sync — browse it with `git log origin/<branch>`.
         console.print(f'  [blue]{ICON_DOT}  origin/{branch} — remote only, last commit {age}[/blue]')
+    render_tag_findings(report)
+    console.print()
+
+
+def render_tag_findings(report: RepoBranchReport) -> None:
+    """What the tag fetch refused, under the repo's own line."""
     for tag in report.moved_tags:
         console.print(f'  [blue]{ICON_DOT}  tag {escape(tag)} — origin moved it, and syncer never overwrites a local tag[/blue]')
     if report.tag_fetch_error:
         console.print(f'  [blue]{ICON_DOT}  tags not fetched[/blue]')
         for line in report.tag_fetch_error.splitlines():
             console.print(f'    {escape(line)}', soft_wrap=True)
-    console.print()
 
 
 def report_branches(

@@ -58,6 +58,8 @@ syncer check --json       # emit the run as JSON on stdout instead of a report
 syncer apply -p observe   # override the resolved policy for this run
 syncer apply -j 8         # limit concurrency to 8 repos at a time (default 16)
 syncer check -c work.json # use a different registry; replaces the default set entirely
+syncer fetch              # refresh every clone's origin refs and tags; touches no branch or tree
+syncer fetch -v           # the same, listing every repo and what moved
 syncer doctor            # can this machine run syncer? git, paths, reachability, clones
 syncer issues            # report path mismatches, missing/untracked repos, master branches
 syncer apply --per-branch # execute the decided action per branch
@@ -70,6 +72,8 @@ syncer version           # print installed version
 
 The repo-level view and `--per-branch` share the same policy engine and concurrency; the difference is that the repo-level one also handles repo lifecycle (clone missing repos, flag moved/untracked/no-remote repos), records a run in the history (`syncer stats`), and warns about repos left dirty for days.
 
+**`syncer fetch` runs only the fetch.** It is the fetch `check` and `apply` start with, so it moves `origin/*` and adds new tags, and nothing else: no working tree, index, HEAD or local branch is touched, nothing is pushed, and a missing clone is reported rather than cloned. A tag origin moved is left alone, as every verb leaves it, and counted as stale; `-v` names it. It records no run history. A clean run prints one line — the counts of repos current and updated, and of stale tags — which suits a job run every few minutes.
+
 **A repo whose path already holds files is still cloned.** Setting a machine up puts the gitignored files it cannot rebuild (`.env`, `.planning/`) in place before the repos exist, and `git clone` declines a non-empty destination outright — so those paths used to report `not a git repository` and stop. `apply` builds the repo around what is there instead, and git refuses the whole checkout rather than write over any file already present, so nothing existing is replaced and nothing is deleted. A file the repo neither tracks nor ignores stays put and leaves the fresh clone dirty, which syncer reports like any other dirty tree. A path already holding a `.git` — a linked worktree keeps its own as a file — is reported and left alone.
 
 ### Exit codes
@@ -77,7 +81,7 @@ The repo-level view and `--per-branch` share the same policy engine and concurre
 | Code | Meaning |
 | --- | --- |
 | `0` | nothing reached an error — including repos that merely need a push |
-| `1` | at least one repo reached an error state (`check`, `apply`, `doctor`), or at least one issue was found (`issues`) |
+| `1` | at least one repo reached an error state (`check`, `apply`, `doctor`), could not be fetched (`fetch`), or at least one issue was found (`issues`) |
 | `2` | usage error — an unknown flag or argument |
 | `130` | interrupted with Ctrl-C — nothing was reported and no run was recorded |
 

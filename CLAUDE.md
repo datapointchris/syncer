@@ -123,6 +123,23 @@ wrong branch and a repo git could not be asked about. `is_unverified` is that sp
 
 There is no second sync path. Special-case the default run behind `include_lifecycle`.
 
+### `fetch` is the fetch both surfaces start with, and nothing after it
+
+`run_fetch` (`fetch.py`) runs `refresh_remote` on the same `run_pool` and classifies nothing. It
+reads `Repo.remote_refs` before and after, and `RefMoves.between` names what moved. It never
+touches a working tree, the index, HEAD or a local branch, and never pushes or clones.
+
+- **It never runs `git status`.** Status rewrites an index whose stat data is stale, so a failed
+  fetch reports through `unfetched`, which is `failed_report` without the local counts.
+- **A missing clone is `not_cloned`, an ERROR.** `would_clone` is a WARNING because `apply` clears
+  it, and `fetch` never will.
+- **Tags keep invariant 1.** A moved tag lands in `moved_tags` and is never forced; new tags still
+  arrive, because git refuses only the moved one. A floating `v1` moves on every release of its
+  repo, so a stale tag is a count on the summary line, and only `-v` names it.
+- **No run event.** `stats` reads events as branch state, and `fetch` measures none.
+- **A clean run prints one summary line.** It is built to run unattended on a short interval, and
+  every line it prints lands in a log.
+
 ### A directory where a repo belongs is a repo waiting to be cloned
 
 `git clone` refuses a non-empty destination. On a machine being set up every repo path is
@@ -358,6 +375,9 @@ works on. `issues` exits 1 when it found any.
 `--json` (both verbs, either view) writes to **stdout**, and everything else goes to stderr. It
 reuses the `RepoSnapshot`/`RunSummary` models, so the JSON and the event stream agree by
 construction. An `as_json` flag skips the renderers; there is no console-mode abstraction.
+`fetch --json` is its own shape, because it writes no snapshot. Each repo carries a `status`
+(`updated`, `current`, `failed`, `skipped`, or a lifecycle) and the refs that moved. Every verb's
+`failures` comes from `failures_json`.
 
 ## Concurrency
 

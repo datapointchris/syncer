@@ -32,7 +32,7 @@ from syncer.report import DEFAULT_JITTER_SECONDS
 from syncer.report import DEFAULT_JOBS
 from syncer.report import RepoBranchReport
 from syncer.report import Severity
-from syncer.report import collect_failures
+from syncer.report import failures_json
 from syncer.report import gather_reports
 from syncer.report import hidden_count
 from syncer.report import is_unverified
@@ -52,6 +52,7 @@ from syncer.tracking import read_events
 
 LIFECYCLE_TO_STATUS: dict[str, RepoStatus] = {
     'would_clone': 'missing',
+    'not_cloned': 'missing',
     'cloned': 'cloned',
     'clone_failed': 'clone_failed',
     'path_mismatch': 'path_mismatch',
@@ -221,16 +222,7 @@ def run_sync(
             {
                 'summary': summary.model_dump(),
                 'repos': [snapshot.model_dump() for snapshot in snapshots],
-                'failures': [
-                    {
-                        'cause': group.cause.value if group.cause else None,
-                        'host': group.host,
-                        'repos': list(group.repos),
-                        'stderr': group.stderr,
-                        'hints': list(group.hints),
-                    }
-                    for group in collect_failures(reports)
-                ],
+                'failures': failures_json(reports),
                 'stale': [{'path': path, 'days': days} for path, days in stale],
             }
         )

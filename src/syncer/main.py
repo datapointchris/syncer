@@ -23,6 +23,7 @@ from syncer.config import resolve_registry
 from syncer.doctor import doctor_exit_code
 from syncer.doctor import render_doctor
 from syncer.doctor import run_doctor
+from syncer.fetch import run_fetch
 from syncer.output import ICON_MOVE
 from syncer.output import ICON_WARN
 from syncer.output import console
@@ -55,6 +56,7 @@ EPILOG = (
     "[cyan]syncer apply[/cyan] — pull, push, fast-forward, and clone what's safe\n\n"
     '[cyan]syncer apply -p mirror[/cyan] — run the aggressive mirror policy this once\n\n'
     '[cyan]syncer check --per-branch[/cyan] — quick per-branch view, no lifecycle or history\n\n'
+    "[cyan]syncer fetch[/cyan] — refresh every clone's origin refs and tags; touches no branch or tree\n\n"
     '[cyan]syncer issues[/cyan] — find moved, missing, or untracked repos\n\n'
     '[cyan]syncer config init[/cyan] — start from scratch on a new machine'
 )
@@ -85,7 +87,7 @@ def main(
 
     Two verbs over the same run: [bold]check[/bold] reports what each policy would do and never
     writes, [bold]apply[/bold] executes it. Both take [bold]--per-branch[/bold] to swap the
-    repo-level view for a per-branch one.
+    repo-level view for a per-branch one. [bold]fetch[/bold] runs only the fetch both start with.
     """
     # Never raises and never prints an error; the notice is deferred to exit so
     # it lands after the command's own output. `syncer update` is the only place
@@ -187,6 +189,30 @@ def apply(
     Exits 1 if any repo reached an error state, so it can gate a script.
     """
     run(apply=True, per_branch=per_branch, policy=policy, jobs=jobs, repos_file=repos_file, as_json=json_output, verbose=verbose)
+
+
+@app.command(rich_help_panel='Sync')
+def fetch(
+    jobs: Jobs = DEFAULT_JOBS,
+    repos_file: ReposFile = None,
+    json_output: JsonOutput = False,
+    verbose: Verbose = False,
+) -> None:
+    """Fetch every repo's remote-tracking refs and new tags, and say what moved.
+
+    Never touches a working tree, the index, HEAD or a local branch, and never pushes or clones.
+    A tag origin moved is named, never overwritten. No run history is recorded.
+
+    A clean run prints one summary line; [bold]-v[/bold] lists every repo and what moved.
+
+    Exits 1 if any repo could not be fetched, so a scheduler records the run as failed.
+    """
+    try:
+        reports = run_fetch(resolve_config(repos_file), load_tool_config(), jobs=jobs, as_json=json_output, verbose=verbose)
+    except KeyboardInterrupt:
+        error('interrupted — nothing was reported')
+        raise typer.Exit(INTERRUPTED_EXIT_CODE) from None
+    raise typer.Exit(exit_code_for(reports))
 
 
 @app.command(rich_help_panel='Inspect')
