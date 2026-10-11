@@ -793,9 +793,10 @@ def collect_failures(reports: list[RepoBranchReport]) -> list[FailureGroup]:
     URL. Grouping on the registry's expectation alone would file a corporate host's outage under
     github.com and offer a hint for the wrong machine.
     """
-    return group_failures(
-        (report.label, report.origin_mismatch or report.expected_url, failure) for report in reports for failure in report.failures
-    )
+    failures: list[tuple[str, str, GitFailure]] = []
+    for report in reports:
+        failures.extend((report.label, report.origin_mismatch or report.expected_url, failure) for failure in report.failures)
+    return group_failures(failures)
 
 
 def render_failure_summary(reports: list[RepoBranchReport]) -> None:

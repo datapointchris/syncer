@@ -1,4 +1,5 @@
 import json
+from itertools import product
 
 import pytest
 from typer.testing import CliRunner
@@ -95,7 +96,9 @@ class TestPolicyShow:
         """observe has no rules at all, so every cell is the fallback — worth asserting, since
         an empty rule table is the one shape a hand-written matrix would get wrong."""
         payload = json.loads(runner.invoke(app, ['policy', 'show', 'observe', '--json']).output)
-        actions = {action for row in payload['decisions'].values() for action in row.values()}
+        actions: set[str] = set()
+        for row in payload['decisions'].values():
+            actions.update(row.values())
         assert actions == {'report'}
 
 
@@ -148,9 +151,8 @@ class TestPolicyRules:
         result = runner.invoke(app, ['policy', 'rules', 'standard', '--json'])
         assert result.exit_code == 0
         payload = json.loads(result.stdout)
-        assert {row['rule'] for row in payload['rules']} == {
-            f'{selector}:{state.value}' for state in PrimaryState for selector in ('default', 'current', '*')
-        }
+        keys = product(PrimaryState, ('default', 'current', '*'))
+        assert {row['rule'] for row in payload['rules']} == {f'{selector}:{state.value}' for state, selector in keys}
 
     def test_the_action_column_agrees_with_decide(self, config_home):
         """The browse view is what someone edits their config from, so a row claiming an action
