@@ -7,7 +7,7 @@ independent of any policy:
 
 1. Never --force / -f / --force-with-lease (no such argv is ever constructed).
 2. Never mutate a branch whose working tree is dirty — or whose cleanliness cannot be verified.
-   `git status` failing used to read as a clean tree, i.e. as permission to mutate. The exemptions
+   A failed `git status` is never read as a clean tree, i.e. as permission to mutate. The exemptions
    are the actions that touch no tree at all (TREE_INDEPENDENT), each refusing under invariant 9
    first so that "checked out nowhere" is verified rather than assumed.
 3. fast_forward / pull_ff / ff_ref require strict ancestry (upstream strictly ahead), re-checked here.
