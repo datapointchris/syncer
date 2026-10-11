@@ -294,6 +294,11 @@ class SyncerConfig(BaseModel):
             )
         return self
 
+    def unretired_repos(self) -> list[RepoConfig]:
+        """Every repo syncer keeps in sync: dormant as well as active, because a dormant clone
+        still falls behind its remote. This is wider than the registry's own `active`."""
+        return [repo for repo in self.repos if repo.status != 'retired']
+
 
 class ToolConfig(BaseModel):
     """Machine-local tool config from ~/.config/syncer/config.toml.

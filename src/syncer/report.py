@@ -641,9 +641,9 @@ def gather_reports(
     include_lifecycle: bool = False,
     show_progress: bool = False,
 ) -> list[RepoBranchReport]:
-    """Classify every active repo concurrently, and return the reports `run_pool` sorted."""
-    active_repos = active_repo_configs(config)
-    if not active_repos:
+    """Classify every unretired repo concurrently, and return the reports `run_pool` sorted."""
+    repos = config.unretired_repos()
+    if not repos:
         return []
     worker = partial(
         build_repo_report,
@@ -655,14 +655,10 @@ def gather_reports(
         jitter=jitter,
         include_lifecycle=include_lifecycle,
         search_paths=[Path(p).expanduser() for p in config.search_paths],
-        claimed_paths={Path(rc.path).expanduser() for rc in active_repos},
+        claimed_paths={Path(rc.path).expanduser() for rc in repos},
         breaker=HostBreaker(),
     )
-    return run_pool(active_repos, worker, jobs, show_progress)
-
-
-def active_repo_configs(config: SyncerConfig) -> list[RepoConfig]:
-    return [repo for repo in config.repos if repo.status != 'retired']
+    return run_pool(repos, worker, jobs, show_progress)
 
 
 def run_pool(

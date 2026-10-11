@@ -156,6 +156,22 @@ class TestReachability:
 
 
 class TestClonesAndPolicy:
+    def test_the_registry_count_names_each_status_it_covers(self, isolated, tmp_path):
+        """syncer covers dormant repos too, so calling its count `active` claimed the registry's
+        narrower set, the one other readers of the same file act on."""
+        write_registry(
+            isolated,
+            repos=[
+                {'name': 'a', 'path': str(tmp_path / 'a'), 'status': 'active'},
+                {'name': 'd', 'path': str(tmp_path / 'd'), 'status': 'dormant'},
+                {'name': 'e', 'path': str(tmp_path / 'e'), 'status': 'dormant'},
+                {'name': 'r', 'path': str(tmp_path / 'r'), 'status': 'retired'},
+            ],
+        )
+        [registry] = checks_named(run_doctor(), 'registry')
+        assert registry.summary.startswith('3 repos in ')
+        assert registry.summary.endswith(': 1 active, 2 dormant; 1 retired skipped')
+
     def test_missing_clones_are_one_fact_not_n_warnings(self, isolated, tmp_path):
         bare = bare_repo(tmp_path, 'api')
         write_registry(

@@ -44,7 +44,6 @@ from syncer.report import DEFAULT_JITTER_SECONDS
 from syncer.report import DEFAULT_JOBS
 from syncer.report import RepoBranchReport
 from syncer.report import Severity
-from syncer.report import active_repo_configs
 from syncer.report import failures_json
 from syncer.report import render_failure_summary
 from syncer.report import render_report
@@ -243,7 +242,7 @@ def run_fetch(
     as_json: bool = False,
     verbose: bool = False,
 ) -> list[RepoBranchReport]:
-    """Fetch every active repo and render the result. Returns the reports so the caller can set an exit code.
+    """Fetch every unretired repo and render the result. Returns the reports so the caller can set an exit code.
 
     The summary line comes first, because it is the whole of a clean run. Below it go the repos
     that could not be fetched, or under `-v` every repo with what moved.
@@ -256,7 +255,7 @@ def run_fetch(
         jitter=jitter,
         breaker=HostBreaker(),
     )
-    reports = run_pool(active_repo_configs(config), worker, jobs, show_progress=not as_json)
+    reports = run_pool(config.unretired_repos(), worker, jobs, show_progress=not as_json)
     if as_json:
         emit_json(
             {'summary': summary_counts(reports), 'repos': [repo_json(report) for report in reports], 'failures': failures_json(reports)}

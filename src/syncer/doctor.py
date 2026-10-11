@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from collections import Counter
 from dataclasses import dataclass
 from dataclasses import field
 from enum import StrEnum
@@ -159,8 +160,16 @@ def registry_loads(path: Path, source: str | None) -> tuple[Check, SyncerConfig 
         return Check('registry', Status.FAIL, f'{path} is not valid JSON', detail=[str(exc)]), None
     except ConfigError as exc:
         return Check('registry', Status.FAIL, f'{path} is invalid', detail=list(exc.problems)), None
-    active = [repo for repo in config.repos if repo.status != 'retired']
-    return Check('registry', Status.OK, f'{len(active)} active repos in {path}'), config
+    return Check('registry', Status.OK, f'{len(config.unretired_repos())} repos in {path}{population(config)}'), config
+
+
+def population(config: SyncerConfig) -> str:
+    """The synced repos by status, then the retired ones skipped. The registry's own `active`
+    is narrower than what syncer covers, so a bare count would read as that set."""
+    counts: Counter[str] = Counter(repo.status or 'undeclared' for repo in config.repos)
+    covered = ', '.join(f'{counts[status]} {status}' for status in ('active', 'dormant', 'undeclared') if counts[status])
+    skipped = f'; {counts["retired"]} retired skipped' if counts['retired'] else ''
+    return f': {covered}{skipped}' if covered else skipped
 
 
 def not_the_shipped_template(config: SyncerConfig) -> Check:
@@ -211,9 +220,7 @@ def identity_is_usable(config: SyncerConfig) -> Check:
 def hosts_to_probe(config: SyncerConfig) -> list[tuple[str, str]]:
     """One (host, url) per distinct host, in registry order, capped."""
     seen: dict[str, str] = {}
-    for repo in config.repos:
-        if repo.status == 'retired':
-            continue
+    for repo in config.unretired_repos():
         url = resolve_clone_url(repo, config)
         seen.setdefault(remote_host(url), url)
     return list(seen.items())[:MAX_HOSTS_PROBED]
@@ -254,8 +261,8 @@ def reachability_checks(config: SyncerConfig) -> list[Check]:
 
 def repos_on_disk(config: SyncerConfig, reachable: bool) -> Check:
     """Pure stat, no git. Reports the fresh-machine case as one fact rather than N warnings."""
-    active = [repo for repo in config.repos if repo.status != 'retired']
-    if not active:
+    repos = config.unretired_repos()
+    if not repos:
         return Check(
             'clones',
             Status.WARN,
@@ -265,10 +272,10 @@ def repos_on_disk(config: SyncerConfig, reachable: bool) -> Check:
     # Keyed on `.git`, not on the path: setting a machine up seeds gitignored files into repo
     # paths before anything is cloned, so a directory standing there is not a clone. Counting one
     # as present is a clean bill of health for a box that holds no repos at all.
-    missing = [repo for repo in active if not (Path(repo.path).expanduser() / '.git').exists()]
+    missing = [repo for repo in repos if not (Path(repo.path).expanduser() / '.git').exists()]
     if not missing:
-        return Check('clones', Status.OK, f'all {len(active)} repos present')
-    summary = f'{len(active) - len(missing)} of {len(active)} repos present, {len(missing)} missing'
+        return Check('clones', Status.OK, f'all {len(repos)} repos present')
+    summary = f'{len(repos) - len(missing)} of {len(repos)} repos present, {len(missing)} missing'
     hints = ['clone them: syncer apply'] if reachable else ['fix the reachability failure above first — cloning will fail the same way']
     return Check('clones', Status.WARN, summary, detail=[repo.name for repo in missing[:6]], hints=hints)
 

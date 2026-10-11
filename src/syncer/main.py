@@ -88,6 +88,9 @@ def main(
     Two verbs over the same run: [bold]check[/bold] reports what each policy would do and never
     writes, [bold]apply[/bold] executes it. Both take [bold]--per-branch[/bold] to swap the
     repo-level view for a per-branch one. [bold]fetch[/bold] runs only the fetch both start with.
+
+    All three cover every registry repo that is not retired, dormant ones included, which is wider
+    than the registry's own [bold]active[/bold]. [bold]doctor[/bold] counts them by status.
     """
     # Never raises and never prints an error; the notice is deferred to exit so
     # it lands after the command's own output. `syncer update` is the only place

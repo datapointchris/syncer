@@ -119,7 +119,7 @@ The registry resolves in three rungs, and `-c/--repos-file` beats all of them: `
 }
 ```
 
-Each repo has a `status`: `active` (default), `dormant`, or `retired`. Retired repos are skipped during sync.
+Each repo declares a `status`: `active`, `dormant`, or `retired`. syncer keeps active and dormant repos in sync alike, because a dormant clone still falls behind its remote, and skips retired ones. An entry with no status is synced too, and `syncer config validate` names it.
 
 `search_paths` are what `syncer issues` scans for repos that moved or aren't tracked; `exclude_paths` disclaims a subtree inside them, for directories another registry owns. **Syncer never modifies a registry that holds repos** — `issues` reports drift and you fix the paths by hand. Only `config init` and `config scan --write` write one, and both refuse the moment the file lists any.
 
