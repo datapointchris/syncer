@@ -281,8 +281,6 @@ class TestGitStats:
         assert 'T' in date
 
     def test_first_and_last_differ_with_multiple_commits(self, git_repo):
-        import time
-
         time.sleep(1)  # ensure different timestamps
         (git_repo / 'file2.txt').write_text('content\n')
         _git(git_repo, 'add', '.')

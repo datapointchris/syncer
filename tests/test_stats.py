@@ -1,4 +1,5 @@
 import datetime as dt
+from unittest.mock import MagicMock
 from unittest.mock import patch
 
 from rich.console import Console
@@ -150,8 +151,6 @@ class TestShowStats:
         ):
 
             def make_repo(name, path, owner, host):
-                from unittest.mock import MagicMock
-
                 m = MagicMock()
                 m.name = name
                 m.is_fork = False
@@ -215,8 +214,6 @@ class TestShowCommitsGraph:
         ):
 
             def make_repo(name, path, owner, host):
-                from unittest.mock import MagicMock
-
                 m = MagicMock()
                 m.name = name
                 m.is_fork = False
@@ -251,8 +248,6 @@ class TestShowCommitsGraph:
         ):
 
             def make_repo(name, path, owner, host):
-                from unittest.mock import MagicMock
-
                 m = MagicMock()
                 m.name = name
                 m.is_fork = name == 'forked'
@@ -288,8 +283,6 @@ class TestShowRepoAge:
         ):
 
             def make_repo(name, path, owner, host):
-                from unittest.mock import MagicMock
-
                 m = MagicMock()
                 m.name = name
                 m.is_fork = False

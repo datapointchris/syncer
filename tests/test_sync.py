@@ -90,7 +90,6 @@ class TestRepoStatus:
         _git(second, 'config', 'user.name', 'T')
         _git(second, 'commit', '--allow-empty', '-m', 'remote work')
         _git(second, 'push')
-        from syncer.report import gather_reports
 
         # clone_url named explicitly: origin here is a tmp_path bare repo, and the registry's
         # default github.com URL would trip origin_mismatch and lift the repo to WARNING for a
@@ -118,7 +117,6 @@ class TestSnapshot:
         _git(repo_path, 'commit', '--allow-empty', '-m', 'wip')
         _git(repo_path, 'checkout', 'main')
         config = _config_for([repo_path])
-        from syncer.report import gather_reports
 
         report = gather_reports(config, ToolConfig(default_policy='observe'), jitter=0.0)[0]
         snap = _snapshot(report)
