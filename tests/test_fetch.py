@@ -4,6 +4,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from syncer.config import RepoConfig
@@ -52,6 +53,22 @@ def push_from_another_clone(tmp_path: Path, name: str, branch: str = 'main') -> 
     git(other, 'commit', '--allow-empty', '-m', f'upstream on {branch}')
     git(other, 'push', 'origin', branch)
     return git(other, 'rev-parse', 'HEAD')
+
+
+def tag_moved_upstream(tmp_path: Path, repo_path: Path, tag_refspec: bool) -> str:
+    """Tag the clone's commit, push it, then move the tag to a newer commit upstream. Returns the old commit.
+
+    `tag_refspec` sets on the clone what `fetch.pruneTags` adds: an explicit tag refspec, which is
+    the only thing that makes git refuse a moved tag. Without it auto-follow skips any tag that
+    already exists locally and exits 0. Stated here rather than inherited, because a developer's
+    git config decides it otherwise and CI has none.
+    """
+    git(repo_path, 'config', 'fetch.pruneTags', 'true' if tag_refspec else 'false')
+    first = git(repo_path, 'rev-parse', 'HEAD')
+    git(repo_path, 'tag', 'v1')
+    git(repo_path, 'push', 'origin', 'v1')
+    git(tmp_path / f'{repo_path.name}.git', 'update-ref', 'refs/tags/v1', push_from_another_clone(tmp_path, repo_path.name))
+    return first
 
 
 def config_for(paths: list[Path]) -> SyncerConfig:
@@ -162,19 +179,17 @@ class TestFetchMovesOnlyRemoteRefs:
 
 
 class TestTagsAreNeverForced:
-    def test_a_moved_tag_is_named_and_kept_while_a_new_tag_arrives(self, tmp_path):
+    @pytest.mark.parametrize(('tag_refspec', 'named'), [(True, ['v1']), (False, [])])
+    def test_a_moved_tag_is_kept_while_a_new_tag_arrives(self, tmp_path, tag_refspec, named):
+        """Only a tag refspec makes git refuse the moved tag, so only then can it be named."""
         repo_path = make_cloned_repo(tmp_path, 'api')
-        first = git(repo_path, 'rev-parse', 'HEAD')
-        git(repo_path, 'tag', 'v1')
-        git(repo_path, 'push', 'origin', 'v1')
-        second = push_from_another_clone(tmp_path, 'api')
+        first = tag_moved_upstream(tmp_path, repo_path, tag_refspec)
         bare = tmp_path / 'api.git'
-        git(bare, 'update-ref', 'refs/tags/v1', second)  # a floating major tag moved upstream
-        git(bare, 'update-ref', 'refs/tags/v2', second)
+        git(bare, 'update-ref', 'refs/tags/v2', git(bare, 'rev-parse', 'main'))
 
         report = fetch_reports([repo_path])[0]
 
-        assert report.moved_tags == ['v1']
+        assert report.moved_tags == named
         assert report.ref_moves is not None
         assert report.ref_moves.tags == ('v2',)
         assert git(repo_path, 'rev-parse', 'v1') == first
@@ -222,9 +237,7 @@ class TestCli:
     def test_a_stale_tag_is_counted_on_the_one_line_and_named_under_verbose(self, tmp_path, monkeypatch):
         """A floating tag moves on every release, so listing it would put a line in every unattended run."""
         repo_path = make_cloned_repo(tmp_path, 'api')
-        git(repo_path, 'tag', 'v1')
-        git(repo_path, 'push', 'origin', 'v1')
-        git(tmp_path / 'api.git', 'update-ref', 'refs/tags/v1', push_from_another_clone(tmp_path, 'api'))
+        tag_moved_upstream(tmp_path, repo_path, tag_refspec=True)
         self._run(tmp_path, monkeypatch, [repo_path])
 
         quiet = self._run(tmp_path, monkeypatch, [repo_path])
