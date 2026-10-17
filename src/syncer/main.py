@@ -58,7 +58,8 @@ EPILOG = (
     '[cyan]syncer check --per-branch[/cyan] — quick per-branch view, no lifecycle or history\n\n'
     "[cyan]syncer fetch[/cyan] — refresh every clone's origin refs and tags; touches no branch or tree\n\n"
     '[cyan]syncer issues[/cyan] — find moved, missing, or untracked repos\n\n'
-    '[cyan]syncer config init[/cyan] — start from scratch on a new machine'
+    '[cyan]syncer config init[/cyan] — start from scratch on a new machine\n\n'
+    '[cyan]syncer doctor && syncer apply[/cyan] — then sync it, stopping first if the machine cannot run syncer'
 )
 
 
@@ -85,11 +86,17 @@ def main(
 ) -> None:
     """Check whether local git repos are synced, across every branch.
 
-    Two verbs over the same run: [bold]check[/bold] reports what each policy would do and never
-    writes, [bold]apply[/bold] executes it. Both take [bold]--per-branch[/bold] to swap the
-    repo-level view for a per-branch one. [bold]fetch[/bold] runs only the fetch both start with.
+    Start with [bold]check[/bold]: it reports what each policy would do and never writes. Follow
+    it with [bold]apply[/bold], which executes that same run. On a new box, [bold]syncer doctor &&
+    syncer apply[/bold] writes nothing unless the machine can run it. Both verbs take
+    [bold]--per-branch[/bold] for a per-branch view. [bold]fetch[/bold] runs only the fetch both
+    start with.
 
-    All three cover every registry repo that is not retired, dormant ones included, which is wider
+    Reach for [bold]config validate[/bold] when the files may not parse, [bold]issues[/bold] when a
+    repo may have moved or gone missing, and [bold]doctor[/bold] when this machine may not run
+    syncer at all.
+
+    check, apply and fetch cover every registry repo that is not retired, dormant ones included, which is wider
     than the registry's own [bold]active[/bold]. [bold]doctor[/bold] counts them by status.
     """
     # Never raises and never prints an error; the notice is deferred to exit so

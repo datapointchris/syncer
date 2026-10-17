@@ -36,6 +36,35 @@ class TestBareInvocation:
         assert 'No such option' not in runner.invoke(app, [verb, flag, '--help']).output
 
 
+class TestRootHelpGuides:
+    """A correct command list still leaves the reader to figure out the order, and an agent lifts
+    an example verbatim, so the root screen states the sequence, says which of the three
+    diagnostics answers which question, and leads its examples with the common case."""
+
+    def _help(self, monkeypatch) -> str:
+        monkeypatch.setattr('syncer.main.notify', lambda *_: None)
+        result = runner.invoke(app, ['--help'])
+        assert result.exit_code == 0
+        return ' '.join(result.output.split())
+
+    def test_states_the_working_sequence(self, monkeypatch):
+        text = self._help(monkeypatch)
+        assert 'Start with check' in text
+        assert 'Follow it with apply' in text
+        assert 'syncer doctor && syncer apply' in text
+
+    def test_says_which_diagnostic_to_reach_for(self, monkeypatch):
+        text = self._help(monkeypatch)
+        assert 'Reach for config validate when the files may not parse' in text
+        assert 'issues when a repo may have moved or gone missing' in text
+        assert 'doctor when this machine may not run syncer at all' in text
+
+    def test_the_common_case_is_the_first_example(self, monkeypatch):
+        text = self._help(monkeypatch)
+        examples = text.rsplit('╯ Examples', 1)[1]
+        assert examples.lstrip().startswith('syncer check —')
+
+
 class TestWritingIsAVerbNotAFlag:
     """`check --apply` put the write inside the read, and `--dry-run` existed only to cancel
     it — a flag whose whole job is undoing another flag. `check` is now the dry run."""
