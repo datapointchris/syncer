@@ -7,12 +7,13 @@ Syncer fetches every configured repo concurrently, classifies each branch (ahead
 ## Installing
 
 ```bash
-uv tool install "syncer @ git+https://github.com/datapointchris/syncer.git@$(gh release view --repo datapointchris/syncer --json tagName -q .tagName)"
+uv tool install --index https://pypi.ichrisbirch.com/simple/ syncer
 ```
 
-Install a **tag**, not the default branch — substitute one explicitly (`@v6.0.0`) if you would rather
-not shell out to `gh`. `syncer update` reads uv's receipt to find out what it may do, and refuses to
-reinstall over a branch install, whose version says nothing about how far behind it is.
+Every release is published to that package index. Name it on the install: without it uv asks PyPI,
+where `syncer` is a different project. uv records the index beside the tool, which is where
+`syncer update` reads it back. A branch install carries no release version, so `syncer update`
+refuses it.
 
 ## Updating
 
@@ -20,7 +21,7 @@ reinstall over a branch install, whose version says nothing about how far behind
 syncer update
 ```
 
-This fetches the latest GitHub release and reinstalls via `uv tool install`.
+This finds the latest release and reinstalls it from the index via `uv tool install`.
 
 ## Starting from scratch
 
