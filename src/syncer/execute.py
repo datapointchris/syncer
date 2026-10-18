@@ -277,6 +277,12 @@ def rebase_push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     if not repo.pull_rebase():  # invariant 4: conflict → abort → refuse, never half-rebase
         repo.rebase_abort()
         return refused(state, Action.REBASE_PUSH, Refusal.REBASE_CONFLICT)
+    # A push that publishes nothing still needs write access, which a read-only clone lacks.
+    rebased = repo.ahead_behind(state.branch, state.upstream)
+    if rebased is None:
+        return refused(state, Action.REBASE_PUSH, Refusal.COUNTS_UNREADABLE)
+    if rebased[0] == 0:
+        return Outcome(branch=state.branch, action=Action.REBASE_PUSH, status='done', message='rebased; the upstream held every commit')
     ok, err = repo.push_branch(state.branch)
     if ok:
         return Outcome(branch=state.branch, action=Action.REBASE_PUSH, status='done', message='rebased and pushed')
@@ -445,7 +451,7 @@ ACTION_DOCS: dict[Action, ActionDoc] = {
     ),
     Action.REBASE_PUSH: ActionDoc(
         summary='rebase onto the upstream, then publish',
-        runs='git pull --rebase  →  git push origin <branch>:<branch>',
+        runs='git pull --rebase  →  git push origin <branch>:<branch>, when the rebase left commits to publish',
         refuses=(
             Refusal.NOT_CURRENT,
             Refusal.DIRTY_TREE,

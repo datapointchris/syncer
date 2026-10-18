@@ -163,6 +163,19 @@ class TestExecuteEffects:
         assert outcome.status == 'done'
         assert state_for(repo, 'main').primary == PrimaryState.SYNCED
 
+    def test_rebase_push_publishes_nothing_once_the_upstream_holds_every_commit(self, cloned_repo, tmp_path):
+        # An upstream that rewrote history, seen from a clone that cannot push to it.
+        commit(cloned_repo, 'same.py', 'local copy')
+        second_clone_pushes(tmp_path, 'same.py')
+        git(cloned_repo, 'config', 'remote.origin.receivepack', 'false')
+        repo = make_repo(cloned_repo)
+        repo.fetch_prune()
+        state = state_for(repo, 'main')
+        assert state.primary == PrimaryState.DIVERGED
+        outcome = execute(Action.REBASE_PUSH, state, repo, POLICY)
+        assert outcome.status == 'done', outcome.message
+        assert state_for(repo, 'main').primary == PrimaryState.SYNCED
+
     def test_set_upstream_push_sets_tracking(self, cloned_repo):
         git(cloned_repo, 'checkout', '-b', 'feature/new')
         commit(cloned_repo, 'x.py', 'wip')
