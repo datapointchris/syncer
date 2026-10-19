@@ -25,7 +25,7 @@ dev = [
     "mypy>=1.10.0",
     "pre-commit>=4.3.0",
     "pytest>=8.0.0",
-    "ruff==0.12.5",
+    "ruff==0.17.1",
 ]
 
 
@@ -132,6 +132,16 @@ dataclasses = "dc"
 typeCheckingMode = "standard"
 analyzeUnannotatedFunctions = true  # or pylance stops analyzing in vscode
 
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.uv-dynamic-versioning]
+style = "semver"
+
+# A new commit or tag changes the version, so it has to invalidate uv's cache.
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { git = { commit = true, tags = true } }]
+
 [tool.forge]
 # Keys the shared toolchain standard owns, written by its generator.
 # Dropping one from the template removes it here on the next sync; a key absent
@@ -170,19 +180,6 @@ managed = [
 # Dependencies held at the version the pre-commit hook runs, in every group
 # and extra that names them, so a local run and CI cannot disagree.
 pinned = ["ruff"]
-
-# The release tag is the version. python-semantic-release finds no file to
-# stamp, so it tags the merge commit itself and writes no release commit.
-# uv_build cannot do this: its metadata has no dynamic version field.
-[tool.hatch.version]
-source = "uv-dynamic-versioning"
-
-[tool.uv-dynamic-versioning]
-style = "semver"
-
-# A new commit or tag changes the version, so it has to invalidate uv's cache.
-[tool.uv]
-cache-keys = [{ file = "pyproject.toml" }, { git = { commit = true, tags = true } }]
 
 [build-system]
 requires = ["hatchling", "uv-dynamic-versioning"]
