@@ -164,7 +164,7 @@ def repo_outcome(report: RepoBranchReport) -> str:
 
 
 def summary_counts(reports: list[RepoBranchReport]) -> dict[str, int]:
-    """Every repo lands in exactly one of the first three counts, so they sum to the registry.
+    """Every repo fetched lands in exactly one of the first three counts, so they sum to the unretired repos.
 
     `stale_tags` counts tags instead. A floating tag such as `v1` moves on every release of its
     repo, and the local one stays stale until a person deletes it. So it is counted on the line

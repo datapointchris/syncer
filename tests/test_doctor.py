@@ -157,8 +157,8 @@ class TestReachability:
 
 class TestClonesAndPolicy:
     def test_the_registry_count_names_each_status_it_covers(self, isolated, tmp_path):
-        """syncer covers dormant repos too, so calling its count `active` claimed the registry's
-        narrower set, the one other readers of the same file act on."""
+        """syncer covers dormant repos too, so a count labelled `active` would claim the
+        registry's narrower set, the one other readers of the same file act on."""
         write_registry(
             isolated,
             repos=[
