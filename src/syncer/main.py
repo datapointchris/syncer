@@ -59,7 +59,7 @@ EPILOG = examples_epilog(
     ('syncer fetch', "refresh every clone's origin refs and tags; touches no branch or tree"),
     ('syncer issues', 'find moved, missing, or untracked repos'),
     ('syncer config init', 'start from scratch on a new machine'),
-    ('syncer doctor && syncer apply', 'then sync it, stopping first if the machine cannot run syncer'),
+    ('syncer doctor && syncer apply', 'sync a new machine, but only if doctor finds nothing wrong'),
 )
 
 
@@ -87,8 +87,8 @@ def main(
     """Check whether local git repos are synced, across every branch.
 
     Start with [bold]check[/bold]: it reports what each policy would do and never writes. Follow
-    it with [bold]apply[/bold], which executes that same run. On a new box, [bold]syncer doctor &&
-    syncer apply[/bold] writes nothing unless the machine can run it. Both verbs take
+    it with [bold]apply[/bold], which executes that same run. On a new machine, [bold]syncer doctor
+    && syncer apply[/bold] writes nothing unless doctor passes. Both verbs take
     [bold]--per-branch[/bold] for a per-branch view. [bold]fetch[/bold] runs only the fetch both
     start with.
 
@@ -96,8 +96,8 @@ def main(
     repo may have moved or gone missing, and [bold]doctor[/bold] when this machine may not run
     syncer at all.
 
-    check, apply and fetch cover every registry repo that is not retired, dormant ones included, which is wider
-    than the registry's own [bold]active[/bold]. [bold]doctor[/bold] counts them by status.
+    check, apply and fetch cover every registry repo that is not retired, dormant ones included —
+    wider than the registry's own [bold]active[/bold]. [bold]doctor[/bold] counts them by status.
     """
     # Never raises and never prints an error; the notice is deferred to exit so
     # it lands after the command's own output. `syncer update` is the only place
