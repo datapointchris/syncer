@@ -404,8 +404,8 @@ def doctor(
     config and registry paths with the reason each was chosen, whether the remotes can actually
     be reached, and how many repos are cloned. Read-only, and never writes a config.
 
-    Exits 1 if any check fails, so [bold]syncer doctor && syncer apply[/bold] stops on a box
-    that was never going to work.
+    Exits 1 if any check fails, so [bold]syncer doctor && syncer apply[/bold] stops on a
+    machine that was never going to work.
     """
     checks = run_doctor(repos_file)
     render_doctor(checks)
