@@ -122,8 +122,8 @@ LIFECYCLE_STYLE = {
     'path_mismatch': (ICON_MOVE, 'yellow', 'path mismatch', Severity.WARNING),
     'not_git': (ICON_ERR, 'red', 'not a git repository', Severity.ERROR),
     'no_remote': (ICON_ERR, 'red', 'no remote', Severity.ERROR),
-    # `fetch` only. It never clones, so a missing clone is a repo it could not fetch.
-    'not_cloned': (ICON_ERR, 'red', 'not cloned', Severity.ERROR),
+    # `fetch` only. It never clones, and the clone is `apply`'s to make, as `would_clone` is in `check`.
+    'not_cloned': (ICON_WARN, 'yellow', 'not cloned', Severity.WARNING),
 }
 
 # Icon says *what* the branch is; color says *who has to act* (below). Splitting the two is

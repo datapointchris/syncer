@@ -37,6 +37,7 @@ from syncer.output import ICON_DOT
 from syncer.output import ICON_ERR
 from syncer.output import ICON_OK
 from syncer.output import ICON_PULL
+from syncer.output import ICON_WARN
 from syncer.output import console
 from syncer.output import emit_json
 from syncer.policy import Policy
@@ -58,6 +59,7 @@ from syncer.repos import origin_mismatch
 
 UPDATED = 'updated'
 CURRENT = 'current'
+NOT_CLONED = 'not_cloned'
 
 
 def unfetched(repo: Repo, label: str, repo_config: RepoConfig, error: str, policy_name: str | None = None) -> RepoBranchReport:
@@ -108,9 +110,7 @@ def build_fetch_report(
 
     if not repo.is_git_repo:
         # A `.git` file is a linked worktree or git state syncer cannot read, not a missing clone.
-        return (
-            lifecycle('not_git') if (path / '.git').exists() else lifecycle('not_cloned', '`syncer apply` clones it, and fetch never does')
-        )
+        return lifecycle('not_git') if (path / '.git').exists() else lifecycle(NOT_CLONED, '`syncer apply` clones it, and fetch never does')
     remotes = repo.remotes()
     if remotes is None:
         return unfetched(repo, label, repo_config, 'cannot read this repo (git failed)')
@@ -164,7 +164,7 @@ def repo_outcome(report: RepoBranchReport) -> str:
 
 
 def summary_counts(reports: list[RepoBranchReport]) -> dict[str, int]:
-    """Every repo fetched lands in exactly one of the first three counts, so they sum to the unretired repos.
+    """Every repo fetched lands in exactly one of the first four counts, so they sum to the unretired repos.
 
     `stale_tags` counts tags instead. A floating tag such as `v1` moves on every release of its
     repo, and the local one stays stale until a person deletes it. So it is counted on the line
@@ -174,14 +174,15 @@ def summary_counts(reports: list[RepoBranchReport]) -> dict[str, int]:
     return {
         CURRENT: outcomes[CURRENT],
         UPDATED: outcomes[UPDATED],
-        'not_fetched': len(reports) - outcomes[CURRENT] - outcomes[UPDATED],
+        NOT_CLONED: outcomes[NOT_CLONED],
+        'not_fetched': len(reports) - outcomes[CURRENT] - outcomes[UPDATED] - outcomes[NOT_CLONED],
         'stale_tags': sum(len(report.moved_tags) for report in reports),
     }
 
 
 def needs_attention(report: RepoBranchReport) -> bool:
-    """Shown without `-v`: a repo not fetched, or one whose new tags did not arrive."""
-    return report_severity(report) is Severity.ERROR or report.tag_fetch_error is not None
+    """Shown without `-v`: a repo not fetched, one not cloned yet, or one whose new tags did not arrive."""
+    return report_severity(report) is Severity.ERROR or report.lifecycle == NOT_CLONED or report.tag_fetch_error is not None
 
 
 def visible_reports(reports: list[RepoBranchReport], verbose: bool) -> list[RepoBranchReport]:
@@ -209,6 +210,8 @@ def print_summary_line(counts: dict[str, int]) -> None:
     parts = [f'[green]{ICON_OK}  {counts[CURRENT]} current[/green]']
     if counts[UPDATED]:
         parts.append(f'[cyan]{ICON_PULL}  {counts[UPDATED]} updated[/cyan]')
+    if counts[NOT_CLONED]:
+        parts.append(f'[yellow]{ICON_WARN}  {counts[NOT_CLONED]} not cloned[/yellow]')
     if counts['not_fetched']:
         parts.append(f'[red]{ICON_ERR}  {counts["not_fetched"]} not fetched[/red]')
     if counts['stale_tags']:

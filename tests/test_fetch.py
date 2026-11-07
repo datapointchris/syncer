@@ -215,7 +215,7 @@ class TestFailuresAreNamedAndTheRunCarriesOn:
         report = fetch_reports([missing])[0]
         assert report.lifecycle == 'not_cloned'
         assert not missing.exists()
-        assert exit_code_for([report]) == 1
+        assert exit_code_for([report]) == 0
 
 
 class TestCli:
@@ -263,13 +263,17 @@ class TestCli:
         repo_path = make_cloned_repo(tmp_path, 'api')
         push_from_another_clone(tmp_path, 'api')
         missing = tmp_path / 'absent'
+        unreadable = tmp_path / 'linked'
+        unreadable.mkdir()
+        (unreadable / '.git').write_text('gitdir: /nowhere\n')
 
-        result = self._run(tmp_path, monkeypatch, [repo_path, missing], '--json')
+        result = self._run(tmp_path, monkeypatch, [repo_path, missing, unreadable], '--json')
 
         payload = json.loads(result.stdout)  # nothing else may be on stdout
         assert result.exit_code == 1
-        assert payload['summary'] == {'current': 0, 'updated': 1, 'not_fetched': 1, 'stale_tags': 0}
+        assert payload['summary'] == {'current': 0, 'updated': 1, 'not_cloned': 1, 'not_fetched': 1, 'stale_tags': 0}
         statuses = {repo['name']: repo for repo in payload['repos']}
         assert statuses['api']['status'] == 'updated'
         assert statuses['api']['updated'] == ['origin/main']
         assert statuses['absent']['status'] == 'not_cloned'
+        assert statuses['linked']['status'] == 'not_git'
