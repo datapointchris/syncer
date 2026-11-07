@@ -28,6 +28,7 @@ from syncer.output import ICON_MOVE
 from syncer.output import ICON_WARN
 from syncer.output import console
 from syncer.output import error
+from syncer.output import examples_epilog
 from syncer.output import status_line
 from syncer.report import DEFAULT_JOBS
 from syncer.report import exit_code_for
@@ -49,17 +50,16 @@ app.add_typer(policy_app, name='policy', rich_help_panel='Inspect')
 # the notice cannot name a release the update command would not install.
 UPDATE_CONFIG = Config(tool='syncer', owner='datapointchris')
 
-EPILOG = (
-    '[bold]Examples[/bold]\n\n'
-    '[cyan]syncer check[/cyan] — report the repos that need something; never writes\n\n'
-    '[cyan]syncer check -v[/cyan] — the same run, listing every repo including the synced ones\n\n'
-    "[cyan]syncer apply[/cyan] — pull, push, fast-forward, and clone what's safe\n\n"
-    '[cyan]syncer apply -p mirror[/cyan] — run the aggressive mirror policy this once\n\n'
-    '[cyan]syncer check --per-branch[/cyan] — quick per-branch view, no lifecycle or history\n\n'
-    "[cyan]syncer fetch[/cyan] — refresh every clone's origin refs and tags; touches no branch or tree\n\n"
-    '[cyan]syncer issues[/cyan] — find moved, missing, or untracked repos\n\n'
-    '[cyan]syncer config init[/cyan] — start from scratch on a new machine\n\n'
-    '[cyan]syncer doctor && syncer apply[/cyan] — then sync it, stopping first if the machine cannot run syncer'
+EPILOG = examples_epilog(
+    ('syncer check', 'report the repos that need something; never writes'),
+    ('syncer check -v', 'the same run, listing every repo including the synced ones'),
+    ('syncer apply', "pull, push, fast-forward, and clone what's safe"),
+    ('syncer apply -p mirror', 'run the aggressive mirror policy this once'),
+    ('syncer check --per-branch', 'quick per-branch view, no lifecycle or history'),
+    ('syncer fetch', "refresh every clone's origin refs and tags; touches no branch or tree"),
+    ('syncer issues', 'find moved, missing, or untracked repos'),
+    ('syncer config init', 'start from scratch on a new machine'),
+    ('syncer doctor && syncer apply', 'then sync it, stopping first if the machine cannot run syncer'),
 )
 
 
@@ -158,7 +158,15 @@ def run(*, apply: bool, per_branch: bool, policy: str | None, jobs: int, repos_f
     raise typer.Exit(exit_code_for(reports))
 
 
-@app.command(rich_help_panel='Sync')
+@app.command(
+    rich_help_panel='Sync',
+    epilog=examples_epilog(
+        ('syncer check', 'what each repo needs before you switch machines; writes nothing'),
+        ('syncer check -v', 'the same report, listing the repos that are already synced too'),
+        ('syncer check -p mirror', 'what the mirror policy would do here, without doing it'),
+        ('syncer check --per-branch', 'one row per branch, with no cloning or run history'),
+    ),
+)
 def check(
     per_branch: PerBranch = False,
     policy: Policy = None,
@@ -179,7 +187,15 @@ def check(
     run(apply=False, per_branch=per_branch, policy=policy, jobs=jobs, repos_file=repos_file, as_json=json_output, verbose=verbose)
 
 
-@app.command(rich_help_panel='Sync')
+@app.command(
+    rich_help_panel='Sync',
+    epilog=examples_epilog(
+        ('syncer apply', 'pull, push, fast-forward and clone whatever is safe'),
+        ('syncer apply -v', 'the same run, listing every repo and what was done to it'),
+        ('syncer apply -j 4', 'the same run, four repos at a time, for a slow link or a busy host'),
+        ('syncer apply --per-branch', 'act branch by branch, with no cloning or run history'),
+    ),
+)
 def apply(
     per_branch: PerBranch = False,
     policy: Policy = None,
@@ -201,7 +217,14 @@ def apply(
     run(apply=True, per_branch=per_branch, policy=policy, jobs=jobs, repos_file=repos_file, as_json=json_output, verbose=verbose)
 
 
-@app.command(rich_help_panel='Sync')
+@app.command(
+    rich_help_panel='Sync',
+    epilog=examples_epilog(
+        ('syncer fetch', "refresh every clone's origin refs and tags, and print one summary line"),
+        ('syncer fetch -v', 'the same fetch, naming each repo and what moved on origin'),
+        ('syncer fetch --json', 'the same fetch as JSON on stdout, for a script or a scheduler'),
+    ),
+)
 def fetch(
     jobs: Jobs = DEFAULT_JOBS,
     repos_file: ReposFile = None,
@@ -225,7 +248,13 @@ def fetch(
     raise typer.Exit(exit_code_for(reports))
 
 
-@app.command(rich_help_panel='Inspect')
+@app.command(
+    rich_help_panel='Inspect',
+    epilog=examples_epilog(
+        ('syncer issues', 'find repos that moved, went missing, or are on disk but not in the registry'),
+        ('syncer issues && syncer check', 'read sync state only once the registry matches the disk'),
+    ),
+)
 def issues(
     repos_file: Annotated[
         Path | None,
@@ -334,7 +363,13 @@ def issues(
     raise typer.Exit(1)
 
 
-@app.command(rich_help_panel='Inspect')
+@app.command(
+    rich_help_panel='Inspect',
+    epilog=examples_epilog(
+        ('syncer stats', 'past runs: what synced, what stayed dirty, and which repos went stale'),
+        ('syncer apply; syncer stats', 'sync, then see this run beside the earlier ones'),
+    ),
+)
 def stats(
     repos_file: Annotated[
         Path | None,
@@ -349,7 +384,13 @@ def stats(
     show_stats(syncer_config, events_file(repos_path, repos_file))
 
 
-@app.command(rich_help_panel='Inspect')
+@app.command(
+    rich_help_panel='Inspect',
+    epilog=examples_epilog(
+        ('syncer doctor', 'check git, both config files and whether the remotes answer, on this machine'),
+        ('syncer doctor && syncer apply', 'sync only on a machine that can run syncer'),
+    ),
+)
 def doctor(
     repos_file: Annotated[
         Path | None,
@@ -371,14 +412,26 @@ def doctor(
     raise typer.Exit(doctor_exit_code(checks))
 
 
-@app.command(rich_help_panel='Manage')
+@app.command(
+    rich_help_panel='Manage',
+    epilog=examples_epilog(
+        ('syncer version', 'the installed version, to compare against the latest release'),
+        ('syncer --version', 'the same answer, as a flag'),
+    ),
+)
 def version() -> None:
     """Print the installed version of syncer."""
     v = importlib.metadata.version('syncer')
     console.print(f'syncer {v}')
 
 
-@app.command(rich_help_panel='Manage')
+@app.command(
+    rich_help_panel='Manage',
+    epilog=examples_epilog(
+        ('syncer update --check', 'whether a newer release exists; installs nothing'),
+        ('syncer update', 'install the latest release in place of this one'),
+    ),
+)
 def update(
     check_only: Annotated[bool, typer.Option('--check', help='Report whether an update is available without installing it')] = False,
 ) -> None:
@@ -492,7 +545,12 @@ def setup_demo_repos(base: Path) -> SyncerConfig:
     )
 
 
-@app.command(rich_help_panel='Examples')
+@app.command(
+    rich_help_panel='Examples',
+    epilog=examples_epilog(
+        ('syncer demo', 'see every status syncer reports, against throwaway repos it builds and deletes'),
+    ),
+)
 def demo() -> None:
     """Run a full sync against throwaway temp repos to show every status state."""
     tmp = Path(tempfile.mkdtemp(prefix='syncer-demo-'))

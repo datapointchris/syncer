@@ -43,6 +43,7 @@ from syncer.config import write_registry
 from syncer.output import console
 from syncer.output import emit_json
 from syncer.output import error
+from syncer.output import examples_epilog
 from syncer.output import hint
 from syncer.output import success
 from syncer.policy import BUILTIN_POLICIES
@@ -53,6 +54,11 @@ from syncer.repos import normalize_remote_url
 config_app = typer.Typer(
     no_args_is_help=True,
     help='Inspect and edit the tool config and the repo registry it points at.',
+    epilog=examples_epilog(
+        ('syncer config show', 'which files are in play, and the policy each repo resolves to'),
+        ('syncer config validate', 'check both files parse and agree before a run'),
+        ('syncer config init && syncer config edit registry', 'set up a new machine, then name its repos'),
+    ),
 )
 
 
@@ -68,7 +74,13 @@ def requested_files(which: str | None) -> tuple[str, ...]:
     return (which,)
 
 
-@config_app.command('init')
+@config_app.command(
+    'init',
+    epilog=examples_epilog(
+        ('syncer config init', 'create both files at the paths syncer reads, on a new machine'),
+        ('syncer config init registry', 'create only the registry, keeping the config you already have'),
+    ),
+)
 def config_init(
     which: Annotated[str | None, typer.Argument(help='One of: config, registry. Omit to create both.')] = None,
     repos_file: Annotated[
@@ -142,7 +154,13 @@ def entry_from(path: Path) -> tuple[dict[str, str], str, str]:
     return entry, host, owner
 
 
-@config_app.command('scan')
+@config_app.command(
+    'scan',
+    epilog=examples_epilog(
+        ('syncer config scan ~/code', 'print a registry for every clone under ~/code, to review'),
+        ('syncer config scan ~/code --write', 'save it as the registry, where none lists repos yet'),
+    ),
+)
 def config_scan(
     paths: Annotated[list[Path], typer.Argument(help='Directories to scan for git repos.')],
     write: Annotated[bool, typer.Option('--write', help='Write the registry instead of printing it')] = False,
@@ -205,7 +223,13 @@ def config_scan(
     success(f'wrote {len(entries)} repos to {location.path}')
 
 
-@config_app.command('example')
+@config_app.command(
+    'example',
+    epilog=examples_epilog(
+        ('syncer config example', 'every config.toml option, annotated, to read while editing'),
+        ('syncer config example registry', 'every registry field, annotated'),
+    ),
+)
 def config_example(
     which: Annotated[str, typer.Argument(help='Which file to print: config or registry.')] = 'config',
 ) -> None:
@@ -229,7 +253,13 @@ def config_example(
         print(template, end='')
 
 
-@config_app.command('path')
+@config_app.command(
+    'path',
+    epilog=examples_epilog(
+        ('syncer config path', 'where the config, the registry and the run history live'),
+        ('syncer config path registry', 'the registry path alone, bare, for a shell substitution'),
+    ),
+)
 def config_path(
     which: Annotated[str | None, typer.Argument(help='One of: config, registry, state. Omit to print all three.')] = None,
     as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
@@ -256,7 +286,13 @@ def config_path(
         print(f'{name:<9} {path}')
 
 
-@config_app.command('show')
+@config_app.command(
+    'show',
+    epilog=examples_epilog(
+        ('syncer config show', 'the files in play, and which policy each repo resolves to and why'),
+        ('syncer config show --json', 'the same settings as JSON on stdout'),
+    ),
+)
 def config_show(
     repos_file: Annotated[
         Path | None,
@@ -348,7 +384,13 @@ def policy_source(repo_config, tool_config: ToolConfig) -> str:
     return 'default_policy'
 
 
-@config_app.command('edit')
+@config_app.command(
+    'edit',
+    epilog=examples_epilog(
+        ('syncer config edit registry', 'add or remove the repos syncer covers'),
+        ('syncer config edit', 'change policies, overrides or the registry path in config.toml'),
+    ),
+)
 def config_edit(
     which: Annotated[str, typer.Argument(help='Which file to open: config or registry.')] = 'config',
     repos_file: Annotated[
@@ -358,9 +400,9 @@ def config_edit(
 ) -> None:
     """Open the tool config or the repo registry in your editor ($VISUAL, then $EDITOR).
 
-    Takes the same `config`/`registry` positional as `init` and `example`. It used to open only
-    config.toml, while the file a new machine actually needs edited is the registry — naming your
-    repos is the one step nothing else can do for you.
+    Takes the same `config`/`registry` positional as `init` and `example`. The file a new machine
+    needs edited is the registry, because naming your repos is the one step nothing else can do
+    for you.
 
     Seeds the file from its starter first if none exists. The editor runs in the foreground, so a
     terminal editor blocks until you close it; a GUI editor returns immediately unless you
@@ -396,7 +438,13 @@ def config_edit(
     subprocess.run([editor_bin, *parts[1:], str(target)])
 
 
-@config_app.command('validate')
+@config_app.command(
+    'validate',
+    epilog=examples_epilog(
+        ('syncer config validate', 'check both files parse, match their schemas and agree'),
+        ('syncer config validate && syncer apply', 'sync only once both files are sound'),
+    ),
+)
 def config_validate(
     repos_file: Annotated[
         Path | None,

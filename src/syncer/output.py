@@ -20,6 +20,7 @@ from enum import StrEnum
 from typing import Any
 
 from rich.console import Console
+from rich.markup import escape
 
 # highlight=False globally: Rich's automatic highlighting colors anything that looks like a
 # number or a path, which turns a report of branch names and commit counts into confetti.
@@ -89,6 +90,16 @@ def status_line(icon: str, name: str, msg: str, color: str, branch: str | None =
     suffix_w = len(f' {msg}')
     padding = '_' * max(1, LINE_WIDTH - prefix_w - suffix_w)
     return f'[{color}]{prefix}{padding} {msg}[/{color}]'
+
+
+def examples_epilog(*examples: tuple[str, str]) -> str:
+    """A help screen's Examples block: each command beside the situation it answers.
+
+    The commonest invocation goes first. Each pair is (command, what it is for), and every command
+    must run as written, because an example is copied rather than read.
+    """
+    lines = [f'[cyan]{escape(command)}[/cyan] — {purpose}' for command, purpose in examples]
+    return '[bold]Examples[/bold]\n\n' + '\n\n'.join(lines)
 
 
 def emit_json(data: Any) -> None:

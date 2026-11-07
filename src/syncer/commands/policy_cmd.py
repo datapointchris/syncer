@@ -20,6 +20,7 @@ from syncer.execute import describe_refusal
 from syncer.output import console
 from syncer.output import emit_json
 from syncer.output import error
+from syncer.output import examples_epilog
 from syncer.output import hint
 from syncer.policy import BUILTIN_POLICIES
 from syncer.policy import PROTECTED_ALLOWED
@@ -35,6 +36,12 @@ from syncer.policy import matching_protection
 policy_app = typer.Typer(
     no_args_is_help=True,
     help='Inspect the sync policies this machine can resolve, and what each one decides.',
+    epilog=examples_epilog(
+        ('syncer policy list', 'the policies this machine can use, built-in and custom'),
+        ('syncer policy show standard', 'what the default policy decides for every branch state'),
+        ('syncer policy rules | grep gone', 'find the rule key to set for a branch whose remote is gone'),
+        ('syncer policy actions list', 'the fixed menu of actions a rule can choose from'),
+    ),
 )
 
 # The branch name the matrix evaluates when none is given. Exact-name and glob selectors are
@@ -83,6 +90,10 @@ def policy_summary(policy: Policy) -> dict:
 actions_app = typer.Typer(
     no_args_is_help=True,
     help='The action menu a rule can map to, and what each one runs and refuses.',
+    epilog=examples_epilog(
+        ('syncer policy actions list', 'every action a rule can map to, and whether it changes anything'),
+        ('syncer policy actions show fast_forward', 'what one action runs, and every check that refuses it'),
+    ),
 )
 policy_app.add_typer(actions_app, name='actions')
 
@@ -122,7 +133,14 @@ def rule_rows(policy: Policy, branch: str) -> list[dict]:
     return rows
 
 
-@policy_app.command('rules')
+@policy_app.command(
+    'rules',
+    epilog=examples_epilog(
+        ('syncer policy rules', 'every rule key you can set, with what the default policy decides for it'),
+        ('syncer policy rules mirror | grep gone', 'what mirror does with a branch whose remote is gone'),
+        ('syncer policy rules --branch develop', 'the same keys, resolved for a branch named develop'),
+    ),
+)
 def policy_rules(
     name: Annotated[str | None, typer.Argument(help='Policy to resolve the rules for. Omitted, the machine default_policy.')] = None,
     branch: Annotated[
@@ -194,7 +212,13 @@ def action_record(action: Action, policies: dict[str, Policy]) -> dict:
     }
 
 
-@actions_app.command('list')
+@actions_app.command(
+    'list',
+    epilog=examples_epilog(
+        ('syncer policy actions list', 'every action, whether it mutates, and the states it applies to'),
+        ('syncer policy actions list --json', 'the same menu as JSON, with what each one runs and refuses'),
+    ),
+)
 def actions_list(
     as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
 ) -> None:
@@ -228,7 +252,13 @@ def actions_list(
     console.print('syncer policy actions show <action>    what one of them runs, and what refuses it', soft_wrap=True)
 
 
-@actions_app.command('show')
+@actions_app.command(
+    'show',
+    epilog=examples_epilog(
+        ('syncer policy actions show delete_local', 'exactly when syncer will delete a local branch'),
+        ('syncer policy actions show push --json', 'one action as JSON, with the policies that decide it'),
+    ),
+)
 def actions_show(
     action_name: Annotated[str, typer.Argument(help='Action name, as it appears in `syncer policy actions list`.')],
     as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
@@ -269,7 +299,13 @@ def actions_show(
     console.print(f'  [bold]Decided by[/bold] {", ".join(record["decided_by"]) or "no policy on this machine"}', soft_wrap=True)
 
 
-@policy_app.command('list')
+@policy_app.command(
+    'list',
+    epilog=examples_epilog(
+        ('syncer policy list', 'every policy this machine resolves, and where each one is defined'),
+        ('syncer policy list --json', 'the same list as JSON on stdout'),
+    ),
+)
 def policy_list(
     as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
 ) -> None:
@@ -310,7 +346,13 @@ def policy_list(
     console.print(table)
 
 
-@policy_app.command('show')
+@policy_app.command(
+    'show',
+    epilog=examples_epilog(
+        ('syncer policy show standard', 'its rules, and the decision they produce for every state'),
+        ('syncer policy show standard --branch develop', 'confirm a branch-specific rule wins before apply runs'),
+    ),
+)
 def policy_show(
     name: Annotated[str, typer.Argument(help='Policy name, as it appears in `syncer policy list`.')],
     branch: Annotated[
