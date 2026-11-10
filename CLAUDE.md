@@ -459,6 +459,9 @@ both halves.
 
 ## Testing and release
 
+`task setup` makes a fresh checkout runnable, `task test` runs the suite, `task lint` runs the
+read-only checks and `task format` applies ruff's rewrites. `task` alone lists the rest.
+
 There is one test module per source module under `tests/`. `test_policy.py` holds the exhaustive
 primary-state × policy truth table, which is only possible because `decide()` is pure. Releases
 come from python-semantic-release off conventional commits. The notes go in the GitHub release

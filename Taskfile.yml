@@ -1,0 +1,49 @@
+version: "3"
+
+tasks:
+  default:
+    desc: List the available tasks
+    silent: true
+    cmds:
+      - task --list
+
+  # A worktree is a clean checkout, so everything gitignored is absent. The
+  # virtualenv comes back from uv.lock.
+  setup:
+    desc: Make a fresh checkout runnable
+    cmds:
+      - uv sync
+
+  test:
+    desc: Run all tests
+    cmds:
+      - uv run pytest
+
+  lint:
+    desc: Run ruff, mypy and bandit without writing any file
+    cmds:
+      - uv run ruff format --check .
+      - uv run ruff check .
+      - task: typecheck
+      - uv run bandit -c pyproject.toml -r src
+
+  typecheck:
+    desc: Type check with mypy
+    cmds:
+      - uv run mypy src
+
+  format:
+    desc: Apply ruff formatting and autofixes
+    cmds:
+      - uv run ruff format .
+      - uv run ruff check --fix .
+
+  build:
+    desc: Build the wheel and sdist
+    cmds:
+      - uv build
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - rm -rf dist
