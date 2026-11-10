@@ -3,7 +3,9 @@ import shutil
 import subprocess
 from unittest.mock import patch
 
+import click
 import pytest
+import typer
 from typer.testing import CliRunner
 
 from syncer.main import app
@@ -11,29 +13,36 @@ from syncer.main import app
 runner = CliRunner()
 
 
+def option_names(command: click.Command) -> set[str]:
+    return {opt for param in command.params if isinstance(param, click.Option) for opt in param.opts}
+
+
 class TestBareInvocation:
-    """The run used to hang off the root callback, so `syncer` scanned every repo and
-    `syncer --apply` mutated them — a write one flag away from the bare invocation. It is
-    `syncer check` / `syncer apply` now, and bare shows help. See cli-design.md, 'No args
-    shows help'."""
+    """`syncer` alone shows help and acts on nothing; the sweep is a verb, `check` or `apply`."""
 
     def test_bare_invocation_shows_help(self, monkeypatch):
         monkeypatch.setattr('syncer.main.notify', lambda *_: None)
         result = runner.invoke(app, [])
-        assert 'Usage:' in result.output
         assert 'check' in result.output
 
-    @pytest.mark.parametrize('flag', ['--policy=standard', '--jobs=2', '--repos-file=x.json', '--json', '--per-branch', '-v'])
-    def test_action_flags_are_rejected_at_the_root(self, flag, monkeypatch):
-        """Flags on the root callback are the tell that a default is really a command."""
-        monkeypatch.setattr('syncer.main.notify', lambda *_: None)
-        assert runner.invoke(app, [flag]).exit_code != 0
+    def test_the_sweep_flags_live_on_the_verbs_and_never_on_the_root(self):
+        """The command surface, read from the built command tree rather than listed here.
 
-    @pytest.mark.parametrize('verb', ['check', 'apply'])
-    @pytest.mark.parametrize('flag', ['--policy=standard', '--jobs=2', '--json', '--per-branch', '-v', '--verbose'])
-    def test_both_verbs_accept_them_instead(self, verb, flag, monkeypatch):
-        monkeypatch.setattr('syncer.main.notify', lambda *_: None)
-        assert 'No such option' not in runner.invoke(app, [verb, flag, '--help']).output
+        A flag on the root callback is the tell that a default is really a command: with the run
+        hung off the root, `syncer` would sweep every repo and a write would be one flag away from
+        the bare invocation. So the root declares none of the options a sweep reads.
+
+        `check` is `apply`'s dry run, the same classification and decided actions without the
+        writes. A flag one accepts and the other refuses would make the dry run answer a different
+        question from the run it previews, so the two declare exactly the same options.
+        """
+        root = typer.main.get_command(app)
+        assert isinstance(root, click.Group)
+        check = root.commands['check']
+        apply = root.commands['apply']
+
+        assert option_names(check) == option_names(apply)
+        assert option_names(root).isdisjoint(option_names(check))
 
 
 class TestWritingIsAVerbNotAFlag:
