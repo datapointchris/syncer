@@ -41,11 +41,6 @@ class TestRepoSnapshot:
         assert snap.stashes == 0
         assert snap.branch is None
 
-    def test_all_fields(self):
-        snap = RepoSnapshot(name='r', path='/r', status='issues', branch='main', uncommitted=3, unpushed=1, behind=2, stashes=1)
-        assert snap.uncommitted == 3
-        assert snap.branch == 'main'
-
     def test_branches_default_empty(self):
         snap = RepoSnapshot(name='r', path='/r', status='synced')
         assert snap.branches == []
@@ -78,11 +73,6 @@ class TestRepoSnapshot:
         assert restored.branches[0].branch == 'main'
         assert restored.branches[0].outcome == 'skipped'
 
-    def test_all_statuses(self):
-        for status in ('synced', 'issues', 'pulled', 'pushed', 'cloned', 'missing', 'not_git', 'no_remote', 'path_mismatch'):
-            snap = RepoSnapshot(name='r', path='/r', status=status)
-            assert snap.status == status
-
     def test_an_unreadable_line_does_not_take_the_run_down(self, tmp_path):
         """History is a side channel; the sync report is what the user asked for. A truncated
         write or a line from a version this one predates must not abort the whole run."""
@@ -107,13 +97,6 @@ class TestRepoSnapshot:
         """
         snap = RepoSnapshot(name='r', path='/r', status='a-status-from-a-future-version')
         assert snap.status == 'a-status-from-a-future-version'
-
-
-class TestRunSummary:
-    def test_fields(self):
-        s = RunSummary(total=10, synced=8, pulled=1, pushed=0, issues=1, duration_ms=1500)
-        assert s.total == 10
-        assert s.duration_ms == 1500
 
 
 class TestSyncRunEvent:

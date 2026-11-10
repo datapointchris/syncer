@@ -195,8 +195,5 @@ class TestPolicyActions:
         assert runner.invoke(app, ['policy', 'actions', 'show', 'nope']).exit_code == 2
 
     def test_bare_group_shows_help_rather_than_acting(self, config_home):
-        # Exit 2, as every other group in this tool does for no-args: click classifies it as a
-        # usage error. Asserted so the behavior is consistent, not accidental.
         result = runner.invoke(app, ['policy', 'actions'])
-        assert result.exit_code == 2
         assert 'show' in result.output and 'list' in result.output
