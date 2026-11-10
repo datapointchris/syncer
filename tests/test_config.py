@@ -125,10 +125,14 @@ class TestLoadToolConfig:
             load_tool_config()
         assert 'unknown action' in capsys.readouterr().err
 
-    def test_git_timeout_defaults_and_overrides(self, tool_config):
-        assert load_tool_config().git_timeout == GIT_TIMEOUT_SECONDS
-        tool_config.write_text('git_timeout = 300\n')
-        assert load_tool_config().git_timeout == 300
+    def test_git_timeout_seconds_defaults_and_overrides_with_its_source(self, tool_config):
+        defaulted = load_tool_config()
+        assert defaulted.git_timeout_seconds == GIT_TIMEOUT_SECONDS
+        assert 'git_timeout_seconds' not in defaulted.set_in_file
+        tool_config.write_text('git_timeout_seconds = 300\n')
+        overridden = load_tool_config()
+        assert overridden.git_timeout_seconds == 300
+        assert 'git_timeout_seconds' in overridden.set_in_file
 
     def test_parses_repo_overrides(self, tool_config):
         tool_config.write_text('[repo_overrides]\n"shared-repo" = "observe"\n')
@@ -507,7 +511,7 @@ class TestPolicyPatching:
 
     def test_the_keys_syncer_does_read_are_not_refused(self):
         """The guard is a denylist by omission, so it fails closed on a key that is real."""
-        parse_tool_config(tomllib.loads('repos_registry = "~/r.json"\ndefault_policy = "standard"\ngit_timeout = 60\n'))
+        parse_tool_config(tomllib.loads('repos_registry = "~/r.json"\ndefault_policy = "standard"\ngit_timeout_seconds = 60\n'))
 
     def test_extending_an_unknown_policy_names_both(self, tool_config):
         with pytest.raises(ConfigError) as exc:

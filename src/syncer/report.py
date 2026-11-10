@@ -532,7 +532,7 @@ def build_repo_report(
         path=path,
         owner=owner,
         host=config.host,
-        timeout=tool_config.git_timeout,
+        timeout=tool_config.git_timeout_seconds,
         url=resolve_clone_url(repo_config, config),
     )
 
@@ -706,7 +706,7 @@ def run_pool(
         except KeyboardInterrupt:
             # Both halves matter: cancel() empties the queue, and the abort ends the git calls
             # already running. Without the second, shutdown waits out every in-flight fetch and a
-            # Ctrl-C looks ignored for the length of git_timeout.
+            # Ctrl-C looks ignored for the length of git_timeout_seconds.
             abort_running_commands()
             for future in futures:
                 future.cancel()

@@ -164,7 +164,7 @@ def hint_lines(cause: Cause | None, url: str) -> list[str]:
             'an empty registry `owner` builds URLs like https://host//name, which fails exactly this way.',
         ]
     if cause is Cause.TIMEOUT:
-        return ['raise git_timeout in config.toml if this host is legitimately slow.']
+        return ['raise git_timeout_seconds in config.toml if this host is legitimately slow.']
     return []
 
 

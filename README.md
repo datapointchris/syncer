@@ -99,7 +99,7 @@ Two files, deliberately split. `syncer config path` prints where both resolve to
 ```toml
 # repos_registry = "~/shared/repos.json"  # defaults to ~/.config/syncer/repos.json
 default_policy = "standard"
-git_timeout = 120                        # ceiling on a single git call; clones get 5x this
+git_timeout_seconds = 120                # ceiling on a single git call; clones get 5x this
 ```
 
 `repos_registry` is worth setting only when another tool reads the same registry file, and then only on the machines that have it. Because it is machine-local, this file is the one thing that must **not** be shared between machines: a config naming a path only some of them have makes every run there fail on a registry that was never going to exist. Any message about a missing registry names what chose the path — `(from repos_registry in ~/.config/syncer/config.toml)` — and offers both exits, creating one there or dropping the pointer.

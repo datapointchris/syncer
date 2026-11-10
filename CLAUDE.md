@@ -232,7 +232,7 @@ it, and advancing it is expected.
   `config scan --write` fills one that is absent or empty. Both refuse once the file lists repos,
   and `scan` treats an unparsable file as content.
 - **`config.toml`** (`$XDG_CONFIG_HOME/syncer/config.toml`) — **machine-local** tool config:
-  `repos_registry`, `default_policy`, custom `[policies.*]`, `[repo_overrides]`, and `git_timeout`.
+  `repos_registry`, `default_policy`, custom `[policies.*]`, `[repo_overrides]`, and `git_timeout_seconds`.
 
 **The registry path resolves `-c/--repos-file` → `$SYNCER_REPOS_REGISTRY` → `config.toml`
 `repos_registry` → `DEFAULT_REPOS_FILE`.** syncer reads no variable that is not prefixed
@@ -363,7 +363,7 @@ Each all-clear names what it *measured*, never a verdict on the whole set. `doct
 - Nothing assumes GitHub. Reachability is `git ls-remote` against the resolved URL. `gh` is never
   invoked, and a test asserts it.
 - A registry still holding template placeholders skips the network checks.
-- `PROBE_TIMEOUT_SECONDS` is not `git_timeout`, which is sized for a monorepo over a VPN.
+- `PROBE_TIMEOUT_SECONDS` is not `git_timeout_seconds`, which is sized for a monorepo over a VPN.
 - Exit 1 on FAIL, 0 on WARN, so `syncer doctor && syncer apply` stops only on a box that cannot work.
 - It never writes anything.
 
@@ -400,7 +400,7 @@ completes. It is off when `console.is_terminal` is false or `--json` is set.
 
 Ctrl-C ends the run, not the current call. `abort_running_commands()` terminates every live git
 process and short-circuits later ones. Canceling the queue alone leaves `shutdown` waiting out
-`git_timeout`. Nothing renders and **no run event is written**, since a partial sweep is not a
+`git_timeout_seconds`. Nothing renders and **no run event is written**, since a partial sweep is not a
 measurement. Exit code 130. An aborted call *is* recorded as a `GitFailure`, because branches
 below an unfetched remote would be measured against stale refs. Its stderr matches no
 `diagnose` pattern.
@@ -408,7 +408,7 @@ below an unfetched remote would be measured against stale refs. Its stderr match
 ### Nothing may open a window, and a dead host is asked once
 
 Every subprocess goes through `run_command` (`repos.py`). It uses `Popen` because the abort needs
-the handle. A timeout (`git_timeout`, default 120s; 600s for clones) returns as an ordinary
+the handle. A timeout (`git_timeout_seconds`, default 120s; 600s for clones) returns as an ordinary
 non-zero result and is never raised, so one wedged call loses only itself. Never call
 `subprocess.run` directly for git or `gh`.
 

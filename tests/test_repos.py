@@ -433,7 +433,7 @@ class TestNonInteractiveExecution:
 
 class TestAbort:
     """A Ctrl-C used to appear ignored: the pool's shutdown waits for running tasks, so an
-    interrupt during a fetch storm sat there for the remainder of git_timeout with nothing on
+    interrupt during a fetch storm sat there for the remainder of git_timeout_seconds with nothing on
     screen. Ending the processes is what makes the interrupt land immediately."""
 
     @pytest.fixture(autouse=True)
@@ -705,7 +705,7 @@ class TestClone:
         assert 'timed out' in err
 
     def test_clone_scales_its_timeout_from_the_configured_one(self, tmp_path):
-        """config.toml and the README both promise clones get 5x git_timeout; before this the
+        """config.toml and the README both promise clones get 5x git_timeout_seconds; before this the
         clone used a hard-coded 600s and ignored the setting entirely."""
         repo = make_repo(tmp_path / 'dest', url='https://example.invalid/x.git', timeout=30)
         with patch('syncer.repos.run_command') as run:

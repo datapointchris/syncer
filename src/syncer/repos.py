@@ -14,7 +14,7 @@ from pathlib import Path
 # a wedged call eventually reports instead of holding a worker thread forever.
 GIT_TIMEOUT_SECONDS = 120
 # Cloning a large repo legitimately takes minutes, and it happens once per repo. A multiple of
-# the configured timeout rather than a constant, so raising git_timeout for a slow network
+# the configured timeout rather than a constant, so raising git_timeout_seconds for a slow network
 # raises the clone ceiling too — which is what config.toml and the README always claimed.
 CLONE_TIMEOUT_MULTIPLIER = 5
 # Exit code for a timeout, matching the shell's convention for a command killed by `timeout`.
@@ -195,7 +195,7 @@ def abort_running_commands() -> None:
     """End every in-flight git call and make every later one return without running.
 
     Without it a Ctrl-C does nothing visible: ThreadPoolExecutor's shutdown waits for running
-    tasks, so an interrupt during a fetch storm sits there for the remainder of git_timeout — two
+    tasks, so an interrupt during a fetch storm sits there for the remainder of git_timeout_seconds — two
     minutes of a terminal that has already been told to stop.
     """
     aborted.set()
@@ -272,7 +272,7 @@ class Repo:
         recording it would bury the real failures in noise.
 
         `timeout` is for the one call that does a clone's work from inside a repo: the first
-        fetch of a full history. Everything else is sized by git_timeout.
+        fetch of a full history. Everything else is sized by git_timeout_seconds.
         """
         result = run_command(['git', *args], cwd=self.path, timeout=timeout or self.timeout)
         if result.returncode != 0 and not probe:

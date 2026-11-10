@@ -313,7 +313,7 @@ def issues(
             path=path,
             owner=owner,
             host=syncer_config.host,
-            timeout=tool_config.git_timeout,
+            timeout=tool_config.git_timeout_seconds,
             url=resolve_clone_url(repo_config, syncer_config),
         )
 

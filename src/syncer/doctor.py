@@ -56,7 +56,7 @@ from syncer.output import success
 from syncer.repos import GitFailure
 from syncer.repos import run_command
 
-# Deliberately not git_timeout. That is sized for fetching a large monorepo over a VPN (120s by
+# Deliberately not git_timeout_seconds. That is sized for fetching a large monorepo over a VPN (120s by
 # default); a diagnostic that hangs for two minutes per host is one nobody waits for.
 PROBE_TIMEOUT_SECONDS = 20
 

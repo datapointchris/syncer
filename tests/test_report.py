@@ -810,7 +810,7 @@ class TestAHostThatFailedIsNotAskedAgain:
         breaker = HostBreaker()
         breaker.record_failure('https://git.example.com/o/alpha.git', self.AUTH)
         config = config_for([repo_path])
-        report = build_report(config.repos[0], config, breaker=breaker, tool_config=ToolConfig(git_timeout=5))
+        report = build_report(config.repos[0], config, breaker=breaker, tool_config=ToolConfig(git_timeout_seconds=5))
         assert report is not None
         assert report.skipped is not None
         assert report.skipped.host == 'git.example.com'
@@ -823,7 +823,7 @@ class TestAHostThatFailedIsNotAskedAgain:
         breaker = HostBreaker()
         breaker.record_failure('https://git.example.com/o/bravo.git', self.AUTH)
         config = config_for([repo_path])
-        report = build_report(config.repos[0], config, breaker=breaker, tool_config=ToolConfig(git_timeout=5))
+        report = build_report(config.repos[0], config, breaker=breaker, tool_config=ToolConfig(git_timeout_seconds=5))
         assert report is not None
         assert report.rows == []
 
@@ -899,7 +899,7 @@ class TestOneRepoCannotTakeTheRunDown:
 class TestAnInterruptEndsTheGitCalls:
     """Canceling the queue is only half of it: without ending the calls already running, the
     pool's shutdown waits out every in-flight fetch and the Ctrl-C looks ignored for the length
-    of git_timeout."""
+    of git_timeout_seconds."""
 
     def test_the_abort_reaches_run_command(self, tmp_path):
         paths = [make_cloned_repo(tmp_path, 'alpha')]

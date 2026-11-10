@@ -99,7 +99,7 @@ def build_fetch_report(
         path=path,
         owner=repo_config.owner or config.owner,
         host=config.host,
-        timeout=tool_config.git_timeout,
+        timeout=tool_config.git_timeout_seconds,
         url=resolve_clone_url(repo_config, config),
     )
 

@@ -237,7 +237,7 @@ class TestCloneFailureReachesTheScreen:
 
 class TestAnInterruptEndsTheRun:
     """A Ctrl-C used to look ignored: the pool's shutdown waits for running tasks, so an
-    interrupt during a fetch storm sat there for the remainder of git_timeout with nothing on
+    interrupt during a fetch storm sat there for the remainder of git_timeout_seconds with nothing on
     screen. Measured against a real signal afterwards: 0.2s to exit, code 130."""
 
     def _registry(self, tmp_path):

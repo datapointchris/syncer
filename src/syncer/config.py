@@ -98,7 +98,7 @@ default_policy = "standard"
 
 # Ceiling on a single git call, in seconds; clones get five times this. Machine-local because it
 # is a property of this box's network — a VPN fetching a large monorepo needs more headroom.
-git_timeout = 120
+git_timeout_seconds = 120
 
 # Per-repo policy, keyed by the name in the registry. Beats the registry's sync_policy hint,
 # loses to --policy.
@@ -316,7 +316,10 @@ class ToolConfig(BaseModel):
     repo_overrides: dict[str, str] = {}
     # Ceiling on a single git call. Machine-local because it is a property of this box's network
     # — a corporate VPN fetching a large monorepo needs more headroom than a home connection.
-    git_timeout: int = GIT_TIMEOUT_SECONDS
+    git_timeout_seconds: int = GIT_TIMEOUT_SECONDS
+    # The top-level keys config.toml itself set, so `config show` can say whether a value came
+    # from the file or is the built-in default. Empty when no file exists.
+    set_in_file: frozenset[str] = frozenset()
 
 
 class ConfigError(Exception):
@@ -470,7 +473,7 @@ def build_policies(raw_policies: dict[str, Any], bases: dict[str, str] | None = 
 # Every key this file may carry. Declared rather than inferred from the model, because the
 # construction below reads each one by name and pydantic ignores what it is not handed —
 # so a key dropped from that call would silently become "unknown" rather than unread.
-TOOL_CONFIG_KEYS = frozenset({'repos_registry', 'default_policy', 'policies', 'repo_overrides', 'git_timeout'})
+TOOL_CONFIG_KEYS = frozenset({'repos_registry', 'default_policy', 'policies', 'repo_overrides', 'git_timeout_seconds'})
 
 
 def parse_tool_config(raw: dict[str, Any]) -> ToolConfig:
@@ -502,7 +505,8 @@ def parse_tool_config(raw: dict[str, Any]) -> ToolConfig:
             policies=policies,
             policy_bases=bases,
             repo_overrides=raw.get('repo_overrides', {}),
-            git_timeout=raw.get('git_timeout', GIT_TIMEOUT_SECONDS),
+            git_timeout_seconds=raw.get('git_timeout_seconds', GIT_TIMEOUT_SECONDS),
+            set_in_file=frozenset(raw),
         )
     except ValidationError as exc:
         raise ConfigError(validation_problems(exc)) from exc

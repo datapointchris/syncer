@@ -343,7 +343,9 @@ def config_show(
                 'registry_source': registry_source,
                 'state_dir': str(STATE_DIR),
                 'default_policy': tool_config.default_policy,
-                'git_timeout': tool_config.git_timeout,
+                'default_policy_source': setting_source(tool_config, 'default_policy'),
+                'git_timeout_seconds': tool_config.git_timeout_seconds,
+                'git_timeout_seconds_source': setting_source(tool_config, 'git_timeout_seconds'),
                 'policies': sorted(known_policies),
                 'repos': repos,
             }
@@ -361,9 +363,11 @@ def config_show(
     )
     console.print(f'[bold]state[/bold]     {STATE_DIR}', soft_wrap=True)
     console.print()
-    console.print(f'[bold]default_policy[/bold]  {tool_config.default_policy}')
-    console.print(f'[bold]git_timeout[/bold]     {tool_config.git_timeout}s')
-    console.print(f'[bold]policies[/bold]        {", ".join(sorted(known_policies))}')
+    default_policy_source = setting_source(tool_config, 'default_policy')
+    timeout_source = setting_source(tool_config, 'git_timeout_seconds')
+    console.print(f'[bold]default_policy[/bold]       {tool_config.default_policy} [cyan]({default_policy_source})[/cyan]')
+    console.print(f'[bold]git_timeout_seconds[/bold]  {tool_config.git_timeout_seconds} [cyan]({timeout_source})[/cyan]')
+    console.print(f'[bold]policies[/bold]             {", ".join(sorted(known_policies))}')
 
     if not repos:
         return
@@ -373,6 +377,11 @@ def config_show(
     for repo in repos:
         marker = '' if repo['resolves'] else '  [red](unknown policy)[/red]'
         console.print(f'  {repo["name"]:<{width}}  {repo["policy"]} [cyan]({repo["source"]})[/cyan]{marker}')
+
+
+def setting_source(tool_config: ToolConfig, key: str) -> str:
+    """Whether a top-level setting came from config.toml or is the built-in default."""
+    return 'config.toml' if key in tool_config.set_in_file else 'default'
 
 
 def policy_source(repo_config, tool_config: ToolConfig) -> str:
