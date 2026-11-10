@@ -55,7 +55,7 @@ EPILOG = examples_epilog(
     ('syncer check -v', 'the same run, listing every repo including the synced ones'),
     ('syncer apply', "pull, push, fast-forward, and clone what's safe"),
     ('syncer apply -p mirror', 'run the aggressive mirror policy this once'),
-    ('syncer check --per-branch', 'quick per-branch view, no lifecycle or history'),
+    ('syncer check --per-branch', 'quick per-branch view: clones nothing, records no run'),
     ('syncer fetch', "refresh every clone's origin refs and tags; touches no branch or tree"),
     ('syncer issues', 'find moved, missing, or untracked repos'),
     ('syncer config init', 'start from scratch on a new machine'),
@@ -107,7 +107,9 @@ def main(
         notify(UPDATE_CONFIG)
 
 
-PerBranch = Annotated[bool, typer.Option('--per-branch', help='Per-branch view: no lifecycle, cloning, or run history')]
+PerBranch = Annotated[
+    bool, typer.Option('--per-branch', help='Per-branch view: clones no missing repo, flags no moved one, records no run')
+]
 Policy = Annotated[str | None, typer.Option('--policy', '-p', help='Override the resolved policy for every repo')]
 Jobs = Annotated[int, typer.Option('--jobs', '-j', help='Max repos to process concurrently')]
 ReposFile = Annotated[

@@ -54,10 +54,10 @@ order, so the first failure is the one to act on. It exits 1 on a real problem, 
 syncer check              # classify every repo/branch and show what would happen; never writes
 syncer apply              # execute each policy's safe actions (pull/push/ff/clone)
 syncer check -v           # list every repo, including the ones with nothing to report
-syncer check --per-branch # per-branch view: no lifecycle, cloning, or run history
+syncer check --per-branch # per-branch view: clones nothing, flags no moved repo, records no run
 syncer check --json       # emit the run as JSON on stdout instead of a report
 syncer apply -p observe   # override the resolved policy for this run
-syncer apply -j 8         # limit concurrency to 8 repos at a time (default 16)
+syncer apply -j 8         # limit concurrency to 8 repos at a time
 syncer check -c work.json # use a different registry; replaces the default set entirely
 syncer fetch              # refresh every clone's origin refs and tags; touches no branch or tree
 syncer fetch -v           # the same, listing every repo and what moved
@@ -155,7 +155,7 @@ Both views classify every branch (per-branch `ahead`/`behind`/`gone`/`no_upstrea
 
 Tags are fetched after the branches, and never decide whether a repo was measured. A tag the remote moved, such as a reusable workflow's `v1`, is left where it is locally and named under the repo. So is any other reason the tag fetch was refused. Neither changes the exit code.
 
-Repos are fetched and processed **concurrently** (default 16 at a time, `-j` to tune), so a single run over many repos takes roughly as long as the slowest repo rather than the sum. A small random jitter staggers the initial fetches so they don't hit the remote all at once. Output is sorted by attention, so anything needing action lands nearest the prompt.
+Repos are fetched and processed **concurrently** (`-j` to tune; `syncer apply --help` prints the default), so a single run over many repos takes roughly as long as the slowest repo rather than the sum. A small random jitter staggers the initial fetches so they don't hit the remote all at once. Output is sorted by attention, so anything needing action lands nearest the prompt.
 
 While it runs, a live line on stderr shows how far in it is, which repos are being fetched right now, and how long each has been going — so a slow host is visible as it happens rather than after the fact. It is a terminal affordance: nothing is drawn into a pipe, a log, or `--json`. Ctrl-C ends the git calls immediately and exits 130 without writing a run to the history, because a sweep that covered some unknown fraction of the registry is not a measurement.
 
