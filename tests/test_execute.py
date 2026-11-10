@@ -1,9 +1,11 @@
+import ast
 import subprocess
 from itertools import chain
 from pathlib import Path
 
 import pytest
 
+import syncer
 from syncer.classify import classify_branch
 from syncer.execute import ACTION_DOCS
 from syncer.execute import CHECKOUT_REFUSALS
@@ -1114,3 +1116,28 @@ class TestActionDocs:
         # new placeholder without a stand-in raises KeyError here rather than in the CLI.
         for reason in Refusal:
             assert describe_refusal(reason)
+
+
+COMPONENT_REFUSALS = frozenset({'protection_refusal', 'checkout_refusal', 'worktree_refusal', 'dirty_refusal'})
+
+
+def test_only_blocking_refusal_reaches_the_component_refusals():
+    """Outside execute.py, a gate is consulted through blocking_refusal, never one at a time.
+
+    blocking_refusal composes the four static gates so a caller cannot consult three and miss the
+    fourth. A row that consulted them itself and missed one would draw an arrow `apply` refuses.
+    Read from the package source, so a module added later is covered without editing this test.
+    execute.py is exempt: it defines the four, and execute() runs the protection gate itself.
+    """
+    package = Path(syncer.__file__).parent
+    offenders = []
+    for module in sorted(package.rglob('*.py')):
+        if module == package / 'execute.py':
+            continue
+        for node in ast.walk(ast.parse(module.read_text())):
+            name = node.id if isinstance(node, ast.Name) else node.attr if isinstance(node, ast.Attribute) else None
+            if name is None and isinstance(node, ast.alias):
+                name = node.name
+            if name in COMPONENT_REFUSALS:
+                offenders.append(f'{module.relative_to(package)}:{node.lineno}: {name}')
+    assert not offenders, offenders

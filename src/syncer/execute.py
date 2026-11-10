@@ -584,8 +584,9 @@ def protection_refusal(action: Action, state: BranchState, policy: Policy) -> Re
 def blocking_refusal(action: Action, state: BranchState, policy: Policy, dirty: bool) -> Refusal | None:
     """The reason `apply` would refuse `action`, when that is knowable without running anything.
 
-    The three static gates in one place, so a caller cannot consult two of them and miss the
-    third. Anything a guard can only discover mid-write (a rebase conflict, unreadable counts)
+    The four static gates in one place, so a caller cannot consult three of them and miss the
+    fourth. `test_only_blocking_refusal_reaches_the_component_refusals` holds every module outside
+    this one to it. Anything a guard can only discover mid-write (a rebase conflict, unreadable counts)
     is deliberately absent — a row must not promise a refusal any more than it promises an action.
     """
     return (
