@@ -242,7 +242,8 @@ def config_example(
     `syncer config example registry > repos.json` stays clean.
     """
     requested_files(which)
-    template, lexer = (TEMPLATE_REGISTRY, 'json') if which == 'registry' else (TEMPLATE_TOOL_CONFIG, 'toml')
+    template = TEMPLATE_REGISTRY if which == 'registry' else TEMPLATE_TOOL_CONFIG
+    lexer = 'json' if which == 'registry' else 'toml'
     if console.is_terminal:
         console.print(Syntax(template, lexer, background_color='default', word_wrap=True))
         # A template on screen with no path is the half-answer: it says what to write and never
