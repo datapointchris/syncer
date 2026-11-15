@@ -142,7 +142,7 @@ While it runs, a live line on stderr shows how far in it is, which repos are bei
 
 Git is run with prompting, askpass, and credential-manager windows all disabled, so an expired credential fails instead of asking. Stored credentials still answer — only the window is refused. And the first proof that a host is unreachable (rejected credential, unverified host key, unresolvable name) closes it for the rest of the run: the remaining repos on that host are reported as not contacted rather than each waking a credential helper of their own. A host that has already answered successfully can never be closed, and ssh and https count as separate credentials on the same host.
 
-Three policies are built in: `standard` (default-branch auto-sync, feature branches report-only), `observe` (report everything, mutate nothing), and `mirror` (auto everything safe, opt-in). Define your own under `[policies.<name>]` with a `scope` (`default`/`current`/`tracked`/`all`) and a rule table keyed by `<selector>:<state>`:
+`syncer policy list` names the built-in policies, and `syncer policy show <name>` prints what one decides for every branch state. Define your own under `[policies.<name>]` with a `scope` (`default`/`current`/`tracked`/`all`) and a rule table keyed by `<selector>:<state>`:
 
 ```toml
 default_policy = "standard"

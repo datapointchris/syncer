@@ -292,8 +292,9 @@ exception is `sync_policy` in `repos.json`. It is a portable hint and must name 
 the repo shows `unknown policy` on machines whose `config.toml` lacks it.
 
 Per-repo resolution, first hit wins (`resolve_policy_name`): `--policy` → `repo_overrides` →
-`repos.json` `sync_policy` → `default_policy` → built-in `standard`. The built-ins are `standard`,
-`observe` and `mirror`. `observe` mutates nothing and **does not pull**.
+`repos.json` `sync_policy` → `default_policy` → built-in `standard`. `BUILTIN_POLICIES`
+(`policy.py`) holds the built-ins, and `syncer policy list` prints them. `observe` mutates nothing
+and **does not pull**.
 
 ## The report says what to run, for the rows it will not clear
 
