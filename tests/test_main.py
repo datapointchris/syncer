@@ -1,6 +1,8 @@
 import json
+import re
 import shutil
 import subprocess
+from pathlib import Path
 from unittest.mock import patch
 
 import click
@@ -15,6 +17,51 @@ runner = CliRunner()
 
 def option_names(command: click.Command) -> set[str]:
     return {opt for param in command.params if isinstance(param, click.Option) for opt in param.opts}
+
+
+REPO = Path(__file__).parent.parent
+
+# A command printed for a person to run: in a code span, rich markup, an examples tuple or a
+# print call, after a hint's colon, or chained after && or ;. A bare quote, and a tuple assigned
+# to a keyword such as `notes=('...`, are left out, because a sentence about syncer opens those
+# too. A word running into a `/` or a `.` is a path argument, not a subcommand.
+WORDS = r'((?: [a-z][\w-]*(?![\w/.-]))+)'
+PRINTED_IN_SOURCE = re.compile(rf"(?:`|(?<!=)\('|\[bold\]|\[cyan\]|: |&& |; )syncer{WORDS}")
+SHELL_FENCE = re.compile(r'^```(?:bash|sh)\n(.*?)^```', re.MULTILINE | re.DOTALL)
+PRINTED_IN_FENCE = re.compile(rf'^syncer{WORDS}', re.MULTILINE)
+
+
+def printed_commands():
+    for source in sorted((REPO / 'src' / 'syncer').rglob('*.py')):
+        for match in PRINTED_IN_SOURCE.finditer(source.read_text()):
+            yield source.name, match.group(1).split()
+    readme = (REPO / 'README.md').read_text()
+    for fence in SHELL_FENCE.finditer(readme):
+        for match in PRINTED_IN_FENCE.finditer(fence.group(1)):
+            yield 'README.md', match.group(1).split()
+    for match in PRINTED_IN_SOURCE.finditer(readme):
+        yield 'README.md', match.group(1).split()
+
+
+def test_every_command_it_prints_is_in_the_command_tree():
+    """A hint naming a command that was renamed sends its reader to an error."""
+    tree = typer.main.get_command(app)
+    missing = []
+    walked = 0
+    for source, words in printed_commands():
+        walked += 1
+        command = tree
+        for word in words:
+            subcommands = getattr(command, 'commands', None)
+            if subcommands is None:
+                break
+            if word not in subcommands:
+                missing.append(f'{source}: syncer {" ".join(words)}')
+                break
+            command = subcommands[word]
+
+    assert walked > 50
+    assert missing == []
 
 
 class TestBareInvocation:
