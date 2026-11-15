@@ -437,7 +437,7 @@ def version() -> None:
 def update(
     check_only: Annotated[bool, typer.Option('--check', help='Report whether an update is available without installing it')] = False,
 ) -> None:
-    """Update syncer to the latest GitHub release."""
+    """Update syncer to the newest release its package index serves."""
     run_update(UPDATE_CONFIG, check_only=check_only)
 
 
