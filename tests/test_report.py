@@ -20,6 +20,7 @@ from syncer.policy import Action
 from syncer.policy import BranchState
 from syncer.policy import Policy
 from syncer.policy import PrimaryState
+from syncer.policy import Scope
 from syncer.remedy import Remedy
 from syncer.report import BranchRow
 from syncer.report import RepoBranchReport
@@ -618,7 +619,7 @@ class TestWatchedRemoteBranches:
 
     def _watched(self, tmp_path, patterns, *branches):
         repo_config, config = self._repo_with_remote_branches(tmp_path, *branches)
-        tool_config = ToolConfig(policies={'w': Policy(name='w', scope='all', watch_remote=patterns)})
+        tool_config = ToolConfig(policies={'w': Policy(name='w', scope=Scope.ALL, watch_remote=patterns)})
         report = build_repo_report(
             repo_config,
             config=config,

@@ -1,11 +1,13 @@
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from syncer.classify import classify_branch
 from syncer.classify import classify_repo
 from syncer.policy import BUILTIN_POLICIES
+from syncer.policy import BranchState
 from syncer.policy import Policy
 from syncer.policy import PrimaryState
 from syncer.policy import Scope
@@ -44,7 +46,7 @@ def second_clone_pushes(tmp_path: Path, filename: str = 'remote.txt') -> None:
     git(second, 'push')
 
 
-def classify_main(repo: Repo) -> object:
+def classify_main(repo: Repo) -> BranchState:
     return classify_branch(repo, 'main', default='main', current='main', dirty_current=False, stashed=False)
 
 
@@ -134,7 +136,7 @@ class TestClassifyBranchStates:
         repo = make_repo(cloned_repo)
         repo.fetch_prune()
 
-        args = {'default': 'main', 'current': 'develop', 'dirty_current': False, 'stashed': False}
+        args: dict[str, Any] = {'default': 'main', 'current': 'develop', 'dirty_current': False, 'stashed': False}
         assert classify_branch(repo, 'feature/x', **args).merged_into_target is False
         assert classify_branch(repo, 'feature/x', merge_target='develop', **args).merged_into_target is True
 

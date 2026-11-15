@@ -78,7 +78,7 @@ class TestRepoConfig:
 
     def test_invalid_status_rejected(self):
         with pytest.raises(ValueError):
-            RepoConfig(name='test', path='~/code/test', status='invalid')
+            RepoConfig.model_validate({'name': 'test', 'path': '~/code/test', 'status': 'invalid'})
 
     def test_sync_policy_defaults_to_none(self):
         repo = RepoConfig(name='test', path='~/code/test')
@@ -245,7 +245,7 @@ class TestSyncerConfig:
         config = SyncerConfig(
             owner='testuser',
             host='https://github.com',
-            repos=[{'name': 'repo1', 'path': '~/code/repo1'}],
+            repos=[RepoConfig(name='repo1', path='~/code/repo1')],
         )
         assert config.search_paths == []
 
@@ -315,12 +315,14 @@ class TestRegistryLocation:
     def test_repos_registry_names_the_config_that_set_it(self, tool_config, repos_file):
         location = registry_location(ToolConfig(repos_registry=str(repos_file)))
         assert location.path == repos_file
+        assert location.source is not None
         assert 'repos_registry' in location.source
         assert str(tool_config) in location.source
 
     def test_the_flag_names_itself(self, tool_config, repos_file, tmp_path):
         location = registry_location(ToolConfig(repos_registry=str(repos_file)), tmp_path / 'work.json')
         assert location.path == tmp_path / 'work.json'
+        assert location.source is not None
         assert '--repos-file' in location.source
 
     def test_the_syncer_variable_answers_when_the_config_does_not(self, tool_config, tmp_path, monkeypatch):
@@ -342,6 +344,7 @@ class TestRegistryLocation:
         monkeypatch.setenv('SYNCER_REPOS_REGISTRY', str(tmp_path / 'declared.json'))
         location = registry_location(ToolConfig(), tmp_path / 'work.json')
         assert location.path == tmp_path / 'work.json'
+        assert location.source is not None
         assert '--repos-file' in location.source
 
     def test_the_unprefixed_variable_is_never_consulted(self, tool_config, tmp_path, monkeypatch):

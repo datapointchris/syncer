@@ -53,7 +53,7 @@ class TestTheDisplayIsOffWhenItCannotRedraw:
         progress = RunProgress(3, enabled=False, console=terminal_console())
         with progress:
             token = progress.start('repo')
-            progress.finish(token, 'error')
+            progress.finish(token, Tally.NEEDS_YOU)
         assert progress._done == 1
 
 

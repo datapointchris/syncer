@@ -210,11 +210,11 @@ class TestPolicyValidation:
 
     def test_unknown_scope_rejected(self):
         with pytest.raises(ValueError):
-            Policy(name='p', scope='everything')
+            Policy.model_validate({'name': 'p', 'scope': 'everything'})
 
     def test_unknown_fallback_rejected(self):
         with pytest.raises(ValueError):
-            Policy(name='p', fallback='nuke')
+            Policy.model_validate({'name': 'p', 'fallback': 'nuke'})
 
     def test_valid_policy_accepts_all_scopes(self):
         for scope in Scope:

@@ -1126,9 +1126,9 @@ def test_only_blocking_refusal_reaches_the_component_refusals():
         if module == package / 'execute.py':
             continue
         for node in ast.walk(ast.parse(module.read_text())):
-            name = node.id if isinstance(node, ast.Name) else node.attr if isinstance(node, ast.Attribute) else None
-            if name is None and isinstance(node, ast.alias):
-                name = node.name
+            if not isinstance(node, ast.Name | ast.Attribute | ast.alias):
+                continue
+            name = node.id if isinstance(node, ast.Name) else node.attr if isinstance(node, ast.Attribute) else node.name
             if name in COMPONENT_REFUSALS:
                 offenders.append(f'{module.relative_to(package)}:{node.lineno}: {name}')
     assert not offenders, offenders

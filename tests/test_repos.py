@@ -636,7 +636,7 @@ class TestLinkedWorktrees:
         assert repo.worktree_for('side') is None
         assert repo.held_by_worktree('side') is True
 
-    def test_the_answer_is_read_once_per_repo(self, git_repo, tmp_path):
+    def test_the_answer_is_read_once_per_repo(self, git_repo, tmp_path, monkeypatch):
         """Every branch asks the same question of an answer that cannot change mid-run, and a
         registry of eighty repos pays for it once each."""
         git(git_repo, 'branch', 'side')
@@ -644,7 +644,12 @@ class TestLinkedWorktrees:
         repo = make_repo(git_repo)
         calls = []
         original = repo._git
-        repo._git = lambda *args, **kwargs: (calls.append(args), original(*args, **kwargs))[1]
+
+        def recording(*args, **kwargs):
+            calls.append(args)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(repo, '_git', recording)
         for _ in range(3):
             repo.held_by_worktree('side')
         assert [args for args in calls if args[:2] == ('worktree', 'list')] == [('worktree', 'list', '--porcelain')]
@@ -730,6 +735,7 @@ class TestContainsBranch:
         git(git_repo, 'merge', '--no-ff', '-m', 'merge feature', 'feature')
         repo = make_repo(git_repo)
         assert repo.is_merged_into('feature', 'master' if repo.default_branch == 'master' else 'main') is True
+        assert repo.default_branch is not None
         assert repo.contains_branch('feature', repo.default_branch) is True
 
     def test_patch_equivalence_proves_a_squash_merged_branch(self, git_repo):
@@ -738,6 +744,7 @@ class TestContainsBranch:
         git(git_repo, 'commit', '-m', 'squash feature')
         repo = make_repo(git_repo)
         default = repo.default_branch
+        assert default is not None
         assert repo.is_merged_into('feature', default) is False  # a squash rewrites the commit
         assert repo.is_patch_applied_in('feature', default) is True
         assert repo.contains_branch('feature', default) is True
@@ -745,6 +752,7 @@ class TestContainsBranch:
     def test_unintegrated_branch_is_not_contained(self, git_repo):
         self._branch_with_commit(git_repo, 'feature', 'a.txt')
         repo = make_repo(git_repo)
+        assert repo.default_branch is not None
         assert repo.contains_branch('feature', repo.default_branch) is False
 
     def test_missing_target_is_not_contained(self, git_repo):
