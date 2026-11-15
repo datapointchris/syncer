@@ -50,26 +50,7 @@ order, so the first failure is the one to act on. It exits 1 on a real problem, 
 
 ## Usage
 
-```bash
-syncer check              # classify every repo/branch and show what would happen; never writes
-syncer apply              # execute each policy's safe actions (pull/push/ff/clone)
-syncer check -v           # list every repo, including the ones with nothing to report
-syncer check --per-branch # per-branch view: clones nothing, flags no moved repo, records no run
-syncer check --json       # emit the run as JSON on stdout instead of a report
-syncer apply -p observe   # override the resolved policy for this run
-syncer apply -j 8         # limit concurrency to 8 repos at a time
-syncer check -c work.json # use a different registry; replaces the default set entirely
-syncer fetch              # refresh every clone's origin refs and tags; touches no branch or tree
-syncer fetch -v           # the same, listing every repo and what moved
-syncer doctor            # can this machine run syncer? git, paths, reachability, clones
-syncer issues            # report path mismatches, missing/untracked repos, master branches
-syncer apply --per-branch # execute the decided action per branch
-syncer stats             # run history and repo insights (commits, age, dirty, stale)
-syncer config            # inspect, edit, scan, and validate the config and registry
-syncer policy            # list policies and show what each one decides
-syncer demo              # run against temp repos to show each status state
-syncer version           # print installed version
-```
+`syncer --help` lists every command with examples, and `syncer <command> --help` lists that command's flags.
 
 The repo-level view and `--per-branch` share the same policy engine and concurrency; the difference is that the repo-level one also handles repo lifecycle (clone missing repos, flag moved/untracked/no-remote repos), records a run in the history (`syncer stats`), and warns about repos left dirty for days.
 
