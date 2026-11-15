@@ -19,24 +19,11 @@ from syncer.sync import repo_status
 from syncer.sync import run_sync
 from syncer.sync import snapshot
 from syncer.tracking import read_events
+from tests.cloned_repos import make_cloned_repo
 
 
 def git(path: Path, *args: str) -> None:
     subprocess.run(['git', *args], cwd=path, capture_output=True, text=True)
-
-
-def make_cloned_repo(tmp_path: Path, name: str) -> Path:
-    bare = tmp_path / f'{name}.git'
-    subprocess.run(['git', 'init', '--bare', '-b', 'main', str(bare)], capture_output=True)
-    repo_path = tmp_path / name
-    subprocess.run(['git', 'clone', str(bare), str(repo_path)], capture_output=True)
-    git(repo_path, 'config', 'user.email', 't@t.com')
-    git(repo_path, 'config', 'user.name', 'T')
-    (repo_path / 'README.md').write_text('# t\n')
-    git(repo_path, 'add', '.')
-    git(repo_path, 'commit', '-m', 'init')
-    git(repo_path, 'push', '-u', 'origin', 'main')
-    return repo_path
 
 
 def config_for(paths: list[Path]) -> SyncerConfig:

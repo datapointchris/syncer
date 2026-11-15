@@ -20,26 +20,13 @@ from syncer.report import exit_code_for
 from syncer.report import report_severity
 from syncer.repos import RefMoves
 from syncer.repos import Repo
+from tests.cloned_repos import make_cloned_repo
 
 runner = CliRunner()
 
 
 def git(path: Path, *args: str) -> str:
     return subprocess.run(['git', *args], cwd=path, capture_output=True, text=True).stdout.strip()
-
-
-def make_cloned_repo(tmp_path: Path, name: str) -> Path:
-    bare = tmp_path / f'{name}.git'
-    subprocess.run(['git', 'init', '--bare', '-b', 'main', str(bare)], capture_output=True)
-    repo_path = tmp_path / name
-    subprocess.run(['git', 'clone', str(bare), str(repo_path)], capture_output=True)
-    git(repo_path, 'config', 'user.email', 'test@test.com')
-    git(repo_path, 'config', 'user.name', 'Test')
-    (repo_path / 'README.md').write_text('# Test\n')
-    git(repo_path, 'add', '.')
-    git(repo_path, 'commit', '-m', 'init')
-    git(repo_path, 'push', '-u', 'origin', 'main')
-    return repo_path
 
 
 def push_from_another_clone(tmp_path: Path, name: str, branch: str = 'main') -> str:

@@ -8,6 +8,7 @@ from syncer.doctor import Status
 from syncer.doctor import doctor_exit_code
 from syncer.doctor import render_doctor
 from syncer.doctor import run_doctor
+from tests.cloned_repos import make_cloned_repo
 
 
 @pytest.fixture
@@ -25,17 +26,8 @@ def isolated(tmp_path, monkeypatch):
 
 def bare_repo(tmp_path: Path, name: str) -> Path:
     """A real local remote, so the reachability probe can succeed with no network."""
-    bare = tmp_path / f'{name}.git'
-    subprocess.run(['git', 'init', '--bare', '-b', 'main', str(bare)], capture_output=True)
-    seed = tmp_path / f'{name}-seed'
-    subprocess.run(['git', 'clone', str(bare), str(seed)], capture_output=True)
-    subprocess.run(['git', 'config', 'user.email', 't@t.com'], cwd=seed, capture_output=True)
-    subprocess.run(['git', 'config', 'user.name', 'T'], cwd=seed, capture_output=True)
-    (seed / 'README.md').write_text('# t\n')
-    subprocess.run(['git', 'add', 'README.md'], cwd=seed, capture_output=True)
-    subprocess.run(['git', 'commit', '-m', 'init'], cwd=seed, capture_output=True)
-    subprocess.run(['git', 'push', '-u', 'origin', 'main'], cwd=seed, capture_output=True)
-    return bare
+    make_cloned_repo(tmp_path, f'{name}-seed', remote=name)
+    return tmp_path / f'{name}.git'
 
 
 def write_registry(config_dir: Path, **overrides) -> Path:

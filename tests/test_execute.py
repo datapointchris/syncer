@@ -25,6 +25,7 @@ from syncer.policy import BranchState
 from syncer.policy import Policy
 from syncer.policy import PrimaryState
 from syncer.repos import Repo
+from tests.cloned_repos import make_cloned_repo
 
 FORCE_FLAGS = ('--force', '-f', '--force-with-lease')
 
@@ -65,17 +66,7 @@ def state_for(repo: Repo, branch: str) -> BranchState:
 @pytest.fixture
 def cloned_repo(tmp_path):
     """A working clone of a bare remote with one pushed commit on main."""
-    bare = tmp_path / 'remote.git'
-    subprocess.run(['git', 'init', '--bare', '-b', 'main', str(bare)], capture_output=True)
-    repo_path = tmp_path / 'repo'
-    subprocess.run(['git', 'clone', str(bare), str(repo_path)], capture_output=True)
-    git(repo_path, 'config', 'user.email', 'test@test.com')
-    git(repo_path, 'config', 'user.name', 'Test')
-    (repo_path / 'README.md').write_text('# Test\n')
-    git(repo_path, 'add', '.')
-    git(repo_path, 'commit', '-m', 'init')
-    git(repo_path, 'push', '-u', 'origin', 'main')
-    return repo_path
+    return make_cloned_repo(tmp_path, 'repo', remote='remote')
 
 
 def second_clone_pushes(tmp_path: Path, filename: str = 'remote.txt', content: str | None = None) -> None:

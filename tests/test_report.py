@@ -45,6 +45,7 @@ from syncer.repos import GitFailure
 from syncer.repos import abort_running_commands
 from syncer.repos import reset_abort
 from syncer.repos import run_command
+from tests.cloned_repos import make_cloned_repo
 
 
 class RecordingBreaker(HostBreaker):
@@ -85,20 +86,6 @@ def build_report(repo_config, config, *, cli_policy=None, apply=False, include_l
 
 def git(path: Path, *args: str) -> None:
     subprocess.run(['git', *args], cwd=path, capture_output=True, text=True)
-
-
-def make_cloned_repo(tmp_path: Path, name: str) -> Path:
-    bare = tmp_path / f'{name}.git'
-    subprocess.run(['git', 'init', '--bare', '-b', 'main', str(bare)], capture_output=True)
-    repo_path = tmp_path / name
-    subprocess.run(['git', 'clone', str(bare), str(repo_path)], capture_output=True)
-    git(repo_path, 'config', 'user.email', 'test@test.com')
-    git(repo_path, 'config', 'user.name', 'Test')
-    (repo_path / 'README.md').write_text('# Test\n')
-    git(repo_path, 'add', '.')
-    git(repo_path, 'commit', '-m', 'init')
-    git(repo_path, 'push', '-u', 'origin', 'main')
-    return repo_path
 
 
 def config_for(paths: list[Path]) -> SyncerConfig:
@@ -616,16 +603,8 @@ class TestWatchedRemoteBranches:
     ones — so a long-lived branch deliberately never checked out is invisible."""
 
     def _repo_with_remote_branches(self, tmp_path, *branches):
+        seed = make_cloned_repo(tmp_path, 'seed', remote='remote')
         bare = tmp_path / 'remote.git'
-        subprocess.run(['git', 'init', '--bare', '-b', 'main', str(bare)], capture_output=True)
-        seed = tmp_path / 'seed'
-        subprocess.run(['git', 'clone', str(bare), str(seed)], capture_output=True)
-        subprocess.run(['git', 'config', 'user.email', 't@t'], cwd=seed, capture_output=True)
-        subprocess.run(['git', 'config', 'user.name', 'T'], cwd=seed, capture_output=True)
-        (seed / 'README.md').write_text('# x\n')
-        subprocess.run(['git', 'add', '.'], cwd=seed, capture_output=True)
-        subprocess.run(['git', 'commit', '-m', 'init'], cwd=seed, capture_output=True)
-        subprocess.run(['git', 'push', '-u', 'origin', 'main'], cwd=seed, capture_output=True)
         for branch in branches:
             subprocess.run(['git', 'checkout', '-b', branch], cwd=seed, capture_output=True)
             subprocess.run(['git', 'push', '-u', 'origin', branch], cwd=seed, capture_output=True)

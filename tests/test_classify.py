@@ -10,6 +10,7 @@ from syncer.policy import Policy
 from syncer.policy import PrimaryState
 from syncer.policy import Scope
 from syncer.repos import Repo
+from tests.cloned_repos import make_cloned_repo
 
 
 def git(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -23,18 +24,7 @@ def make_repo(path: Path) -> Repo:
 @pytest.fixture
 def cloned_repo(tmp_path):
     """A working clone of a bare remote with one pushed commit on the default branch."""
-    bare = tmp_path / 'remote.git'
-    subprocess.run(['git', 'init', '--bare', '-b', 'main', str(bare)], capture_output=True)
-
-    repo_path = tmp_path / 'repo'
-    subprocess.run(['git', 'clone', str(bare), str(repo_path)], capture_output=True)
-    git(repo_path, 'config', 'user.email', 'test@test.com')
-    git(repo_path, 'config', 'user.name', 'Test')
-    (repo_path / 'README.md').write_text('# Test\n')
-    git(repo_path, 'add', '.')
-    git(repo_path, 'commit', '-m', 'init')
-    git(repo_path, 'push', '-u', 'origin', 'main')
-    return repo_path
+    return make_cloned_repo(tmp_path, 'repo', remote='remote')
 
 
 def commit(path: Path, filename: str, message: str) -> None:

@@ -11,6 +11,7 @@ import typer
 from typer.testing import CliRunner
 
 from syncer.main import app
+from tests.cloned_repos import make_cloned_repo
 
 runner = CliRunner()
 
@@ -181,17 +182,7 @@ class TestExitCodesAndJson:
         return registry
 
     def _healthy_repo(self, tmp_path, name='api'):
-        bare = tmp_path / f'{name}.git'
-        subprocess.run(['git', 'init', '--bare', '-b', 'main', str(bare)], capture_output=True)
-        repo = tmp_path / name
-        subprocess.run(['git', 'clone', str(bare), str(repo)], capture_output=True)
-        subprocess.run(['git', 'config', 'user.email', 't@t.com'], cwd=repo, capture_output=True)
-        subprocess.run(['git', 'config', 'user.name', 'T'], cwd=repo, capture_output=True)
-        (repo / 'README.md').write_text('# t\n')
-        subprocess.run(['git', 'add', 'README.md'], cwd=repo, capture_output=True)
-        subprocess.run(['git', 'commit', '-m', 'init'], cwd=repo, capture_output=True)
-        subprocess.run(['git', 'push', '-u', 'origin', 'main'], cwd=repo, capture_output=True)
-        return repo
+        return make_cloned_repo(tmp_path, name)
 
     def _run(self, registry, monkeypatch, tmp_path, *args):
         monkeypatch.setattr('syncer.main.notify', lambda *_: None)
