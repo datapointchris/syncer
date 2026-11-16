@@ -145,29 +145,49 @@ class TestExecuteEffects:
         # After a successful push the remote-tracking ref advances → back to synced.
         assert state_for(repo, 'main').primary == PrimaryState.SYNCED
 
-    def test_rebase_push_resolves_diverged_without_conflict(self, cloned_repo, tmp_path):
-        commit(cloned_repo, 'local.py', 'local work')  # local ahead on its own file
-        second_clone_pushes(tmp_path, 'remote.py')  # remote ahead on a different file
+    def test_merge_push_lands_a_diverged_branch_on_its_remote_with_origin_first(self, cloned_repo, tmp_path):
+        """Origin's first-parent line keeps every commit it published, and neither side's commit
+        changes sha. The bare refuses a non-fast-forward, so the push landing proves no force."""
+        git(tmp_path / 'remote.git', 'config', 'receive.denyNonFastForwards', 'true')
+        commit(cloned_repo, 'local.py', 'local work')
+        second_clone_pushes(tmp_path, 'remote.py')
         repo = make_repo(cloned_repo)
         repo.fetch_prune()
         state = state_for(repo, 'main')
         assert state.primary == PrimaryState.DIVERGED
-        outcome = execute(Action.REBASE_PUSH, state, repo, POLICY)
-        assert outcome.status == 'done'
+        local, remote = head(repo), git(cloned_repo, 'rev-parse', 'origin/main').stdout.strip()
+        spy = GitSpy(repo)
+
+        outcome = execute(Action.MERGE_PUSH, state, repo, POLICY)
+
+        assert outcome.status == 'done', outcome.message
+        assert not set(FORCE_FLAGS) & set(spy.flat_args)
+        merge = git(tmp_path / 'remote.git', 'rev-parse', 'main').stdout.strip()
+        assert head(repo) == merge
+        assert git(cloned_repo, 'rev-parse', 'HEAD^1', 'HEAD^2').stdout.split() == [remote, local]
+        assert git(cloned_repo, 'log', '-1', '--format=%s').stdout.strip() == f'chore: merge commit {local[:12]} into main'
+        assert remote in git(tmp_path / 'remote.git', 'rev-list', '--first-parent', 'main').stdout.split()
         assert state_for(repo, 'main').primary == PrimaryState.SYNCED
 
-    def test_rebase_push_publishes_nothing_once_the_upstream_holds_every_commit(self, cloned_repo, tmp_path):
-        # An upstream that rewrote history, seen from a clone that cannot push to it.
-        commit(cloned_repo, 'same.py', 'local copy')
-        second_clone_pushes(tmp_path, 'same.py')
-        git(cloned_repo, 'config', 'remote.origin.receivepack', 'false')
+    def test_merge_push_merges_a_moved_base_into_the_branch(self, cloned_repo, tmp_path):
+        """A branch tracking origin/main is work on a base that moved, so the base merges in with
+        the branch first, and origin/main itself is left alone."""
+        git(cloned_repo, 'checkout', '-b', 'feature', '--track', 'origin/main')
+        commit(cloned_repo, 'feature.py', 'feature work')
+        second_clone_pushes(tmp_path, 'remote.py')
         repo = make_repo(cloned_repo)
         repo.fetch_prune()
-        state = state_for(repo, 'main')
+        state = state_for(repo, 'feature')
         assert state.primary == PrimaryState.DIVERGED
-        outcome = execute(Action.REBASE_PUSH, state, repo, POLICY)
+        local, base = head(repo), git(cloned_repo, 'rev-parse', 'origin/main').stdout.strip()
+
+        outcome = execute(Action.MERGE_PUSH, state, repo, POLICY)
+
         assert outcome.status == 'done', outcome.message
-        assert state_for(repo, 'main').primary == PrimaryState.SYNCED
+        assert git(cloned_repo, 'rev-parse', 'HEAD^1', 'HEAD^2').stdout.split() == [local, base]
+        assert git(cloned_repo, 'log', '-1', '--format=%s').stdout.strip() == 'chore: merge origin/main into feature'
+        assert git(tmp_path / 'remote.git', 'rev-parse', 'feature').stdout.strip() == head(repo)
+        assert git(tmp_path / 'remote.git', 'rev-parse', 'main').stdout.strip() == base
 
     def test_set_upstream_push_sets_tracking(self, cloned_repo):
         git(cloned_repo, 'checkout', '-b', 'feature/new')
@@ -404,21 +424,27 @@ class TestExecuteRefusals:
 
 
 class TestInvariants:
-    def test_rebase_push_conflict_aborts_clean(self, cloned_repo, tmp_path):
-        # Local and remote edit the SAME file differently → rebase must conflict.
+    def test_merge_push_conflict_changes_nothing(self, cloned_repo, tmp_path):
+        """Invariant 4: the conflict is found before any write, so there is nothing to abort."""
         commit(cloned_repo, 'README.md', 'local edit', content='local\n')
         second_clone_pushes(tmp_path, 'README.md', content='remote\n')
         repo = make_repo(cloned_repo)
         repo.fetch_prune()
         state = state_for(repo, 'main')
         assert state.primary == PrimaryState.DIVERGED
-        outcome = execute(Action.REBASE_PUSH, state, repo, POLICY)
+        refs_before = git(cloned_repo, 'for-each-ref').stdout
+        remote_before = git(tmp_path / 'remote.git', 'rev-parse', 'main').stdout
+
+        outcome = execute(Action.MERGE_PUSH, state, repo, POLICY)
+
         assert outcome.status == 'refused'
-        assert outcome.reason is Refusal.REBASE_CONFLICT
-        # invariant 4: no half-rebase, tree left clean
+        assert outcome.reason is Refusal.MERGE_CONFLICT
+        assert 'README.md' in outcome.message
+        assert git(cloned_repo, 'for-each-ref').stdout == refs_before
+        assert git(tmp_path / 'remote.git', 'rev-parse', 'main').stdout == remote_before
         assert repo.uncommitted_changes == []
-        assert not (cloned_repo / '.git' / 'rebase-merge').exists()
-        assert not (cloned_repo / '.git' / 'rebase-apply').exists()
+        assert not (cloned_repo / '.git' / 'MERGE_HEAD').exists()
+        assert repo.failures == []
 
     def test_no_force_flag_ever_issued(self, cloned_repo, tmp_path):
         """Sweep every action against a battery of real states; assert git never sees --force*."""
@@ -451,7 +477,7 @@ class TestInvariants:
         before_head = head(repo)
         before_dirty = repo.uncommitted_changes
         state = state_for(repo, 'main')
-        for action in (Action.FAST_FORWARD, Action.PULL_FF, Action.REBASE_PUSH, Action.PUSH):
+        for action in (Action.FAST_FORWARD, Action.PULL_FF, Action.MERGE_PUSH, Action.PUSH):
             outcome = execute(action, state, repo, POLICY)
             assert outcome.status == 'refused'
         assert head(repo) == before_head
@@ -802,14 +828,14 @@ def current_and_gone(cloned_repo: Path, tmp_path: Path) -> tuple[Repo, BranchSta
 
 
 class TestCheckoutRefusal:
-    """The static current/non-current gate, mirrored for the report. Absent it, mirror's
-    `*:diverged = rebase_push` printed a rebase arrow on every non-current diverged branch and
-    refused all of them at execute time."""
+    """The static current/non-current gate, mirrored for the report. mirror's
+    `*:diverged = merge_push` selects every diverged branch, and execute refuses each one not
+    checked out here."""
 
-    def test_rebase_push_is_predicted_refused_off_the_current_branch(self, cloned_repo):
+    def test_merge_push_is_predicted_refused_off_the_current_branch(self, cloned_repo):
         repo = make_repo(cloned_repo)
         state = state_for(repo, 'main').model_copy(update={'is_current': False})
-        assert checkout_refusal(Action.REBASE_PUSH, state) is Refusal.NOT_CURRENT
+        assert checkout_refusal(Action.MERGE_PUSH, state) is Refusal.NOT_CURRENT
         assert checkout_refusal(Action.PULL_FF, state) is Refusal.NOT_CURRENT
 
     def test_ff_ref_is_predicted_refused_on_it(self, cloned_repo):
@@ -954,7 +980,7 @@ class TestProtectedBranches:
 
         assert head(repo) == head_before
         # A refusal is decided before dispatch, so no mutating git command is even attempted.
-        assert not any(arg in ('push', 'branch', 'update-ref', 'rebase') for arg in spy.flat_args)
+        assert not any(arg in ('push', 'branch', 'update-ref', 'commit-tree') for arg in spy.flat_args)
 
     def test_an_unprotected_policy_changes_nothing(self, cloned_repo, tmp_path):
         second_clone_pushes(tmp_path)

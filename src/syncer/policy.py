@@ -59,7 +59,7 @@ class Action(StrEnum):
     FF_WORKTREE = 'ff_worktree'
     FF_REF = 'ff_ref'
     PUSH = 'push'
-    REBASE_PUSH = 'rebase_push'
+    MERGE_PUSH = 'merge_push'
     SET_UPSTREAM_PUSH = 'set_upstream_push'
     DELETE_LOCAL = 'delete_local'
     PROMPT = 'prompt'
@@ -128,6 +128,16 @@ class BranchState(BaseModel):
     # since the whole point of a worktree is to leave the main checkout alone. Another
     # execute-time gate, invisible to decide() like the rest.
     worktree_dirty: bool = False
+
+
+def tracks_own_remote(state: BranchState) -> bool:
+    """Whether the upstream is this branch's own counterpart on origin rather than a base branch.
+
+    A branch tracking `origin/<itself>` diverges when two machines both commit, and its merge keeps
+    origin's line first. A branch tracking `origin/main` diverges when main moves, and catches up
+    by merging the base in. The whole name is compared, so `feature/x` matches `origin/feature/x`.
+    """
+    return state.upstream == f'origin/{state.branch}'
 
 
 class Policy(BaseModel):
@@ -258,7 +268,7 @@ STANDARD_POLICY = Policy(
     rules={
         'default:synced': 'skip',
         'default:ahead': 'push',
-        'default:diverged': 'rebase_push',
+        'default:diverged': 'merge_push',
         'default:gone': 'report',
         '*:behind': 'fast_forward',
         '*:ahead': 'report',
@@ -284,7 +294,7 @@ MIRROR_POLICY = Policy(
     rules={
         '*:behind': 'fast_forward',
         '*:ahead': 'push',
-        '*:diverged': 'rebase_push',
+        '*:diverged': 'merge_push',
         '*:gone': 'delete_local',
     },
 )

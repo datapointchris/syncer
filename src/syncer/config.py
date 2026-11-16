@@ -135,7 +135,7 @@ merge_target = "develop"
 # selectors use. Enforced in execute() before any action runs, so it is a hard guard rather
 # than a matter of writing the right exact-name rule for every branch — under a fallback like
 # "*:ahead" = "push", one forgotten branch is one stray local commit on a shared branch.
-# push, rebase_push, set_upstream_push and delete_local are refused; fast_forward still runs,
+# push, merge_push, set_upstream_push and delete_local are refused; fast_forward still runs,
 # because advancing to what the upstream already contains publishes nothing and destroys
 # nothing. `syncer policy show <name> --branch develop` marks exactly which actions this stops.
 protected = ["develop", "dev", "uat", "prod", "release/*"]
@@ -154,7 +154,7 @@ watch_remote = ["develop", "dev", "uat", "prod"]
 #
 #   selector   exact branch name  >  glob  >  role (default > current)  >  "*"
 #   state      synced | ahead | behind | diverged | no_upstream | gone | detached
-#   action     skip | report | fast_forward | push | rebase_push | set_upstream_push
+#   action     skip | report | fast_forward | push | merge_push | set_upstream_push
 #              | delete_local | prompt | pull_ff | ff_worktree | ff_ref
 #
 # Name intents, not mechanisms: fast_forward dispatches on where the branch is checked out, to
@@ -162,7 +162,7 @@ watch_remote = ["develop", "dev", "uat", "prod"]
 # holds it) or ff_ref (update-ref, for a branch checked out nowhere). A rule naming a mechanism
 # directly is refused every time the branch is somewhere that mechanism does not cover.
 [policies.laptop.rules]
-"main:diverged"       = "rebase_push"
+"main:diverged"       = "merge_push"
 "release/*:ahead"     = "report"
 "default:synced"      = "skip"
 "default:ahead"       = "push"

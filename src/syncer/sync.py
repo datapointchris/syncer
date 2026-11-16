@@ -75,7 +75,7 @@ def operation_status(report: RepoBranchReport) -> RepoStatus:
     acted = {row.action for row in report.rows if row.outcome is not None and row.outcome.status == 'done'}
     if not acted:
         return 'pending'
-    if Action.REBASE_PUSH in acted or (acted & {Action.FAST_FORWARD, Action.PULL_FF, Action.FF_REF} and Action.PUSH in acted):
+    if Action.MERGE_PUSH in acted or (acted & {Action.FAST_FORWARD, Action.PULL_FF, Action.FF_REF} and Action.PUSH in acted):
         return 'pull_pushed'
     if Action.PUSH in acted:
         return 'pushed'

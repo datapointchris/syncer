@@ -18,12 +18,12 @@ REPO = '/home/u/repos/thing'
 WORKTREE = '/home/u/.worktrees/thing/feature'
 
 # Every argv a remedy must never contain. The point of the module is that a report you paste from
-# cannot cost you work, and that only holds if it is asserted over the whole table rather than
-# reviewed per string.
+# cannot cost you work or change a commit's sha, and that only holds if it is asserted over the
+# whole table rather than reviewed per string.
 #
 # Compared as whole argv tokens, never as substrings: `-f` is inside `--ff-only`, and a check that
 # reads a fast-forward as a force is one that gets relaxed rather than trusted.
-DESTRUCTIVE = frozenset({'--force', '-f', '--force-with-lease', 'reset', 'checkout', 'restore', 'stash', 'clean', '-D'})
+DESTRUCTIVE = frozenset({'--force', '-f', '--force-with-lease', 'reset', 'checkout', 'restore', 'stash', 'clean', '-D', 'rebase'})
 
 
 def branch_state(primary: PrimaryState, **overrides) -> BranchState:
@@ -66,19 +66,29 @@ class TestDivergedNamesTheRightBase:
     whose upstream is not its own remote counterpart, which is what an unlanded worktree branch
     looks like and is not what the words 'diverged' lead you to run."""
 
-    def test_a_branch_tracking_a_base_rebases_and_needs_no_force(self):
+    def test_a_branch_tracking_a_base_merges_the_base_in(self):
         state = branch_state(PrimaryState.DIVERGED, upstream='origin/main', worktree=WORKTREE)
         remedy = remedy_for(state, Action.REPORT, REPO, None, None)
-        assert remedy.commands == (f'cd {WORKTREE}', 'git rebase origin/main')
+        assert remedy.commands == (f'cd {WORKTREE}', 'git merge origin/main -m "chore: merge origin/main into feature"')
         assert 'tracks origin/main, not origin/feature' in remedy_text(remedy)
 
-    def test_a_branch_tracking_its_own_remote_rebases_then_pushes_plainly(self):
-        remedy = remedy_for(branch_state(PrimaryState.DIVERGED), Action.REPORT, REPO, None, None)
-        assert remedy.commands == (f'cd {REPO}', 'git rebase origin/feature', 'git push origin feature')
-        assert 'no force needed' in remedy_text(remedy)
+    @pytest.mark.parametrize('branch', ['feature', 'feature/x'])
+    def test_a_branch_tracking_its_own_remote_merges_into_it_then_pushes_plainly(self, branch):
+        """Origin's head is checked out first, so it is the merge's first parent and the push
+        lands as a fast-forward of what origin holds."""
+        state = branch_state(PrimaryState.DIVERGED, branch=branch, upstream=f'origin/{branch}')
+        remedy = remedy_for(state, Action.REPORT, REPO, None, None)
+        assert remedy.commands == (
+            f'cd {REPO}',
+            f'git switch --detach origin/{branch}',
+            f'git merge {branch} -m "chore: merge commit $(git rev-parse --short=12 {branch}) into {branch}"',
+            f'git push origin HEAD:{branch}',
+            f'git switch {branch}',
+            f'git merge --ff-only origin/{branch}',
+        )
 
     def test_the_command_runs_where_the_branch_actually_is(self):
-        """Honesty rule 3. A rebase run in the main checkout rebases whatever *it* has checked
+        """Honesty rule 3. A merge run in the main checkout merges into whatever *it* has checked
         out, which is a different branch entirely."""
         state = branch_state(PrimaryState.DIVERGED, upstream='origin/main', worktree=WORKTREE)
         assert remedy_for(state, Action.REPORT, REPO, None, None).commands[0] == f'cd {WORKTREE}'
@@ -112,7 +122,7 @@ class TestPolicyNote:
 
     def test_it_names_the_rule_and_an_action_that_applies(self):
         note = remedy_text(remedy_for(branch_state(PrimaryState.DIVERGED), Action.REPORT, REPO, None, None))
-        assert '*:diverged = rebase_push' in note
+        assert '*:diverged = merge_push' in note
 
     def test_the_default_branch_gets_the_default_selector(self):
         state = branch_state(PrimaryState.AHEAD, is_default=True, branch='main', upstream='origin/main')
@@ -177,15 +187,16 @@ class TestRefusalRemedies:
     def test_an_executed_refusal_wins_over_the_predicted_block(self):
         """apply has the more specific answer, and it is the one the reader just watched happen."""
         state = branch_state(PrimaryState.DIVERGED, is_current=True)
-        remedy = remedy_for(state, Action.REBASE_PUSH, REPO, None, Refusal.REBASE_CONFLICT)
-        assert 'aborted the rebase' in remedy_text(remedy)
+        remedy = remedy_for(state, Action.MERGE_PUSH, REPO, None, Refusal.MERGE_CONFLICT)
+        assert 'before writing anything' in remedy_text(remedy)
+        assert remedy.commands == remedy_for(state, Action.REPORT, REPO, None, None).commands
 
     def test_a_refusal_with_no_remedy_falls_through_to_the_state(self):
         """NOT_CURRENT is syncer describing its own dispatch, not something to act on — but the
         branch underneath it is still diverged, and that is what the reader needs."""
         state = branch_state(PrimaryState.DIVERGED, upstream='origin/main', worktree=WORKTREE)
-        remedy = remedy_for(state, Action.REBASE_PUSH, REPO, Refusal.NOT_CURRENT, None)
-        assert remedy.commands == (f'cd {WORKTREE}', 'git rebase origin/main')
+        remedy = remedy_for(state, Action.MERGE_PUSH, REPO, Refusal.NOT_CURRENT, None)
+        assert remedy.commands == (f'cd {WORKTREE}', 'git merge origin/main -m "chore: merge origin/main into feature"')
 
 
 class TestHonestyRules:
@@ -204,7 +215,9 @@ class TestHonestyRules:
                             None,
                         )
                         for command in remedy.commands:
-                            assert not DESTRUCTIVE & set(command.split()), (primary, action, reason, command)
+                            tokens = command.split()
+                            assert not DESTRUCTIVE & set(tokens), (primary, action, reason, command)
+                            assert not any(token.startswith('+') for token in tokens), (primary, action, reason, command)
 
     def test_every_refusal_is_answered_or_deliberately_silent(self):
         """A new Refusal must be routed or listed, never left to render blank — the direction
@@ -219,7 +232,7 @@ class TestHonestyRules:
         assert not any(refusal_remedy(reason, state, Action.REPORT, REPO) for reason in NO_REMEDY)
 
     def test_every_remedy_opens_with_the_directory_it_runs_in(self):
-        """Honesty rule 3, structurally: a bare `git rebase` is right only if you happen to be
+        """Honesty rule 3, structurally: a bare `git merge` is right only if you happen to be
         standing in the repo, and the report is read from somewhere else."""
         for primary in PrimaryState:
             for reason in (None, *Refusal):

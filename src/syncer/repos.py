@@ -53,6 +53,15 @@ class GitFailure:
         return ' '.join(('git', *self.argv))
 
 
+@dataclass(frozen=True, slots=True)
+class MergedTree:
+    """What `git merge-tree --write-tree` answered: a tree, the paths that conflict, or git's error."""
+
+    tree: str | None = None
+    conflicts: tuple[str, ...] = ()
+    error: str = ''
+
+
 REMOTES_PREFIX = 'refs/remotes/'
 TAGS_PREFIX = 'refs/tags/'
 
@@ -633,18 +642,49 @@ class Repo:
             return
         self._git('remote', 'set-head', 'origin', '--auto')
 
-    def pull_rebase(self) -> bool:
-        result = self._git('pull', '--rebase')
-        return result.returncode == 0
+    def resolve(self, *revisions: str) -> tuple[str, ...] | None:
+        """Each revision's commit sha, in order, or None when any one does not resolve."""
+        result = self._git('rev-parse', *(f'{revision}^{{commit}}' for revision in revisions))
+        shas = tuple(result.stdout.split())
+        return shas if result.returncode == 0 and len(shas) == len(revisions) else None
 
-    def rebase_abort(self) -> bool:
-        result = self._git('rebase', '--abort')
-        return result.returncode == 0
+    def subjects(self, revision_range: str) -> list[str] | None:
+        """The subjects of the non-merge commits in `revision_range`, newest first."""
+        result = self._git('log', '--no-merges', '--format=%s', revision_range)
+        return result.stdout.splitlines() if result.returncode == 0 else None
 
-    def merge_ff_only(self, upstream: str) -> tuple[bool, str]:
-        """Fast-forward the current branch to its upstream. Fails (never merges) if the
-        upstream is not strictly ahead."""
-        result = self._git('merge', '--ff-only', upstream)
+    def merge_tree(self, first: str, second: str) -> MergedTree:
+        """The tree a merge of `first` and `second` would hold, made without moving a ref, the index or a file.
+
+        Exit 1 is git's answer that the merge conflicts, so the call is a probe and only a later
+        exit is recorded. `--write-tree` needs git 2.38.
+        """
+        argv = ('merge-tree', '--write-tree', '--name-only', '--no-messages', first, second)
+        result = self._git(*argv, probe=True)
+        lines = result.stdout.splitlines()
+        if result.returncode == 0 and lines:
+            return MergedTree(tree=lines[0])
+        if result.returncode == 1 and lines[1:]:
+            return MergedTree(conflicts=tuple(line for line in lines[1:] if line))
+        self.failures.append(GitFailure(argv=argv, returncode=result.returncode, stderr=result.stderr.strip()))
+        return MergedTree(error=result.stderr.strip() or f'git merge-tree exited {result.returncode}')
+
+    def commit_tree(self, tree: str, parents: tuple[str, ...], message: str) -> tuple[str | None, str]:
+        """A commit of `tree` on `parents`, first parent first, made without moving any ref."""
+        parent_args = [arg for parent in parents for arg in ('-p', parent)]
+        result = self._git('commit-tree', tree, *parent_args, '-m', message)
+        commit = result.stdout.strip()
+        return (commit if result.returncode == 0 and commit else None), result.stderr.strip()
+
+    def push_commit(self, commit: str, branch: str) -> tuple[bool, str]:
+        """Push one commit to `branch` on origin, with no force, so origin takes it only as a descendant."""
+        result = self._git('push', 'origin', f'{commit}:refs/heads/{branch}')
+        return result.returncode == 0, result.stderr.strip()
+
+    def merge_ff_only(self, target: str) -> tuple[bool, str]:
+        """Fast-forward the current branch to `target`. Fails (never merges) if `target` is not
+        strictly ahead."""
+        result = self._git('merge', '--ff-only', target)
         return result.returncode == 0, result.stderr.strip()
 
     def merge_ff_only_in(self, worktree: str, upstream: str) -> tuple[bool, str]:

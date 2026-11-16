@@ -11,7 +11,8 @@ independent of any policy:
    are the actions that touch no tree at all (TREE_INDEPENDENT), each refusing under invariant 9
    first so that "checked out nowhere" is verified rather than assumed.
 3. fast_forward / pull_ff / ff_ref require strict ancestry (upstream strictly ahead), re-checked here.
-4. rebase_push aborts on conflict and downgrades to a refusal — never a half-rebase.
+4. merge_push changes no commit's sha. It builds its merge with merge-tree and commit-tree, so a
+   conflict is refused before anything is written, and no merge is ever left half-made.
 5. delete_local only under the full GONE ∧ integrated ∧ ¬current ∧ ¬worktree ∧ ¬default ∧
    ¬merge-target guard. Integration is proven by ancestry or by patch equivalence, never assumed
    from the remote branch having been deleted.
@@ -42,6 +43,7 @@ from syncer.policy import BranchState
 from syncer.policy import Policy
 from syncer.policy import PrimaryState
 from syncer.policy import matching_protection
+from syncer.policy import tracks_own_remote
 from syncer.repos import Repo
 
 OutcomeStatus = Literal['skipped', 'reported', 'done', 'refused', 'failed']
@@ -70,7 +72,7 @@ class Refusal(StrEnum):
     NOTHING_TO_PUSH = 'nothing_to_push'
     DIVERGED = 'diverged'
     NOT_DIVERGED = 'not_diverged'
-    REBASE_CONFLICT = 'rebase_conflict'
+    MERGE_CONFLICT = 'merge_conflict'
     NOT_GONE = 'not_gone'
     DELETE_CURRENT = 'delete_current'
     DELETE_DEFAULT = 'delete_default'
@@ -95,7 +97,7 @@ REFUSAL_TEXT: dict[Refusal, str] = {
     Refusal.NOTHING_TO_PUSH: 'nothing to push',
     Refusal.DIVERGED: 'branch is diverged; refusing to push',
     Refusal.NOT_DIVERGED: 'branch is not diverged',
-    Refusal.REBASE_CONFLICT: 'rebase conflict; aborted (resolve manually)',
+    Refusal.MERGE_CONFLICT: 'the merge conflicts in {paths}; nothing was changed',
     Refusal.NOT_GONE: 'branch is not gone',
     Refusal.DELETE_CURRENT: 'refusing to delete the current branch',
     Refusal.DELETE_DEFAULT: 'refusing to delete the default branch',
@@ -107,7 +109,10 @@ REFUSAL_TEXT: dict[Refusal, str] = {
 
 # Stand-ins for the runtime values a refusal template interpolates, used when a reason is being
 # *documented* rather than reported and there is no actual value to show.
-DOC_FIELDS = {'target': '<target>', 'verb': 'this action', 'pattern': '<glob>'}
+DOC_FIELDS = {'target': '<target>', 'verb': 'this action', 'pattern': '<glob>', 'paths': '<paths>'}
+
+# How many subjects a merge's body lists before it gives the count instead of the rest.
+MERGE_LOG_LIMIT = 20
 
 # Every refusal decided by which branch happens to be checked out, and so every one
 # checkout_refusal owes the reporter a prediction of. Naming the set is what turns the mirror test
@@ -261,32 +266,66 @@ def push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     return Outcome(branch=state.branch, action=Action.PUSH, status='failed', message=err)
 
 
-def rebase_push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
+def merge_message(subject: str, name: str, subjects: list[str]) -> str:
+    """The subject, then the subjects the merge brings in, newest first, as `git merge --log` lists them."""
+    if not subjects:
+        return subject
+    count = f' ({len(subjects)} commits)' if len(subjects) > MERGE_LOG_LIMIT else ''
+    listed = [f'  {line}' for line in subjects[:MERGE_LOG_LIMIT]]
+    more = ['  ...'] if len(subjects) > MERGE_LOG_LIMIT else []
+    return '\n'.join((subject, '', f'* {name}:{count}', *listed, *more))
+
+
+def merge_push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
+    """Merge a diverged branch with its upstream and publish the merge, changing no commit's sha.
+
+    A branch tracking its own remote merges into it with origin's head as the first parent, so
+    origin's first-parent line keeps every commit it already published. A branch tracking a base
+    catches up the other way: the branch is the first parent and the base merges in. merge-tree
+    and commit-tree make the merge without touching the tree or the index, so a conflict leaves
+    nothing to abort (invariant 4). The branch fast-forwards to the merge only once origin holds it.
+    """
+
+    def failed(message: str) -> Outcome:
+        return Outcome(branch=state.branch, action=Action.MERGE_PUSH, status='failed', message=message)
+
     if not state.is_current:
-        return refused(state, Action.REBASE_PUSH, Refusal.NOT_CURRENT, verb='rebase_push')
+        return refused(state, Action.MERGE_PUSH, Refusal.NOT_CURRENT, verb='merge_push')
     if repo.is_dirty:  # invariant 2
-        return refused(state, Action.REBASE_PUSH, Refusal.DIRTY_TREE)
+        return refused(state, Action.MERGE_PUSH, Refusal.DIRTY_TREE)
     if not state.upstream:
-        return refused(state, Action.REBASE_PUSH, Refusal.NO_UPSTREAM)
+        return refused(state, Action.MERGE_PUSH, Refusal.NO_UPSTREAM)
     counts = repo.ahead_behind(state.branch, state.upstream)
     if counts is None:
-        return refused(state, Action.REBASE_PUSH, Refusal.COUNTS_UNREADABLE)
+        return refused(state, Action.MERGE_PUSH, Refusal.COUNTS_UNREADABLE)
     ahead, behind = counts
     if not (ahead > 0 and behind > 0):
-        return refused(state, Action.REBASE_PUSH, Refusal.NOT_DIVERGED)
-    if not repo.pull_rebase():  # invariant 4: conflict → abort → refuse, never half-rebase
-        repo.rebase_abort()
-        return refused(state, Action.REBASE_PUSH, Refusal.REBASE_CONFLICT)
-    # A push that publishes nothing still needs write access, which a read-only clone lacks.
-    rebased = repo.ahead_behind(state.branch, state.upstream)
-    if rebased is None:
-        return refused(state, Action.REBASE_PUSH, Refusal.COUNTS_UNREADABLE)
-    if rebased[0] == 0:
-        return Outcome(branch=state.branch, action=Action.REBASE_PUSH, status='done', message='rebased; the upstream held every commit')
-    ok, err = repo.push_branch(state.branch)
-    if ok:
-        return Outcome(branch=state.branch, action=Action.REBASE_PUSH, status='done', message='rebased and pushed')
-    return Outcome(branch=state.branch, action=Action.REBASE_PUSH, status='failed', message=err)
+        return refused(state, Action.MERGE_PUSH, Refusal.NOT_DIVERGED)
+    shas = repo.resolve(state.branch, state.upstream)
+    if shas is None:
+        return failed(f'could not resolve {state.branch} and {state.upstream} to commits')
+    head, upstream_head = shas
+    own = tracks_own_remote(state)
+    parents = (upstream_head, head) if own else (head, upstream_head)
+    merged = repo.merge_tree(*parents)
+    if merged.conflicts:
+        return refused(state, Action.MERGE_PUSH, Refusal.MERGE_CONFLICT, paths=', '.join(merged.conflicts))
+    if merged.tree is None:
+        return failed(merged.error)
+    name = f'commit {head[:12]}' if own else state.upstream
+    brought = repo.subjects(f'{parents[0]}..{parents[1]}') or []
+    commit, err = repo.commit_tree(merged.tree, parents, merge_message(f'chore: merge {name} into {state.branch}', name, brought))
+    if commit is None:
+        return failed(err)
+    ok, err = repo.push_commit(commit, state.branch)
+    if not ok:
+        return failed(err)
+    ok, err = repo.merge_ff_only(commit)
+    if not ok:
+        return failed(f'pushed {commit[:12]} to origin/{state.branch}, but {state.branch} did not fast-forward to it: {err}')
+    merged_how = f'merged into {state.upstream}' if own else f'merged {state.upstream} in'
+    message = f'{merged_how} and pushed {commit[:12]} to origin/{state.branch}'
+    return Outcome(branch=state.branch, action=Action.MERGE_PUSH, status='done', message=message)
 
 
 def set_upstream_push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
@@ -336,7 +375,7 @@ MUTATORS: dict[Action, Callable[[BranchState, Repo, Policy], Outcome]] = {
     Action.FF_WORKTREE: ff_worktree,
     Action.FF_REF: ff_ref,
     Action.PUSH: push,
-    Action.REBASE_PUSH: rebase_push,
+    Action.MERGE_PUSH: merge_push,
     Action.SET_UPSTREAM_PUSH: set_upstream_push,
     Action.DELETE_LOCAL: delete_local,
 }
@@ -361,7 +400,7 @@ class ActionDoc(NamedTuple):
 
     `applies_to` is declared rather than derived, and that is deliberate. Only delete_local tests
     `state.primary`; every other mutator checks the live facts instead — push wants ahead > 0 and
-    behind == 0, rebase_push wants both non-zero, the fast-forward pair wants behind > 0 and
+    behind == 0, merge_push wants both non-zero, the fast-forward pair wants behind > 0 and
     ahead == 0. Those *are* the definitions of AHEAD / DIVERGED / BEHIND, so the mapping is real,
     but there is no primary check to read it off. Adding one would break invariant 6's whole
     point: a guard consulting the classify-time state instead of git is trusting a value that may
@@ -449,18 +488,21 @@ ACTION_DOCS: dict[Action, ActionDoc] = {
         never='force-pushes, or pushes a branch that is behind — no --force argv is ever constructed',
         applies_to=frozenset({PrimaryState.AHEAD}),
     ),
-    Action.REBASE_PUSH: ActionDoc(
-        summary='rebase onto the upstream, then publish',
-        runs='git pull --rebase  →  git push origin <branch>:<branch>, when the rebase left commits to publish',
+    Action.MERGE_PUSH: ActionDoc(
+        summary='merge the branch with its upstream, then publish the merge',
+        runs=(
+            "git merge-tree --write-tree  →  git commit-tree, origin's head first (the branch first where it tracks a base)"
+            '  →  git push origin <merge>:<branch>  →  git merge --ff-only <merge>'
+        ),
         refuses=(
             Refusal.NOT_CURRENT,
             Refusal.DIRTY_TREE,
             Refusal.NO_UPSTREAM,
             Refusal.COUNTS_UNREADABLE,
             Refusal.NOT_DIVERGED,
-            Refusal.REBASE_CONFLICT,
+            Refusal.MERGE_CONFLICT,
         ),
-        never='leaves a half-finished rebase — a conflict is aborted and downgraded to a refusal',
+        never='changes the sha of a commit on either side, or leaves a merge half-made — a conflict is found before anything is written',
         applies_to=frozenset({PrimaryState.DIVERGED}),
     ),
     Action.SET_UPSTREAM_PUSH: ActionDoc(
@@ -520,19 +562,18 @@ def checkout_refusal(action: Action, state: BranchState) -> Refusal | None:
     """Why `action` is refused by which branch happens to be checked out, or None if it admits it.
 
     The mechanisms split on this and each guard's first line tests it, so it is as static as
-    protection and as knowable without running anything. Missing from the mirror, `mirror`'s
-    `*:diverged = rebase_push` printed a rebase arrow on every non-current diverged branch and
-    refused all of them — the arrow promising an action apply never makes, which is the failure
-    dirty_refusal and protection_refusal already exist to prevent.
+    protection and as knowable without running anything. `mirror`'s `*:diverged = merge_push`
+    selects every diverged branch, and execute refuses each one not checked out here. Without
+    this mirror each of those rows would draw a merge arrow apply never follows, which is the
+    failure dirty_refusal and protection_refusal already exist to prevent.
 
     FAST_FORWARD is absent on purpose: it dispatches between the two mechanisms precisely so that
     neither side of the split refuses it.
 
-    DELETE_LOCAL is here for the same reason REBASE_PUSH is. `mirror`'s `*:gone = delete_local`
-    selects the current branch too, so a branch you are standing on whose remote was deleted
-    printed a delete arrow that execute always refused.
+    DELETE_LOCAL is here for the same reason MERGE_PUSH is. `mirror`'s `*:gone = delete_local`
+    selects the current branch too, and execute refuses to delete the branch you are standing on.
     """
-    if action in (Action.PULL_FF, Action.REBASE_PUSH) and not state.is_current:
+    if action in (Action.PULL_FF, Action.MERGE_PUSH) and not state.is_current:
         return Refusal.NOT_CURRENT
     if action is Action.FF_REF and state.is_current:
         return Refusal.IS_CURRENT
@@ -586,7 +627,7 @@ def blocking_refusal(action: Action, state: BranchState, policy: Policy, dirty: 
 
     The four static gates in one place, so a caller cannot consult three of them and miss the
     fourth. `test_only_blocking_refusal_reaches_the_component_refusals` holds every module outside
-    this one to it. Anything a guard can only discover mid-write (a rebase conflict, unreadable counts)
+    this one to it. Anything a guard can only discover mid-write (a merge conflict, unreadable counts)
     is deliberately absent — a row must not promise a refusal any more than it promises an action.
     """
     return (
