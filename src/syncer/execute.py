@@ -11,8 +11,9 @@ independent of any policy:
    are the actions that touch no tree at all (TREE_INDEPENDENT), each refusing under invariant 9
    first so that "checked out nowhere" is verified rather than assumed.
 3. fast_forward / pull_ff / ff_ref require strict ancestry (upstream strictly ahead), re-checked here.
-4. merge_push changes no commit's sha. It builds its merge with merge-tree and commit-tree, so a
-   conflict is refused before anything is written, and no merge is ever left half-made.
+4. merge_push changes no commit's sha, and never publishes a commit origin removed. It builds its
+   merge with merge-tree and commit-tree, so a conflict is refused before anything is written,
+   and no merge is ever left half-made.
 5. delete_local only under the full GONE ∧ integrated ∧ ¬current ∧ ¬worktree ∧ ¬default ∧
    ¬merge-target guard. Integration is proven by ancestry or by patch equivalence, never assumed
    from the remote branch having been deleted.
@@ -43,7 +44,8 @@ from syncer.policy import BranchState
 from syncer.policy import Policy
 from syncer.policy import PrimaryState
 from syncer.policy import matching_protection
-from syncer.policy import tracks_own_remote
+from syncer.policy import merge_plan
+from syncer.repos import MIN_GIT_VERSION
 from syncer.repos import Repo
 
 OutcomeStatus = Literal['skipped', 'reported', 'done', 'refused', 'failed']
@@ -73,6 +75,8 @@ class Refusal(StrEnum):
     DIVERGED = 'diverged'
     NOT_DIVERGED = 'not_diverged'
     MERGE_CONFLICT = 'merge_conflict'
+    UPSTREAM_REWROTE = 'upstream_rewrote'
+    NO_FORK_POINT = 'no_fork_point'
     NOT_GONE = 'not_gone'
     DELETE_CURRENT = 'delete_current'
     DELETE_DEFAULT = 'delete_default'
@@ -98,6 +102,8 @@ REFUSAL_TEXT: dict[Refusal, str] = {
     Refusal.DIVERGED: 'branch is diverged; refusing to push',
     Refusal.NOT_DIVERGED: 'branch is not diverged',
     Refusal.MERGE_CONFLICT: 'the merge conflicts in {paths}; nothing was changed',
+    Refusal.UPSTREAM_REWROTE: 'origin removed {commits}, which this branch still holds; nothing was changed',
+    Refusal.NO_FORK_POINT: 'no reflog of {upstream} shows whether origin removed a commit this branch holds; nothing was changed',
     Refusal.NOT_GONE: 'branch is not gone',
     Refusal.DELETE_CURRENT: 'refusing to delete the current branch',
     Refusal.DELETE_DEFAULT: 'refusing to delete the default branch',
@@ -109,7 +115,14 @@ REFUSAL_TEXT: dict[Refusal, str] = {
 
 # Stand-ins for the runtime values a refusal template interpolates, used when a reason is being
 # *documented* rather than reported and there is no actual value to show.
-DOC_FIELDS = {'target': '<target>', 'verb': 'this action', 'pattern': '<glob>', 'paths': '<paths>'}
+DOC_FIELDS = {
+    'target': '<target>',
+    'verb': 'this action',
+    'pattern': '<glob>',
+    'paths': '<paths>',
+    'commits': '<commits>',
+    'upstream': '<upstream>',
+}
 
 # How many subjects a merge's body lists before it gives the count instead of the rest.
 MERGE_LOG_LIMIT = 20
@@ -277,13 +290,16 @@ def merge_message(subject: str, name: str, subjects: list[str]) -> str:
 
 
 def merge_push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
-    """Merge a diverged branch with its upstream and publish the merge, changing no commit's sha.
+    """Merge a diverged branch with its upstream as `merge_plan` says, changing no commit's sha.
 
-    A branch tracking its own remote merges into it with origin's head as the first parent, so
-    origin's first-parent line keeps every commit it already published. A branch tracking a base
-    catches up the other way: the branch is the first parent and the base merges in. merge-tree
-    and commit-tree make the merge without touching the tree or the index, so a conflict leaves
-    nothing to abort (invariant 4). The branch fast-forwards to the merge only once origin holds it.
+    merge-tree and commit-tree make the merge without touching the tree or the index, so a
+    conflict leaves nothing to abort (invariant 4). A merge onto origin is pushed with no force,
+    carrying the trailers of the commit it lands, and the branch fast-forwards to it only once
+    origin holds it.
+
+    A commit origin published and then removed is never published again. The upstream's reflog
+    holds every value it had, so a fork point origin no longer reaches is a commit it removed: an
+    amend, a reword, a force push dropping a secret. A missing reflog cannot say, and is refused.
     """
 
     def failed(message: str) -> Outcome:
@@ -305,27 +321,42 @@ def merge_push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
     if shas is None:
         return failed(f'could not resolve {state.branch} and {state.upstream} to commits')
     head, upstream_head = shas
-    own = tracks_own_remote(state)
-    parents = (upstream_head, head) if own else (head, upstream_head)
-    merged = repo.merge_tree(*parents)
+    fork = repo.fork_point(state.upstream, head)
+    if fork is None:
+        return refused(state, Action.MERGE_PUSH, Refusal.NO_FORK_POINT, upstream=state.upstream)
+    removed = repo.commits(f'{upstream_head}..{fork}')
+    if removed is None:
+        return failed(f'could not list the commits between {state.upstream} and its fork point')
+    if removed:
+        return refused(state, Action.MERGE_PUSH, Refusal.UPSTREAM_REWROTE, commits=', '.join(sha[:12] for sha in removed))
+    plan = merge_plan(state)
+    sha_of = {state.branch: head, state.upstream: upstream_head}
+    first, second = sha_of[plan.first], sha_of[plan.second]
+    merged = repo.merge_tree(first, second)
     if merged.conflicts:
         return refused(state, Action.MERGE_PUSH, Refusal.MERGE_CONFLICT, paths=', '.join(merged.conflicts))
     if merged.tree is None:
-        return failed(merged.error)
-    name = f'commit {head[:12]}' if own else state.upstream
-    brought = repo.subjects(f'{parents[0]}..{parents[1]}') or []
-    commit, err = repo.commit_tree(merged.tree, parents, merge_message(f'chore: merge {name} into {state.branch}', name, brought))
+        return failed(f'git merge-tree --write-tree, which needs git {".".join(map(str, MIN_GIT_VERSION))} or newer: {merged.error}')
+    subject = plan.subject(state.branch, head[:12])
+    message = merge_message(subject, plan.merged(head[:12]), repo.subjects(f'{first}..{second}') or [])
+    trailers = repo.trailers(head) if plan.onto_remote else ''
+    if trailers:
+        message = f'{message}\n\n{trailers}'
+    commit, err = repo.commit_tree(merged.tree, (first, second), message)
     if commit is None:
         return failed(err)
-    ok, err = repo.push_commit(commit, state.branch)
-    if not ok:
-        return failed(err)
+    if plan.onto_remote:
+        ok, err = repo.push_commit(commit, state.branch)
+        if not ok:
+            return failed(err)
     ok, err = repo.merge_ff_only(commit)
     if not ok:
-        return failed(f'pushed {commit[:12]} to origin/{state.branch}, but {state.branch} did not fast-forward to it: {err}')
-    merged_how = f'merged into {state.upstream}' if own else f'merged {state.upstream} in'
-    message = f'{merged_how} and pushed {commit[:12]} to origin/{state.branch}'
-    return Outcome(branch=state.branch, action=Action.MERGE_PUSH, status='done', message=message)
+        return failed(f'made {commit[:12]}, but {state.branch} did not fast-forward to it: {err}')
+    if plan.onto_remote:
+        done = f'merged into {state.upstream} and pushed {commit[:12]} to origin/{state.branch}'
+    else:
+        done = f'merged {state.upstream} in as {commit[:12]}; nothing was pushed'
+    return Outcome(branch=state.branch, action=Action.MERGE_PUSH, status='done', message=done)
 
 
 def set_upstream_push(state: BranchState, repo: Repo, policy: Policy) -> Outcome:
@@ -489,10 +520,11 @@ ACTION_DOCS: dict[Action, ActionDoc] = {
         applies_to=frozenset({PrimaryState.AHEAD}),
     ),
     Action.MERGE_PUSH: ActionDoc(
-        summary='merge the branch with its upstream, then publish the merge',
+        summary='merge the branch with its upstream, and publish the merge where the upstream is its own remote',
         runs=(
-            "git merge-tree --write-tree  →  git commit-tree, origin's head first (the branch first where it tracks a base)"
+            "git merge-base --fork-point  →  git merge-tree --write-tree  →  git commit-tree, origin's head first"
             '  →  git push origin <merge>:<branch>  →  git merge --ff-only <merge>'
+            '  ·  tracking a base: the branch first, and no push'
         ),
         refuses=(
             Refusal.NOT_CURRENT,
@@ -500,9 +532,14 @@ ACTION_DOCS: dict[Action, ActionDoc] = {
             Refusal.NO_UPSTREAM,
             Refusal.COUNTS_UNREADABLE,
             Refusal.NOT_DIVERGED,
+            Refusal.NO_FORK_POINT,
+            Refusal.UPSTREAM_REWROTE,
             Refusal.MERGE_CONFLICT,
         ),
-        never='changes the sha of a commit on either side, or leaves a merge half-made — a conflict is found before anything is written',
+        never=(
+            'changes the sha of a commit on either side, publishes a commit origin removed, or leaves a merge '
+            'half-made — a conflict is found before anything is written'
+        ),
         applies_to=frozenset({PrimaryState.DIVERGED}),
     ),
     Action.SET_UPSTREAM_PUSH: ActionDoc(

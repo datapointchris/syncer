@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import fnmatch
 from enum import StrEnum
+from typing import NamedTuple
 
 from pydantic import BaseModel
 from pydantic import field_validator
@@ -133,11 +134,38 @@ class BranchState(BaseModel):
 def tracks_own_remote(state: BranchState) -> bool:
     """Whether the upstream is this branch's own counterpart on origin rather than a base branch.
 
-    A branch tracking `origin/<itself>` diverges when two machines both commit, and its merge keeps
-    origin's line first. A branch tracking `origin/main` diverges when main moves, and catches up
-    by merging the base in. The whole name is compared, so `feature/x` matches `origin/feature/x`.
+    The whole name is compared, so `feature/x` matches `origin/feature/x`.
     """
     return state.upstream == f'origin/{state.branch}'
+
+
+class MergePlan(NamedTuple):
+    """How a diverged branch merges with its upstream. merge_push runs it, and its remedy prints it.
+
+    `onto_remote` is one fact with three consequences. A branch tracking `origin/<itself>` merges
+    into origin's head, so origin's first-parent line keeps every commit it published. The subject
+    then names the commit it lands, since `merge main into main` would name nothing, and the merge
+    is pushed to origin. A branch tracking a base merges the base in, branch first, and nothing is
+    published: publishing a branch is `push`'s job.
+    """
+
+    first: str
+    second: str
+    onto_remote: bool
+
+    def merged(self, landed: str) -> str:
+        """What the merge brings in, by name. `landed` is the short sha of the branch's head, or a shell substitution for one."""
+        return f'commit {landed}' if self.onto_remote else self.second
+
+    def subject(self, branch: str, landed: str) -> str:
+        return f'chore: merge {self.merged(landed)} into {branch}'
+
+
+def merge_plan(state: BranchState) -> MergePlan:
+    upstream = state.upstream or ''
+    if tracks_own_remote(state):
+        return MergePlan(first=upstream, second=state.branch, onto_remote=True)
+    return MergePlan(first=state.branch, second=upstream, onto_remote=False)
 
 
 class Policy(BaseModel):

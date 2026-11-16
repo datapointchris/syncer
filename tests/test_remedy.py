@@ -69,8 +69,14 @@ class TestDivergedNamesTheRightBase:
     def test_a_branch_tracking_a_base_merges_the_base_in(self):
         state = branch_state(PrimaryState.DIVERGED, upstream='origin/main', worktree=WORKTREE)
         remedy = remedy_for(state, Action.REPORT, REPO, None, None)
-        assert remedy.commands == (f'cd {WORKTREE}', 'git merge origin/main -m "chore: merge origin/main into feature"')
+        assert remedy.commands == (f'cd {WORKTREE}', 'git merge --no-ff --log origin/main -m "chore: merge origin/main into feature"')
         assert 'tracks origin/main, not origin/feature' in remedy_text(remedy)
+
+    def test_a_branch_checked_out_nowhere_is_switched_to_before_the_base_merges_in(self):
+        """git merges into whatever this checkout holds, which is another branch."""
+        state = branch_state(PrimaryState.DIVERGED, upstream='origin/main')
+        remedy = remedy_for(state, Action.REPORT, REPO, None, None)
+        assert remedy.commands[:2] == (f'cd {REPO}', 'git switch feature')
 
     @pytest.mark.parametrize('branch', ['feature', 'feature/x'])
     def test_a_branch_tracking_its_own_remote_merges_into_it_then_pushes_plainly(self, branch):
@@ -81,7 +87,7 @@ class TestDivergedNamesTheRightBase:
         assert remedy.commands == (
             f'cd {REPO}',
             f'git switch --detach origin/{branch}',
-            f'git merge {branch} -m "chore: merge commit $(git rev-parse --short=12 {branch}) into {branch}"',
+            f'git merge --no-ff --log {branch} -m "chore: merge commit $(git rev-parse --short=12 {branch}) into {branch}"',
             f'git push origin HEAD:{branch}',
             f'git switch {branch}',
             f'git merge --ff-only origin/{branch}',
@@ -187,8 +193,7 @@ class TestRefusalRemedies:
     def test_an_executed_refusal_wins_over_the_predicted_block(self):
         """apply has the more specific answer, and it is the one the reader just watched happen."""
         state = branch_state(PrimaryState.DIVERGED, is_current=True)
-        remedy = remedy_for(state, Action.MERGE_PUSH, REPO, None, Refusal.MERGE_CONFLICT)
-        assert 'before writing anything' in remedy_text(remedy)
+        remedy = remedy_for(state, Action.MERGE_PUSH, REPO, Refusal.PROTECTED, Refusal.MERGE_CONFLICT)
         assert remedy.commands == remedy_for(state, Action.REPORT, REPO, None, None).commands
 
     def test_a_refusal_with_no_remedy_falls_through_to_the_state(self):
@@ -196,7 +201,7 @@ class TestRefusalRemedies:
         branch underneath it is still diverged, and that is what the reader needs."""
         state = branch_state(PrimaryState.DIVERGED, upstream='origin/main', worktree=WORKTREE)
         remedy = remedy_for(state, Action.MERGE_PUSH, REPO, Refusal.NOT_CURRENT, None)
-        assert remedy.commands == (f'cd {WORKTREE}', 'git merge origin/main -m "chore: merge origin/main into feature"')
+        assert remedy.commands == (f'cd {WORKTREE}', 'git merge --no-ff --log origin/main -m "chore: merge origin/main into feature"')
 
 
 class TestHonestyRules:

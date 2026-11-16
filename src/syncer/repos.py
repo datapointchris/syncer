@@ -30,6 +30,16 @@ BRANCHES_ONLY = ('--no-tags', '--no-prune-tags')
 # git's line for a tag it refused to overwrite: ` ! [rejected]   v1   -> v1  (would clobber existing tag)`.
 MOVED_TAG = re.compile(r'^\s*!\s+\[rejected\]\s+(\S+)\s+->\s+\S+\s+\(would clobber existing tag\)', re.MULTILINE)
 
+# The first git with `merge-tree --write-tree`, which merge_push builds its merge with.
+MIN_GIT_VERSION = (2, 38)
+GIT_VERSION = re.compile(r'git version (\d+)\.(\d+)')
+
+
+def parse_git_version(text: str) -> tuple[int, int] | None:
+    """The major and minor version in `git --version`'s output, vendor suffixes and all."""
+    match = GIT_VERSION.search(text)
+    return (int(match[1]), int(match[2])) if match else None
+
 
 @dataclass(frozen=True, slots=True)
 class GitFailure:
@@ -323,7 +333,7 @@ class Repo:
         # probe: a repo with no remote named `origin` is an ordinary answer, and this is asked of
         # every repo. Recording it would bury the failures that mean something.
         result = self._git('remote', 'get-url', 'origin', probe=True)
-        return result.stdout.strip() or None if result.returncode == 0 else None
+        return (result.stdout.strip() or None) if result.returncode == 0 else None
 
     @property
     def contacted_url(self) -> str:
@@ -653,11 +663,31 @@ class Repo:
         result = self._git('log', '--no-merges', '--format=%s', revision_range)
         return result.stdout.splitlines() if result.returncode == 0 else None
 
+    def commits(self, revision_range: str) -> list[str] | None:
+        """The shas in `revision_range`, newest first."""
+        result = self._git('rev-list', revision_range)
+        return result.stdout.split() if result.returncode == 0 else None
+
+    def trailers(self, commit: str) -> str | None:
+        """The trailer block of `commit`, unfolded, or '' when it has none."""
+        result = self._git('log', '-1', '--format=%(trailers:unfold)', commit)
+        return result.stdout.strip() if result.returncode == 0 else None
+
+    def fork_point(self, upstream: str, commit: str) -> str | None:
+        """Where `commit` forked from any value `upstream` has held, read from upstream's reflog.
+
+        A probe, because git exits 1 whenever the reflog cannot answer, including when there is
+        none. None is that, and every caller reads it as unverified.
+        """
+        result = self._git('merge-base', '--fork-point', upstream, commit, probe=True)
+        return (result.stdout.strip() or None) if result.returncode == 0 else None
+
     def merge_tree(self, first: str, second: str) -> MergedTree:
         """The tree a merge of `first` and `second` would hold, made without moving a ref, the index or a file.
 
-        Exit 1 is git's answer that the merge conflicts, so the call is a probe and only a later
-        exit is recorded. `--write-tree` needs git 2.38.
+        git exits 1 both for a conflict and for a revision it cannot read. Only exit 1 with paths
+        after the tree line counts as a conflict, which is why the call is a probe. Every other
+        result is recorded as a `GitFailure`. `--write-tree` needs `MIN_GIT_VERSION`.
         """
         argv = ('merge-tree', '--write-tree', '--name-only', '--no-messages', first, second)
         result = self._git(*argv, probe=True)

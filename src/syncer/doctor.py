@@ -53,7 +53,9 @@ from syncer.output import err_console
 from syncer.output import error
 from syncer.output import hint
 from syncer.output import success
+from syncer.repos import MIN_GIT_VERSION
 from syncer.repos import GitFailure
+from syncer.repos import parse_git_version
 from syncer.repos import run_command
 
 # Deliberately not git_timeout_seconds. That is sized for fetching a large monorepo over a VPN (120s by
@@ -98,7 +100,19 @@ def git_present() -> Check:
             hints=['install git — every other check below depends on it'],
         )
     version = run_command(['git', '--version'], timeout=PROBE_TIMEOUT_SECONDS)
-    return Check('git', Status.OK, version.stdout.strip() or 'git found', detail=[binary])
+    summary = version.stdout.strip() or 'git found'
+    parsed = parse_git_version(version.stdout)
+    if parsed is not None and parsed < MIN_GIT_VERSION:
+        # A warning, not a failure: every other action runs on this git, and so does the rest of doctor.
+        floor = '.'.join(map(str, MIN_GIT_VERSION))
+        return Check(
+            'git',
+            Status.WARN,
+            f'{summary} is older than {floor}',
+            detail=[binary],
+            hints=[f'merge_push builds its merge with `git merge-tree --write-tree`, which needs git {floor} — upgrade git'],
+        )
+    return Check('git', Status.OK, summary, detail=[binary])
 
 
 def paths_in_use(tool_config: ToolConfig, override: Path | None) -> Check:

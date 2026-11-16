@@ -149,7 +149,7 @@ class TestExecuteEffects:
         """Origin's first-parent line keeps every commit it published, and neither side's commit
         changes sha. The bare refuses a non-fast-forward, so the push landing proves no force."""
         git(tmp_path / 'remote.git', 'config', 'receive.denyNonFastForwards', 'true')
-        commit(cloned_repo, 'local.py', 'local work')
+        commit(cloned_repo, 'local.py', 'feat: local work\n\nCo-authored-by: A <a@example.com>')
         second_clone_pushes(tmp_path, 'remote.py')
         repo = make_repo(cloned_repo)
         repo.fetch_prune()
@@ -166,12 +166,38 @@ class TestExecuteEffects:
         assert head(repo) == merge
         assert git(cloned_repo, 'rev-parse', 'HEAD^1', 'HEAD^2').stdout.split() == [remote, local]
         assert git(cloned_repo, 'log', '-1', '--format=%s').stdout.strip() == f'chore: merge commit {local[:12]} into main'
+        trailers = git(cloned_repo, 'log', '--no-walk', '--format=%(trailers:unfold)', 'HEAD', 'HEAD^2').stdout.strip().split('\n\n')
+        assert trailers[0] == trailers[1] and 'Co-authored-by: A <a@example.com>' in trailers[0]
         assert remote in git(tmp_path / 'remote.git', 'rev-list', '--first-parent', 'main').stdout.split()
         assert state_for(repo, 'main').primary == PrimaryState.SYNCED
 
-    def test_merge_push_merges_a_moved_base_into_the_branch(self, cloned_repo, tmp_path):
+    def test_merge_push_never_publishes_a_commit_origin_removed(self, cloned_repo, tmp_path):
+        """Origin replaced a commit this clone already pulled. Merging would push it back."""
+        second_clone_pushes(tmp_path, 'remote.py')
+        git(cloned_repo, 'pull')
+        removed = head(make_repo(cloned_repo))
+        commit(cloned_repo, 'local.py', 'local work')
+        second = tmp_path / 'second'
+        git(second, 'switch', '-c', 'rewrite', 'HEAD~1')
+        commit(second, 'remote.py', 'remote change, rewritten', content='rewritten\n')
+        git(second, 'push', 'origin', 'HEAD:refs/heads/rewrite')
+        bare = tmp_path / 'remote.git'
+        git(bare, 'update-ref', 'refs/heads/main', git(bare, 'rev-parse', 'rewrite').stdout.strip())
+        rewritten = git(bare, 'rev-parse', 'main').stdout
+        repo = make_repo(cloned_repo)
+        repo.fetch_prune()
+        state = state_for(repo, 'main')
+        assert state.primary == PrimaryState.DIVERGED
+
+        outcome = execute(Action.MERGE_PUSH, state, repo, POLICY)
+
+        assert outcome.reason is Refusal.UPSTREAM_REWROTE, outcome.message
+        assert removed[:12] in outcome.message
+        assert git(bare, 'rev-parse', 'main').stdout == rewritten
+
+    def test_merge_push_merges_a_moved_base_into_the_branch_and_publishes_nothing(self, cloned_repo, tmp_path):
         """A branch tracking origin/main is work on a base that moved, so the base merges in with
-        the branch first, and origin/main itself is left alone."""
+        the branch first. Publishing the branch is `push`'s job."""
         git(cloned_repo, 'checkout', '-b', 'feature', '--track', 'origin/main')
         commit(cloned_repo, 'feature.py', 'feature work')
         second_clone_pushes(tmp_path, 'remote.py')
@@ -186,7 +212,7 @@ class TestExecuteEffects:
         assert outcome.status == 'done', outcome.message
         assert git(cloned_repo, 'rev-parse', 'HEAD^1', 'HEAD^2').stdout.split() == [local, base]
         assert git(cloned_repo, 'log', '-1', '--format=%s').stdout.strip() == 'chore: merge origin/main into feature'
-        assert git(tmp_path / 'remote.git', 'rev-parse', 'feature').stdout.strip() == head(repo)
+        assert git(tmp_path / 'remote.git', 'for-each-ref', '--format=%(refname)', 'refs/heads').stdout.split() == ['refs/heads/main']
         assert git(tmp_path / 'remote.git', 'rev-parse', 'main').stdout.strip() == base
 
     def test_set_upstream_push_sets_tracking(self, cloned_repo):

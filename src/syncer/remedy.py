@@ -42,6 +42,7 @@ from syncer.policy import MECHANISM_ACTIONS
 from syncer.policy import Action
 from syncer.policy import BranchState
 from syncer.policy import PrimaryState
+from syncer.policy import merge_plan
 from syncer.policy import tracks_own_remote
 
 
@@ -72,34 +73,36 @@ def in_directory(directory: str, *commands: str) -> tuple[str, ...]:
 
 
 def diverged(state: BranchState, where: str) -> Remedy:
-    """The merge for a diverged branch, by which upstream it tracks.
+    """The merge `merge_push` makes for a diverged branch, as the commands a person runs.
 
-    A branch tracking `origin/<itself>` diverged because two machines both committed. It merges
-    into origin's head from a detached checkout, so origin's head is the first parent and its
-    first-parent line keeps every commit it published. A branch tracking `origin/main` is work on a
-    base that moved, and it merges the base in with no publish.
+    git merges into whatever is checked out, so the plan's first parent is checked out first. For a
+    merge onto origin that is origin's head, detached, and the push and the fast-forward follow.
+    For a base merged in it is the branch itself, switched to where this checkout holds another.
     """
-    upstream = state.upstream or ''
+    plan = merge_plan(state)
     branch = state.branch
-    if tracks_own_remote(state):
+    landed = f'$(git rev-parse --short=12 {branch})'
+    merge = f'git merge --no-ff --log {plan.second} -m "{plan.subject(branch, landed)}"'
+    if plan.onto_remote:
         return Remedy(
             commands=in_directory(
                 where,
-                f'git switch --detach {upstream}',
-                f'git merge {branch} -m "chore: merge commit $(git rev-parse --short=12 {branch}) into {branch}"',
+                f'git switch --detach {plan.first}',
+                merge,
                 f'git push origin HEAD:{branch}',
                 f'git switch {branch}',
-                f'git merge --ff-only {upstream}',
+                f'git merge --ff-only {plan.first}',
             ),
             notes=(
-                f'merges your {state.ahead} commit(s) into {upstream} with its head first, so no commit on either side changes',
+                f'merges your {state.ahead} commit(s) into {plan.first} with its head first, so no commit on either side changes',
                 'and the push needs no force.',
             ),
         )
+    switch = (f'git switch {branch}',) if not state.is_current and state.worktree is None else ()
     return Remedy(
-        commands=in_directory(where, f'git merge {upstream} -m "chore: merge {upstream} into {branch}"'),
+        commands=in_directory(where, *switch, merge),
         notes=(
-            f'{state.branch} tracks {upstream}, not origin/{state.branch} — so this is your work sitting on a base that moved,',
+            f'{state.branch} tracks {plan.second}, not origin/{state.branch} — so this is your work sitting on a base that moved,',
             f'not two machines disagreeing. Publish it separately with: git push -u origin {state.branch}',
         ),
     )
@@ -211,9 +214,20 @@ def refusal_remedy(reason: Refusal, state: BranchState, action: Action, repo_pat
                 'Run the command yourself, or narrow the pattern: syncer config edit config',
             ),
         )
+    if reason in (Refusal.UPSTREAM_REWROTE, Refusal.NO_FORK_POINT):
+        # No merge: it would publish again whatever origin removed. The log is every candidate.
+        why = (
+            f'origin once held commits {state.branch} still has, and removed them, so syncer will not publish them again.'
+            if reason is Refusal.UPSTREAM_REWROTE
+            else f'git keeps no reflog of {state.upstream} here, so syncer cannot tell whether origin removed any of these.'
+        )
+        return Remedy(
+            commands=in_directory(where, f'git log --oneline {state.upstream or ""}..{state.branch}'),
+            notes=(why, 'The log lists every commit only this branch holds. Which of them belong on origin is yours to decide.'),
+        )
     if reason is Refusal.MERGE_CONFLICT:
         # The same merge syncer declined, run where git stops at the conflict for you to resolve.
-        rest = ', then the commands after it' if tracks_own_remote(state) else ''
+        rest = ', then the commands after it' if merge_plan(state).onto_remote else ''
         return Remedy(
             commands=diverged(state, where).commands,
             notes=(
