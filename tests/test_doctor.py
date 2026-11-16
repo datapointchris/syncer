@@ -70,6 +70,15 @@ class TestPrerequisiteOrder:
         assert config_check.status is Status.FAIL
         assert any('not-an-action' in line for line in config_check.detail)
 
+    @pytest.mark.parametrize(
+        ('version', 'status'), [('git version 2.34.1', Status.WARN), ('git version 2.39.5 (Apple Git-154)', Status.OK)]
+    )
+    def test_a_git_older_than_merge_tree_write_tree_warns(self, isolated, monkeypatch, version, status):
+        """merge_push needs 2.38. Every other action runs on an older git, so it warns rather than fails."""
+        monkeypatch.setattr('syncer.doctor.run_command', lambda *a, **k: subprocess.CompletedProcess([], 0, f'{version}\n', ''))
+        [git_check] = checks_named(run_doctor(), 'git')
+        assert git_check.status is status
+
 
 class TestIdentity:
     def test_the_shipped_placeholders_are_caught(self, isolated):

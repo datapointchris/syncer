@@ -453,12 +453,12 @@ class TestRemedyRendering:
     about a repo."""
 
     def _remedy(self):
-        return Remedy(commands=('cd /repo', 'git rebase origin/main'), notes=('feature tracks origin/main.',))
+        return Remedy(commands=('cd /repo', 'git merge origin/main'), notes=('feature tracks origin/main.',))
 
     def test_commands_and_notes_both_render(self, capsys):
         render_remedy(self._remedy())
         out = capsys.readouterr().out
-        assert 'git rebase origin/main' in out
+        assert 'git merge origin/main' in out
         assert 'feature tracks origin/main.' in out
 
     def test_it_goes_to_stdout_with_its_row(self, capsys):
@@ -474,7 +474,7 @@ class TestRemedyRendering:
     def test_a_command_is_never_wrapped(self, capsys):
         """A wrapped command cannot be double-clicked, which is the only thing it is there for."""
         long_path = '/home/u/' + 'nested/' * 20 + 'repo'
-        render_remedy(Remedy(commands=(f'cd {long_path}', 'git rebase origin/main')))
+        render_remedy(Remedy(commands=(f'cd {long_path}', 'git merge origin/main')))
         out = capsys.readouterr().out
         assert f'cd {long_path}' in out
 

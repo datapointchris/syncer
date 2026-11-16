@@ -15,6 +15,9 @@ where `syncer` is a different project. uv records the index beside the tool, whi
 `syncer update` reads it back. A branch install carries no release version, so `syncer update`
 refuses it.
 
+syncer needs git 2.38 or newer, the first with `git merge-tree --write-tree`, which `merge_push`
+builds its merge with. `syncer doctor` warns on an older git.
+
 ## Updating
 
 ```bash
@@ -132,7 +135,7 @@ Run history goes to `$XDG_STATE_HOME/syncer/<registry>-events.jsonl` — state r
 
 Both views classify every branch (per-branch `ahead`/`behind`/`gone`/`no_upstream`/…, computed after `fetch --prune` and repointing `origin/HEAD`) and report the action a policy *would* take; `syncer apply` executes those actions. Policies are **machine-local** and live in `config.toml`, so the same repo can sync aggressively on an always-on box and report-only on a laptop.
 
-`apply` is safe by construction: it enforces hard invariants no policy can override — never `--force`, never mutate a dirty working tree, fast-forward only under strict ancestry, `rebase_push` aborts cleanly on conflict, and any precondition that fails at write time is refused (never forced) rather than mutated.
+`apply` is safe by construction: it enforces hard invariants no policy can override — never `--force`, never mutate a dirty working tree, fast-forward only under strict ancestry, `merge_push` keeps every commit's sha, never republishes a commit origin removed, and refuses a conflict before writing anything, and any precondition that fails at write time is refused (never forced) rather than mutated.
 
 Tags are fetched after the branches, and never decide whether a repo was measured. A tag the remote moved, such as a reusable workflow's `v1`, is left where it is locally and named under the repo. So is any other reason the tag fetch was refused. Neither changes the exit code.
 
@@ -166,7 +169,7 @@ watch_remote = ["develop", "dev", "uat", "prod"]
 
 `protected` names branches (fnmatch patterns, the same grammar the selectors use) that nothing may publish to or destroy. It is enforced centrally in the executor before any action runs, so it's a **hard guard** rather than a matter of writing the right exact-name rule for every branch — under a fallback like `"*:ahead" = "push"`, one branch you forgot is one stray local commit on a shared branch.
 
-`push`, `rebase_push`, `set_upstream_push` and `delete_local` are refused. `fast_forward` still runs: advancing a branch to what its upstream already contains publishes nothing and destroys nothing, and refusing it would make the setting useless for exactly the long-lived branches it exists to protect. The permitted set is an allowlist, so any action added later is refused on a protected branch by default.
+`push`, `merge_push`, `set_upstream_push` and `delete_local` are refused. `fast_forward` still runs: advancing a branch to what its upstream already contains publishes nothing and destroys nothing, and refusing it would make the setting useless for exactly the long-lived branches it exists to protect. The permitted set is an allowlist, so any action added later is refused on a protected branch by default.
 
 Like every other policy setting, it is **machine-local** — it lives on a policy in `config.toml`, none of the built-ins protect anything, and the portable registry carries no policy settings at all. A `check` run marks the actions protection would refuse, so you don't have to run `apply` to see the guard working:
 

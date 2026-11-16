@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import fnmatch
 from enum import StrEnum
+from typing import NamedTuple
 
 from pydantic import BaseModel
 from pydantic import field_validator
@@ -59,7 +60,7 @@ class Action(StrEnum):
     FF_WORKTREE = 'ff_worktree'
     FF_REF = 'ff_ref'
     PUSH = 'push'
-    REBASE_PUSH = 'rebase_push'
+    MERGE_PUSH = 'merge_push'
     SET_UPSTREAM_PUSH = 'set_upstream_push'
     DELETE_LOCAL = 'delete_local'
     PROMPT = 'prompt'
@@ -128,6 +129,43 @@ class BranchState(BaseModel):
     # since the whole point of a worktree is to leave the main checkout alone. Another
     # execute-time gate, invisible to decide() like the rest.
     worktree_dirty: bool = False
+
+
+def tracks_own_remote(state: BranchState) -> bool:
+    """Whether the upstream is this branch's own counterpart on origin rather than a base branch.
+
+    The whole name is compared, so `feature/x` matches `origin/feature/x`.
+    """
+    return state.upstream == f'origin/{state.branch}'
+
+
+class MergePlan(NamedTuple):
+    """How a diverged branch merges with its upstream. merge_push runs it, and its remedy prints it.
+
+    `onto_remote` is one fact with three consequences. A branch tracking `origin/<itself>` merges
+    into origin's head, so origin's first-parent line keeps every commit it published. The subject
+    then names the commit it lands, since `merge main into main` would name nothing, and the merge
+    is pushed to origin. A branch tracking a base merges the base in, branch first, and nothing is
+    published: publishing a branch is `push`'s job.
+    """
+
+    first: str
+    second: str
+    onto_remote: bool
+
+    def merged(self, landed: str) -> str:
+        """What the merge brings in, by name. `landed` is the short sha of the branch's head, or a shell substitution for one."""
+        return f'commit {landed}' if self.onto_remote else self.second
+
+    def subject(self, branch: str, landed: str) -> str:
+        return f'chore: merge {self.merged(landed)} into {branch}'
+
+
+def merge_plan(state: BranchState) -> MergePlan:
+    upstream = state.upstream or ''
+    if tracks_own_remote(state):
+        return MergePlan(first=upstream, second=state.branch, onto_remote=True)
+    return MergePlan(first=state.branch, second=upstream, onto_remote=False)
 
 
 class Policy(BaseModel):
@@ -258,7 +296,7 @@ STANDARD_POLICY = Policy(
     rules={
         'default:synced': 'skip',
         'default:ahead': 'push',
-        'default:diverged': 'rebase_push',
+        'default:diverged': 'merge_push',
         'default:gone': 'report',
         '*:behind': 'fast_forward',
         '*:ahead': 'report',
@@ -284,7 +322,7 @@ MIRROR_POLICY = Policy(
     rules={
         '*:behind': 'fast_forward',
         '*:ahead': 'push',
-        '*:diverged': 'rebase_push',
+        '*:diverged': 'merge_push',
         '*:gone': 'delete_local',
     },
 )

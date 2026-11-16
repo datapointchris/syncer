@@ -57,7 +57,7 @@ an action `apply` never makes. `blocking_refusal()` composes all four so a calle
 clean) and `dirty_refusal()` (one `git status` per repo). All live in `execute.py` beside the
 guards they mirror and feed `BranchRow.blocked`. The mirror tests assert each agrees with
 `execute()` for every action on the menu. A drifting mirror is worse than none, because the arrow
-is the part of a row anyone acts on. A gate discoverable only mid-write (a rebase conflict,
+is the part of a row anyone acts on. A gate discoverable only mid-write (a merge conflict,
 unreadable counts) stays out of `blocked`.
 
 **The checkout mirror is checked in both directions.** Under-predicting draws an arrow `apply`
@@ -173,7 +173,19 @@ any policy:
    A dirty tree is no evidence about a ref being deleted. **syncer never resolves a dirty tree**:
    there is no commit or stash action, and there will not be one.
 3. `fast_forward`/`pull_ff`/`ff_ref` require strict ancestry, re-checked at write time.
-4. `rebase_push` aborts on conflict and downgrades to a refusal — never a half-rebase.
+4. `merge_push` changes no commit's sha. `merge_plan` (`policy.py`) decides the merge once, and
+   the executor and the remedy both follow it. A branch tracking `origin/<itself>` merges into it
+   with origin's head as the **first parent**, so origin's `--first-parent` line keeps every
+   commit it published. That merge carries the trailers of the commit it lands, is pushed with no
+   force, and the branch fast-forwards to it only after origin holds it. A branch tracking a base
+   merges the base in, branch first, and publishes nothing. `merge-tree --write-tree` and
+   `commit-tree` build the merge without touching the tree or the index, so a conflict is refused
+   (`MERGE_CONFLICT`) before anything is written. Nothing on the menu rebases.
+   **A commit origin published and then removed is never published again.** `git merge-base
+   --fork-point` reads the upstream's reflog, and a fork point origin no longer reaches is a commit
+   it removed by an amend, a reword or a force push. That is `UPSTREAM_REWROTE`. With no reflog the
+   question cannot be answered, which is `NO_FORK_POINT`. Both refuse.
+   `merge-tree --write-tree` needs git 2.38 (`MIN_GIT_VERSION`), and `doctor` warns below it.
 5. `delete_local` only under `GONE ∧ integrated ∧ ¬current ∧ ¬worktree ∧ ¬default ∧
    ¬merge-target`. It uses `branch -D`, because a GONE branch has no upstream for `-d`'s
    heuristic; the explicit guard is the safety. *Integrated* means the target provably holds the
@@ -186,7 +198,7 @@ any policy:
 8. A branch matching the policy's `protected` patterns admits no action that publishes or
    destroys. It is checked in `execute()` **before dispatch**, so it covers actions added later.
    `PROTECTED_ALLOWED` (`policy.py`) is an **allowlist**, so a new `Action` is refused on a
-   protected branch by default. `fast_forward` belongs in it; `push`, `rebase_push`,
+   protected branch by default. `fast_forward` belongs in it; `push`, `merge_push`,
    `set_upstream_push` and `delete_local` do not. No built-in policy sets `protected`.
 9. Never write the ref of a branch another worktree has checked out. `is_current` is *this*
    checkout's HEAD alone. `update-ref` is plumbing git does not check, so it would move a live
@@ -303,8 +315,12 @@ failure into a hint; `remedy_for(state, action, repo_path, blocked, refused)` tu
 will not act on into one. Its rules:
 
 - **Nothing is suggested where syncer acts.** An unblocked mutating action gets an empty `Remedy`.
-- **No command can lose work**: no `--force`, `reset`, `checkout` or `stash`. `TestHonestyRules`
-  asserts it over the whole table by argv **token**, since `-f` is a substring of `--ff-only`.
+- **No command can lose work or change a sha.** `TestHonestyRules` asserts this over the whole
+  table by argv **token**, against `DESTRUCTIVE` and any `+` refspec. It checks tokens because
+  `-f` is a substring of `--ff-only`. A diverged branch's remedy renders the same `merge_plan`
+  `merge_push` runs, from a detached checkout of origin's head where that head goes first.
+- **A remedy never republishes what origin removed.** `UPSTREAM_REWROTE` and `NO_FORK_POINT`
+  print the `git log` of what only the branch holds, never the merge.
 - **Every command names its directory**: `state.worktree` when one holds the branch. `DIRTY_TREE`
   is the repo's own tree, so its `status` runs in the repo; `WORKTREE_DIRTY` runs it in the
   worktree. `NO_WORKTREE` is in `NO_REMEDY`.

@@ -15,17 +15,17 @@ The honesty rules, which are testable statements rather than intentions:
 1. **Never invent a remedy.** A combination with no honest answer yields nothing. A confident
    wrong command is worse than silence, because a report that has misled you once about what to
    run is one you stop pasting from — and pasting from it is the whole point.
-2. **Never a command that can lose work.** No --force, no `reset --hard`, no `checkout <file>`,
-   no `stash drop`. Invariant 1 governs what syncer runs; this governs what it tells you to run,
-   and a tool whose entire claim is that it never forces must not hand you the argv that does.
-   Nothing below needs one: rebasing a branch onto *its own upstream* leaves it strictly ahead,
-   so the publish that follows is an ordinary push. A force is only ever wanted when rebasing
-   onto some *other* base, which syncer neither does nor suggests.
+2. **Never a command that can lose work or change a commit's sha.** No --force, no rebase, no
+   `reset --hard`, no `checkout <file>`, no `stash drop`. Invariant 1 governs what syncer runs;
+   this governs what it tells you to run, and a tool whose entire claim is that it never forces
+   must not hand you the argv that does. Nothing below needs one: a diverged branch is merged,
+   which keeps every commit as it is, and a merge descends from what origin holds, so the
+   publish that follows is an ordinary push.
 3. **Name the directory the fact is actually about.** A branch checked out in a linked worktree is
-   not fixed from the main checkout — a rebase run in the repo rebases whatever *that* has checked
-   out. The inverse holds for anything measured on the repo rather than the branch: the dirty tree
-   is the repo's own, and pointing `status` at the worktree printed nothing at all. So a remedy
-   opens with the `cd` that puts every command under it somewhere it is true.
+   not fixed from the main checkout — a merge run in the repo merges into whatever *that* has
+   checked out. The inverse holds for anything measured on the repo rather than the branch: the
+   dirty tree is the repo's own, and pointing `status` at the worktree printed nothing at all. So
+   a remedy opens with the `cd` that puts every command under it somewhere it is true.
 4. **Never tell anyone what to do with their uncommitted work.** syncer has no standing to decide
    between committing and stashing, which is why it has no action for either. It says where the
    changes are and stops.
@@ -42,6 +42,8 @@ from syncer.policy import MECHANISM_ACTIONS
 from syncer.policy import Action
 from syncer.policy import BranchState
 from syncer.policy import PrimaryState
+from syncer.policy import merge_plan
+from syncer.policy import tracks_own_remote
 
 
 @dataclass(frozen=True)
@@ -70,27 +72,37 @@ def in_directory(directory: str, *commands: str) -> tuple[str, ...]:
     return (f'cd {directory}', *commands)
 
 
-def tracks_own_remote(state: BranchState) -> bool:
-    """Whether the upstream is this branch's own counterpart rather than some base branch.
-
-    The difference decides both commands below. A branch tracking `origin/main` is diverged the
-    moment main moves, and the fix is a rebase that needs no publish; a branch tracking
-    `origin/<itself>` is diverged because two machines both committed, and the fix ends in a push.
-    """
-    return state.upstream is not None and state.upstream.rpartition('/')[2] == state.branch
-
-
 def diverged(state: BranchState, where: str) -> Remedy:
-    upstream = state.upstream or ''
-    if tracks_own_remote(state):
+    """The merge `merge_push` makes for a diverged branch, as the commands a person runs.
+
+    git merges into whatever is checked out, so the plan's first parent is checked out first. For a
+    merge onto origin that is origin's head, detached, and the push and the fast-forward follow.
+    For a base merged in it is the branch itself, switched to where this checkout holds another.
+    """
+    plan = merge_plan(state)
+    branch = state.branch
+    landed = f'$(git rev-parse --short=12 {branch})'
+    merge = f'git merge --no-ff --log {plan.second} -m "{plan.subject(branch, landed)}"'
+    if plan.onto_remote:
         return Remedy(
-            commands=in_directory(where, f'git rebase {upstream}', f'git push origin {state.branch}'),
-            notes=(f'replays your {state.ahead} commit(s) onto {upstream}, leaving an ordinary push — no force needed.',),
+            commands=in_directory(
+                where,
+                f'git switch --detach {plan.first}',
+                merge,
+                f'git push origin HEAD:{branch}',
+                f'git switch {branch}',
+                f'git merge --ff-only {plan.first}',
+            ),
+            notes=(
+                f'merges your {state.ahead} commit(s) into {plan.first} with its head first, so no commit on either side changes',
+                'and the push needs no force.',
+            ),
         )
+    switch = (f'git switch {branch}',) if not state.is_current and state.worktree is None else ()
     return Remedy(
-        commands=in_directory(where, f'git rebase {upstream}'),
+        commands=in_directory(where, *switch, merge),
         notes=(
-            f'{state.branch} tracks {upstream}, not origin/{state.branch} — so this is your work sitting on a base that moved,',
+            f'{state.branch} tracks {plan.second}, not origin/{state.branch} — so this is your work sitting on a base that moved,',
             f'not two machines disagreeing. Publish it separately with: git push -u origin {state.branch}',
         ),
     )
@@ -202,10 +214,26 @@ def refusal_remedy(reason: Refusal, state: BranchState, action: Action, repo_pat
                 'Run the command yourself, or narrow the pattern: syncer config edit config',
             ),
         )
-    if reason is Refusal.REBASE_CONFLICT:
+    if reason in (Refusal.UPSTREAM_REWROTE, Refusal.NO_FORK_POINT):
+        # No merge: it would publish again whatever origin removed. The log is every candidate.
+        why = (
+            f'origin once held commits {state.branch} still has, and removed them, so syncer will not publish them again.'
+            if reason is Refusal.UPSTREAM_REWROTE
+            else f'git keeps no reflog of {state.upstream} here, so syncer cannot tell whether origin removed any of these.'
+        )
         return Remedy(
-            commands=in_directory(where, f'git rebase {state.upstream or ""}'),
-            notes=('syncer aborted the rebase rather than leave it half-finished, so the tree is exactly as it was.',),
+            commands=in_directory(where, f'git log --oneline {state.upstream or ""}..{state.branch}'),
+            notes=(why, 'The log lists every commit only this branch holds. Which of them belong on origin is yours to decide.'),
+        )
+    if reason is Refusal.MERGE_CONFLICT:
+        # The same merge syncer declined, run where git stops at the conflict for you to resolve.
+        rest = ', then the commands after it' if merge_plan(state).onto_remote else ''
+        return Remedy(
+            commands=diverged(state, where).commands,
+            notes=(
+                'syncer found the conflict before writing anything, so the tree, the index and every ref are as they were.',
+                f'The merge above stops at it: resolve and `git add` each path, run `git commit`{rest}.',
+            ),
         )
     if reason is Refusal.NOT_INTEGRATED:
         # No command: the target is the policy's merge_target or the repo's default branch, and

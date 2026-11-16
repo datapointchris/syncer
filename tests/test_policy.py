@@ -33,7 +33,7 @@ STANDARD_DEFAULT = {
     PrimaryState.SYNCED: Action.SKIP,
     PrimaryState.AHEAD: Action.PUSH,
     PrimaryState.BEHIND: Action.FAST_FORWARD,
-    PrimaryState.DIVERGED: Action.REBASE_PUSH,
+    PrimaryState.DIVERGED: Action.MERGE_PUSH,
     PrimaryState.NO_UPSTREAM: Action.REPORT,  # no default:no_upstream rule → falls to *:no_upstream
     PrimaryState.GONE: Action.REPORT,
     PrimaryState.DETACHED: Action.REPORT,  # no rule anywhere → fallback
@@ -51,7 +51,7 @@ MIRROR_DEFAULT = {
     PrimaryState.SYNCED: Action.REPORT,  # no default:synced and no *:synced → fallback
     PrimaryState.AHEAD: Action.PUSH,  # falls through to *:ahead
     PrimaryState.BEHIND: Action.FAST_FORWARD,
-    PrimaryState.DIVERGED: Action.REBASE_PUSH,
+    PrimaryState.DIVERGED: Action.MERGE_PUSH,
     PrimaryState.NO_UPSTREAM: Action.REPORT,
     PrimaryState.GONE: Action.DELETE_LOCAL,
     PrimaryState.DETACHED: Action.REPORT,
@@ -60,7 +60,7 @@ MIRROR_FEATURE = {
     PrimaryState.SYNCED: Action.REPORT,
     PrimaryState.AHEAD: Action.PUSH,
     PrimaryState.BEHIND: Action.FAST_FORWARD,
-    PrimaryState.DIVERGED: Action.REBASE_PUSH,
+    PrimaryState.DIVERGED: Action.MERGE_PUSH,
     PrimaryState.NO_UPSTREAM: Action.REPORT,
     PrimaryState.GONE: Action.DELETE_LOCAL,
     PrimaryState.DETACHED: Action.REPORT,
@@ -253,7 +253,7 @@ class TestProtectedBranches:
             Action.FF_WORKTREE,
             Action.FF_REF,
         }
-        assert not PROTECTED_ALLOWED & {Action.PUSH, Action.REBASE_PUSH, Action.SET_UPSTREAM_PUSH, Action.DELETE_LOCAL}
+        assert not PROTECTED_ALLOWED & {Action.PUSH, Action.MERGE_PUSH, Action.SET_UPSTREAM_PUSH, Action.DELETE_LOCAL}
 
     def test_decide_is_invariant_to_protection(self):
         """Protection is an execute-time gate, never a decision input — the same split that
