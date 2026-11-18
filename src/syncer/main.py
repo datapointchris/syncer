@@ -72,8 +72,9 @@ def events_file(repos_path: Path, override: Path | None) -> Path:
 
 
 def version_callback(value: bool) -> None:
+    """--version answers through the version command, so the flag and the verb print one line."""
     if value:
-        console.print(f'syncer {importlib.metadata.version("syncer")}')
+        version()
         raise typer.Exit()
 
 
