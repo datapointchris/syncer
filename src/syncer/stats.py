@@ -8,6 +8,7 @@ from rich.table import Table
 
 from syncer.config import SyncerConfig
 from syncer.output import console
+from syncer.report import screen_label
 from syncer.repos import Repo
 from syncer.tracking import SyncRunEvent
 from syncer.tracking import find_stale_repos
@@ -84,8 +85,7 @@ def show_commits_graph(config: SyncerConfig) -> None:
             continue
         commits = repo.total_commits
         if commits > 0:
-            label = repo_config.path if repo_config.path.startswith('~') else repo_config.name
-            rows.append((label, commits))
+            rows.append((screen_label(repo_config), commits))
 
     if not rows:
         return
@@ -126,8 +126,7 @@ def show_repo_age(config: SyncerConfig) -> None:
             continue
         age_days = (dt.datetime.now(dt.UTC) - first_commit).days
         if age_days >= 0:
-            label = repo_config.path if repo_config.path.startswith('~') else repo_config.name
-            rows.append((label, age_days))
+            rows.append((screen_label(repo_config), age_days))
 
     if not rows:
         return
@@ -221,7 +220,7 @@ def show_all_repos(config: SyncerConfig, events: list[SyncRunEvent]) -> None:
     rows: list[tuple[str, str, str, str, dt.datetime | None]] = []
     for repo_config in config.repos:
         path = Path(repo_config.path).expanduser()
-        label = repo_config.path if repo_config.path.startswith('~') else repo_config.name
+        label = screen_label(repo_config)
         last_dt: dt.datetime | None = None
 
         if path.exists() and (path / '.git').is_dir():

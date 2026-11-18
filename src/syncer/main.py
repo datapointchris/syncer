@@ -33,6 +33,7 @@ from syncer.output import status_line
 from syncer.report import DEFAULT_JOBS
 from syncer.report import exit_code_for
 from syncer.report import report_branches
+from syncer.report import screen_label
 from syncer.repos import Repo
 from syncer.repos import find_repo_in_search_paths
 from syncer.repos import find_untracked_repos
@@ -280,7 +281,7 @@ def issues(
 
     for repo_config in syncer_config.repos:
         path = Path(repo_config.path).expanduser()
-        label = repo_config.path if repo_config.path.startswith('~') else repo_config.name
+        label = screen_label(repo_config)
 
         if not path.exists():
             found = find_repo_in_search_paths(repo_config.name, search_paths, claimed_paths)
