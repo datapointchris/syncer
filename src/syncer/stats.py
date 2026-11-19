@@ -7,9 +7,10 @@ from pathlib import Path
 from rich.table import Table
 
 from syncer.config import SyncerConfig
+from syncer.config import ToolConfig
+from syncer.config import repo_for
 from syncer.output import console
 from syncer.report import screen_label
-from syncer.repos import Repo
 from syncer.tracking import SyncRunEvent
 from syncer.tracking import find_stale_repos
 from syncer.tracking import read_events
@@ -69,14 +70,13 @@ def show_summary(events: list[SyncRunEvent]) -> None:
     console.print(f'  Avg issues:     {avg_issues:.1f} per run')
 
 
-def show_commits_graph(config: SyncerConfig) -> None:
+def show_commits_graph(config: SyncerConfig, tool_config: ToolConfig) -> None:
     rows: list[tuple[str, int]] = []
     for repo_config in config.repos:
         path = Path(repo_config.path).expanduser()
         if not path.exists() or not (path / '.git').is_dir():
             continue
-        owner = repo_config.owner or config.owner
-        repo = Repo(name=repo_config.name, path=path, owner=owner, host=config.host)
+        repo = repo_for(repo_config, config, tool_config)
         try:
             is_fork = repo.is_fork
         except Exception:
@@ -103,14 +103,13 @@ def show_commits_graph(config: SyncerConfig) -> None:
         console.print(f'  {label:<{label_width}s} {bar}  {commits}')
 
 
-def show_repo_age(config: SyncerConfig) -> None:
+def show_repo_age(config: SyncerConfig, tool_config: ToolConfig) -> None:
     rows: list[tuple[str, int]] = []
     for repo_config in config.repos:
         path = Path(repo_config.path).expanduser()
         if not path.exists() or not (path / '.git').is_dir():
             continue
-        owner = repo_config.owner or config.owner
-        repo = Repo(name=repo_config.name, path=path, owner=owner, host=config.host)
+        repo = repo_for(repo_config, config, tool_config)
         try:
             is_fork = repo.is_fork
         except Exception:
@@ -190,7 +189,7 @@ def show_stale(events: list[SyncRunEvent]) -> None:
         console.print(f'  [yellow]\u26a0 {path:<30s} {days} days[/yellow]')
 
 
-def show_all_repos(config: SyncerConfig, events: list[SyncRunEvent]) -> None:
+def show_all_repos(config: SyncerConfig, tool_config: ToolConfig, events: list[SyncRunEvent]) -> None:
     # Build latest status from most recent event
     latest_status: dict[str, str] = {}
     if events:
@@ -224,8 +223,7 @@ def show_all_repos(config: SyncerConfig, events: list[SyncRunEvent]) -> None:
         last_dt: dt.datetime | None = None
 
         if path.exists() and (path / '.git').is_dir():
-            owner = repo_config.owner or config.owner
-            repo = Repo(name=repo_config.name, path=path, owner=owner, host=config.host)
+            repo = repo_for(repo_config, config, tool_config)
             commits = str(repo.total_commits)
             last_date = repo.last_commit_date
             if last_date:
@@ -278,7 +276,7 @@ def show_recent_runs(events: list[SyncRunEvent]) -> None:
         console.print(f'  {date_str}   {summary}')
 
 
-def show_stats(config: SyncerConfig, events_file: Path) -> None:
+def show_stats(config: SyncerConfig, tool_config: ToolConfig, events_file: Path) -> None:
     events = read_events(events_file)
 
     console.print()
@@ -287,10 +285,10 @@ def show_stats(config: SyncerConfig, events_file: Path) -> None:
     console.print()
 
     show_summary(events)
-    show_commits_graph(config)
-    show_repo_age(config)
+    show_commits_graph(config, tool_config)
+    show_repo_age(config, tool_config)
     show_frequently_dirty(events)
     show_stale(events)
-    show_all_repos(config, events)
+    show_all_repos(config, tool_config, events)
     show_recent_runs(events)
     console.print()

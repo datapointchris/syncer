@@ -21,7 +21,6 @@ import random
 import time
 from collections import Counter
 from functools import partial
-from pathlib import Path
 
 from rich.markup import escape
 
@@ -30,7 +29,7 @@ from syncer.classify import refresh_remote
 from syncer.config import RepoConfig
 from syncer.config import SyncerConfig
 from syncer.config import ToolConfig
-from syncer.config import resolve_clone_url
+from syncer.config import repo_for
 from syncer.config import resolve_policies
 from syncer.config import resolve_policy_name
 from syncer.output import ICON_DOT
@@ -92,16 +91,9 @@ def build_fetch_report(
     if jitter > 0:
         time.sleep(random.uniform(0, jitter))  # desync the initial burst of concurrent fetches
 
-    path = Path(repo_config.path).expanduser()
     label = screen_label(repo_config)
-    repo = Repo(
-        name=repo_config.name,
-        path=path,
-        owner=repo_config.owner or config.owner,
-        host=config.host,
-        timeout=tool_config.git_timeout_seconds,
-        url=resolve_clone_url(repo_config, config),
-    )
+    repo = repo_for(repo_config, config, tool_config)
+    path = repo.path
 
     def lifecycle(status: str, detail: str | None = None) -> RepoBranchReport:
         return RepoBranchReport(

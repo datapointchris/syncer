@@ -17,7 +17,7 @@ from syncer.commands.policy_cmd import policy_app
 from syncer.config import RepoConfig
 from syncer.config import SyncerConfig
 from syncer.config import load_tool_config
-from syncer.config import resolve_clone_url
+from syncer.config import repo_for
 from syncer.config import resolve_config
 from syncer.config import resolve_registry
 from syncer.doctor import doctor_exit_code
@@ -34,7 +34,6 @@ from syncer.report import DEFAULT_JOBS
 from syncer.report import exit_code_for
 from syncer.report import report_branches
 from syncer.report import screen_label
-from syncer.repos import Repo
 from syncer.repos import find_repo_in_search_paths
 from syncer.repos import find_untracked_repos
 from syncer.repos import origin_mismatch
@@ -309,15 +308,8 @@ def issues(
         if not (path / '.git').is_dir():
             continue
 
-        owner = repo_config.owner or syncer_config.owner
-        repo = Repo(
-            name=repo_config.name,
-            path=path,
-            owner=owner,
-            host=syncer_config.host,
-            timeout=tool_config.git_timeout_seconds,
-            url=resolve_clone_url(repo_config, syncer_config),
-        )
+        repo = repo_for(repo_config, syncer_config, tool_config)
+        owner = repo.owner
 
         # A clone pointing somewhere the registry never named is silent drift: `gh repo clone
         # <bare-name>` resolves to the authenticated user, so a reference repo that also exists
@@ -385,7 +377,7 @@ def stats(
     History is per registry, so this reports on the same working set the sync run used.
     """
     syncer_config, repos_path = resolve_registry(repos_file)
-    show_stats(syncer_config, events_file(repos_path, repos_file))
+    show_stats(syncer_config, load_tool_config(), events_file(repos_path, repos_file))
 
 
 @app.command(

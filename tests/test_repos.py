@@ -111,7 +111,8 @@ def git_repo_with_remote(tmp_path):
 
 
 def make_repo(path: Path, **kwargs) -> Repo:
-    return Repo(name='test-repo', path=path, owner='user', host='https://github.com', **kwargs)
+    kwargs.setdefault('url', 'https://github.com/user/test-repo')
+    return Repo(name='test-repo', path=path, owner='user', **kwargs)
 
 
 class TestDisplayWidth:
@@ -159,11 +160,6 @@ class TestStatusLine:
 
 
 class TestRepo:
-    def test_init(self):
-        repo = Repo(name='myrepo', path=Path('/tmp/myrepo'), owner='user', host='https://github.com')
-        assert repo.name == 'myrepo'
-        assert repo.url == 'https://github.com/user/myrepo'
-
     def test_exists(self, tmp_path):
         repo = make_repo(tmp_path)
         assert repo.exists is True
@@ -846,7 +842,7 @@ class TestOriginMismatch:
         path = tmp_path / 'clone'
         subprocess.run(['git', 'init', str(path)], capture_output=True)
         subprocess.run(['git', 'remote', 'add', 'origin', origin], cwd=path, capture_output=True)
-        return Repo(name='homelab', path=path, owner='khuedoan', host='https://github.com', url=expected)
+        return Repo(name='homelab', path=path, owner='khuedoan', url=expected)
 
     def test_the_real_incident_is_flagged(self, tmp_path):
         repo = self._repo_with_origin(
@@ -876,7 +872,7 @@ class TestOriginMismatch:
         """`no remote` is already its own lifecycle status; reporting it twice is noise."""
         path = tmp_path / 'bare-init'
         subprocess.run(['git', 'init', str(path)], capture_output=True)
-        repo = Repo(name='x', path=path, owner='me', host='https://github.com')
+        repo = Repo(name='x', path=path, owner='me', url='https://github.com/me/x')
         assert origin_mismatch(repo) is None
 
 
@@ -1021,7 +1017,7 @@ class TestCloneIntoExisting:
     """A directory standing where a repo belongs, holding files that arrived before the clone."""
 
     def _repo(self, target: Path, origin: Path) -> Repo:
-        return Repo(name='target', path=target, owner='user', host='https://github.com', url=str(origin))
+        return Repo(name='target', path=target, owner='user', url=str(origin))
 
     def test_clones_around_files_the_repo_ignores(self, tmp_path, seeded_origin):
         target = occupied(tmp_path, **{'local.env': 'SECRET\n', '.scratch__notes.md': 'notes\n'})

@@ -6,6 +6,7 @@ from rich.console import Console
 
 from syncer.config import RepoConfig
 from syncer.config import SyncerConfig
+from syncer.config import ToolConfig
 from syncer.stats import format_duration
 from syncer.stats import show_commits_graph
 from syncer.stats import show_repo_age
@@ -57,7 +58,7 @@ class TestShowStats:
             patch('syncer.stats.console', console),
             patch('syncer.stats.read_events', return_value=[]),
         ):
-            show_stats(config, tmp_path / 'events.jsonl')
+            show_stats(config, ToolConfig(), tmp_path / 'events.jsonl')
 
     def test_with_events(self, tmp_path):
         """Stats with events should render all sections."""
@@ -86,7 +87,7 @@ class TestShowStats:
             patch('syncer.stats.console', console),
             patch('syncer.stats.read_events', return_value=events),
         ):
-            show_stats(config, tmp_path / 'events.jsonl')
+            show_stats(config, ToolConfig(), tmp_path / 'events.jsonl')
         output = output_file.read_text()
         assert 'Summary' in output
         assert 'Total runs' in output
@@ -102,7 +103,7 @@ class TestShowStats:
             patch('syncer.stats.console', console),
             patch('syncer.stats.read_events', return_value=events),
         ):
-            show_stats(config, tmp_path / 'events.jsonl')
+            show_stats(config, ToolConfig(), tmp_path / 'events.jsonl')
         output = output_file.read_text()
         assert 'Total runs:     5' in output
 
@@ -119,7 +120,7 @@ class TestShowStats:
             patch('syncer.stats.console', console),
             patch('syncer.stats.read_events', return_value=events),
         ):
-            show_stats(config, tmp_path / 'events.jsonl')
+            show_stats(config, ToolConfig(), tmp_path / 'events.jsonl')
         output = output_file.read_text()
         # Jan 12 should appear before Jan 10
         pos_12 = output.find('Jan 12')
@@ -147,10 +148,11 @@ class TestShowStats:
         with (
             patch('syncer.stats.console', console),
             patch('syncer.stats.read_events', return_value=[]),
-            patch('syncer.stats.Repo') as MockRepo,
+            patch('syncer.stats.repo_for') as MockRepo,
         ):
 
-            def make_repo(name, path, owner, host):
+            def make_repo(repo_config, config, tool_config):
+                name = repo_config.name
                 m = MagicMock()
                 m.name = name
                 m.is_fork = False
@@ -160,7 +162,7 @@ class TestShowStats:
                 return m
 
             MockRepo.side_effect = make_repo
-            show_stats(config, tmp_path / 'events.jsonl')
+            show_stats(config, ToolConfig(), tmp_path / 'events.jsonl')
 
         output = output_file.read_text()
         # Find positions within the "All Repos" section specifically
@@ -210,10 +212,11 @@ class TestShowCommitsGraph:
         console = Console(file=open(output_file, 'w'), width=120)  # noqa: SIM115
         with (
             patch('syncer.stats.console', console),
-            patch('syncer.stats.Repo') as MockRepo,
+            patch('syncer.stats.repo_for') as MockRepo,
         ):
 
-            def make_repo(name, path, owner, host):
+            def make_repo(repo_config, config, tool_config):
+                name = repo_config.name
                 m = MagicMock()
                 m.name = name
                 m.is_fork = False
@@ -221,7 +224,7 @@ class TestShowCommitsGraph:
                 return m
 
             MockRepo.side_effect = make_repo
-            show_commits_graph(config)
+            show_commits_graph(config, ToolConfig())
 
         output = output_file.read_text()
         assert 'Commits by Repo' in output
@@ -244,10 +247,11 @@ class TestShowCommitsGraph:
         console = Console(file=open(output_file, 'w'), width=120)  # noqa: SIM115
         with (
             patch('syncer.stats.console', console),
-            patch('syncer.stats.Repo') as MockRepo,
+            patch('syncer.stats.repo_for') as MockRepo,
         ):
 
-            def make_repo(name, path, owner, host):
+            def make_repo(repo_config, config, tool_config):
+                name = repo_config.name
                 m = MagicMock()
                 m.name = name
                 m.is_fork = name == 'forked'
@@ -255,7 +259,7 @@ class TestShowCommitsGraph:
                 return m
 
             MockRepo.side_effect = make_repo
-            show_commits_graph(config)
+            show_commits_graph(config, ToolConfig())
 
         output = output_file.read_text()
         assert 'mine' in output
@@ -279,10 +283,11 @@ class TestShowRepoAge:
         console = Console(file=open(output_file, 'w'), width=120)  # noqa: SIM115
         with (
             patch('syncer.stats.console', console),
-            patch('syncer.stats.Repo') as MockRepo,
+            patch('syncer.stats.repo_for') as MockRepo,
         ):
 
-            def make_repo(name, path, owner, host):
+            def make_repo(repo_config, config, tool_config):
+                name = repo_config.name
                 m = MagicMock()
                 m.name = name
                 m.is_fork = False
@@ -293,7 +298,7 @@ class TestShowRepoAge:
                 return m
 
             MockRepo.side_effect = make_repo
-            show_repo_age(config)
+            show_repo_age(config, ToolConfig())
 
         output = output_file.read_text()
         assert 'Repo Age' in output

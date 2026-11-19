@@ -106,7 +106,7 @@ class TestRemoteRefs:
     def test_origin_head_is_left_out_so_one_moved_branch_counts_once(self, tmp_path):
         repo_path = make_cloned_repo(tmp_path, 'api')
         git(repo_path, 'remote', 'set-head', 'origin', 'main')
-        refs = Repo(name='api', path=repo_path, owner='demo', host='https://github.com').remote_refs()
+        refs = Repo(name='api', path=repo_path, owner='demo', url='https://github.com/demo/api').remote_refs()
         assert refs is not None
         assert 'refs/remotes/origin/HEAD' not in refs
         assert refs['refs/remotes/origin/main'] == git(repo_path, 'rev-parse', 'HEAD')

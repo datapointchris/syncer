@@ -270,11 +270,12 @@ def run_command(args: list[str], *, cwd: Path | None = None, timeout: int) -> su
 
 
 class Repo:
-    def __init__(self, name: str, path: Path, owner: str, host: str, timeout: int = GIT_TIMEOUT_SECONDS, url: str | None = None):
+    def __init__(self, name: str, path: Path, owner: str, url: str, timeout: int = GIT_TIMEOUT_SECONDS):
         self.name = name
         self.path = path
         self.owner = owner
-        self.url = url or f'{host}/{owner}/{name}'
+        # Resolved by the caller: config.resolve_clone_url owns the clone-URL rules.
+        self.url = url
         self.timeout = timeout
         # Thread-confined: report.py builds one Repo per worker task, so a plain list is safe.
         self.failures: list[GitFailure] = []

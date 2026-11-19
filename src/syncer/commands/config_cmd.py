@@ -138,7 +138,7 @@ def entry_from(path: Path) -> tuple[dict[str, str], str, str]:
     Derived from the clone's own origin rather than assumed, so a scan across a directory
     holding both personal and third-party clones produces entries that are individually right.
     """
-    repo = Repo(name=path.name, path=path, owner='', host='')
+    repo = Repo(name=path.name, path=path, owner='', url='')
     origin = repo.origin_url
     home = str(Path.home())
     entry = {'name': path.name, 'path': str(path).replace(home, '~', 1), 'status': 'active'}

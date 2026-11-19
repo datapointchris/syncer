@@ -39,7 +39,7 @@ def git(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 def make_repo(path: Path) -> Repo:
-    return Repo(name='test-repo', path=path, owner='user', host='https://github.com')
+    return Repo(name='test-repo', path=path, owner='user', url='https://github.com/user/test-repo')
 
 
 def commit(path: Path, filename: str, message: str, content: str | None = None) -> None:

@@ -19,6 +19,7 @@ from syncer.output import hint
 from syncer.policy import BUILTIN_POLICIES
 from syncer.policy import Policy
 from syncer.repos import GIT_TIMEOUT_SECONDS
+from syncer.repos import Repo
 
 
 def xdg_config_home() -> Path:
@@ -584,6 +585,18 @@ def resolve_clone_url(repo_config: RepoConfig, config: SyncerConfig) -> str:
     if config.url_template:
         return config.url_template.format(host=config.host, owner=owner, name=repo_config.name)
     return f'{config.host}/{owner}/{repo_config.name}'
+
+
+def repo_for(repo_config: RepoConfig, config: SyncerConfig, tool_config: ToolConfig) -> Repo:
+    """The Repo one registry entry describes, with its resolved clone URL and the configured
+    git timeout. Every command builds its Repo here, so no caller can skip either."""
+    return Repo(
+        name=repo_config.name,
+        path=Path(repo_config.path).expanduser(),
+        owner=repo_config.owner or config.owner,
+        url=resolve_clone_url(repo_config, config),
+        timeout=tool_config.git_timeout_seconds,
+    )
 
 
 def resolve_policies(tool_config: ToolConfig) -> dict[str, Policy]:
