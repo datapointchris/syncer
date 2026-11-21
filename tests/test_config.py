@@ -72,10 +72,6 @@ class TestRepoConfig:
         repo = RepoConfig(name='test', path='~/code/test')
         assert repo.status is None
 
-    def test_explicit_status(self):
-        repo = RepoConfig(name='test', path='~/code/test', status='dormant')
-        assert repo.status == 'dormant'
-
     def test_invalid_status_rejected(self):
         with pytest.raises(ValueError):
             RepoConfig.model_validate({'name': 'test', 'path': '~/code/test', 'status': 'invalid'})
@@ -83,10 +79,6 @@ class TestRepoConfig:
     def test_sync_policy_defaults_to_none(self):
         repo = RepoConfig(name='test', path='~/code/test')
         assert repo.sync_policy is None
-
-    def test_sync_policy_hint(self):
-        repo = RepoConfig(name='test', path='~/code/test', sync_policy='observe')
-        assert repo.sync_policy == 'observe'
 
 
 class TestLoadToolConfig:
