@@ -30,6 +30,7 @@ from syncer.config import SyncerConfig
 from syncer.config import ToolConfig
 from syncer.config import get_repos_file_path
 from syncer.config import init_registry
+from syncer.config import init_registry_command
 from syncer.config import init_tool_config
 from syncer.config import load_tool_config
 from syncer.config import parse_registry
@@ -513,7 +514,8 @@ def validate_registry(location: RegistryLocation, tool_config: ToolConfig, probl
     registry_path = location.path
     if not registry_path.exists():
         problems.append(
-            f'{registry_path}{registry_source_note(location.source)}: no such file — create one with `syncer config init registry`'
+            f'{registry_path}{registry_source_note(location.source)}: no such file'
+            f' — create one with `{init_registry_command(registry_path, location.source)}`'
         )
         return
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import sys
 import tomllib
 from pathlib import Path
@@ -362,7 +363,7 @@ def load_repos_file(path: Path, source: str | None = None) -> SyncerConfig:
     """
     if not path.exists():
         error(f'Repo registry not found: {path}{registry_source_note(source)}')
-        hint('Create an annotated one there with: syncer config init registry')
+        hint(f'Create an empty one there with: {init_registry_command(path, source)}')
         # When something explicitly chose the path, creating a registry there is only half the
         # menu — a machine that was never going to have that path wants the other half.
         if source:
@@ -641,6 +642,14 @@ class RegistryLocation(NamedTuple):
 def registry_source_note(source: str | None) -> str:
     """Parenthetical naming where a registry path came from; empty for the built-in default."""
     return f' (from {source})' if source else ''
+
+
+def init_registry_command(path: Path, source: str | None) -> str:
+    """The command that creates a registry at `path`. When a flag, the environment or config.toml
+    chose the path, it is passed with -c, so the command creates the file where the message said."""
+    if source is None:
+        return 'syncer config init registry'
+    return f'syncer config init registry -c {shlex.quote(str(path))}'
 
 
 def registry_location(tool_config: ToolConfig, override: Path | None = None) -> RegistryLocation:

@@ -35,6 +35,7 @@ from syncer.config import TOOL_CONFIG_PATH
 from syncer.config import ConfigError
 from syncer.config import SyncerConfig
 from syncer.config import ToolConfig
+from syncer.config import init_registry_command
 from syncer.config import parse_registry
 from syncer.config import parse_tool_config
 from syncer.config import read_tool_config
@@ -61,6 +62,10 @@ from syncer.repos import run_command
 # Deliberately not git_timeout_seconds. That is sized for fetching a large monorepo over a VPN (120s by
 # default); a diagnostic that hangs for two minutes per host is one nobody waits for.
 PROBE_TIMEOUT_SECONDS = 20
+
+# `git ls-remote --exit-code` exits 2 when the remote answered but holds no matching refs, as a
+# repo created on the host with nothing pushed yet does. The host was reached.
+LS_REMOTE_NO_MATCHING_REFS = 2
 
 # One probe per host, not per repo, and never more than this many — doctor answers "can this
 # machine reach its remotes", which three hosts establish as well as thirty.
@@ -162,7 +167,7 @@ def registry_loads(path: Path, source: str | None) -> tuple[Check, SyncerConfig 
                 Status.FAIL,
                 f'no registry at {path}{registry_source_note(source)}',
                 hints=[
-                    'create one there: syncer config init registry',
+                    f'create one there: {init_registry_command(path, source)}',
                     *([f'or drop {source} to fall back to {DEFAULT_REPOS_FILE}'] if source else []),
                 ],
             ),
@@ -258,9 +263,12 @@ def reachability_checks(config: SyncerConfig) -> list[Check]:
         if result.returncode == 0:
             checks.append(Check('reach', Status.OK, f'{label} reachable'))
             continue
+        if result.returncode == LS_REMOTE_NO_MATCHING_REFS:
+            checks.append(Check('reach', Status.OK, f'{label} reachable (no branches yet)'))
+            continue
         failure = GitFailure(argv=('ls-remote', url), returncode=result.returncode, stderr=result.stderr.strip())
         cause = classify_failure(failure)
-        what = cause.value.replace('_', ' ') if cause else 'failed'
+        what = cause.value.replace('_', ' ') if cause else f'git ls-remote exited {result.returncode}'
         checks.append(
             Check(
                 'reach',

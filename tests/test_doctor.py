@@ -124,6 +124,14 @@ class TestReachability:
         write_registry(isolated, repos=[{'name': 'api', 'path': str(tmp_path / 'api'), 'clone_url': str(bare)}])
         assert checks_named(run_doctor(), 'reach')[0].status is Status.OK
 
+    def test_a_remote_with_no_branches_yet_passes(self, isolated, tmp_path):
+        """A repo created on the host with nothing pushed answers ls-remote with no refs. The host
+        was reached, so a new machine is not stopped before its first push."""
+        bare = tmp_path / 'new.git'
+        subprocess.run(['git', 'init', '--bare', '-q', str(bare)], check=True)
+        write_registry(isolated, repos=[{'name': 'new', 'path': str(tmp_path / 'new'), 'clone_url': str(bare)}])
+        assert checks_named(run_doctor(), 'reach')[0].status is Status.OK
+
     def test_an_unreachable_remote_fails_with_a_cause_and_a_hint(self, isolated, tmp_path):
         write_registry(isolated, repos=[{'name': 'api', 'path': str(tmp_path / 'api'), 'clone_url': str(tmp_path / 'gone.git')}])
         [reach] = checks_named(run_doctor(), 'reach')

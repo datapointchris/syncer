@@ -15,10 +15,12 @@ rich to run a subprocess.
 
 from __future__ import annotations
 
+import inspect
 import json
 from enum import StrEnum
 from typing import Any
 
+import typer
 from rich.console import Console
 from rich.markup import escape
 
@@ -100,6 +102,37 @@ def examples_epilog(*examples: tuple[str, str]) -> str:
     """
     lines = [f'[cyan]{escape(command)}[/cyan] — {purpose}' for command, purpose in examples]
     return '[bold]Examples[/bold]\n\n' + '\n\n'.join(lines)
+
+
+def unwrap_paragraphs(text: str) -> str:
+    """Join the lines of each blank-line-separated paragraph into one line.
+
+    Typer's rich mode joins the first paragraph's lines and keeps every line break after it, so a
+    docstring wrapped to the source file's width wraps a second time on a narrower terminal and
+    leaves one-word lines. One line per paragraph lets rich wrap each once, to the terminal.
+    """
+    paragraphs = inspect.cleandoc(text).split('\n\n')
+    return '\n\n'.join(' '.join(line.strip() for line in paragraph.splitlines()) for paragraph in paragraphs)
+
+
+def unwrap_help(app: typer.Typer) -> None:
+    """Unwrap the help of `app`'s callback and commands, and of every sub-app under it."""
+    root = app.registered_callback
+    if root is not None and root.callback is not None:
+        text = root.help if isinstance(root.help, str) else inspect.getdoc(root.callback)
+        if text:
+            root.help = unwrap_paragraphs(text)
+    if isinstance(app.info.help, str):
+        app.info.help = unwrap_paragraphs(app.info.help)
+    for command in app.registered_commands:
+        if command.callback is None:
+            continue
+        text = command.help if command.help is not None else inspect.getdoc(command.callback)
+        if text:
+            command.help = unwrap_paragraphs(text)
+    for group in app.registered_groups:
+        if group.typer_instance is not None:
+            unwrap_help(group.typer_instance)
 
 
 def emit_json(data: Any) -> None:

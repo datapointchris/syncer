@@ -9,7 +9,9 @@ from typing import Annotated
 
 import typer
 from pyselfupdate import Config
+from pyselfupdate import NotInstalledError
 from pyselfupdate import notify
+from pyselfupdate import read_installation
 from pyselfupdate.typercmd import run_update
 
 from syncer.commands.config_cmd import config_app
@@ -29,7 +31,9 @@ from syncer.output import ICON_WARN
 from syncer.output import console
 from syncer.output import error
 from syncer.output import examples_epilog
+from syncer.output import hint
 from syncer.output import status_line
+from syncer.output import unwrap_help
 from syncer.report import DEFAULT_JOBS
 from syncer.report import exit_code_for
 from syncer.report import report_branches
@@ -49,6 +53,10 @@ app.add_typer(policy_app, name='policy', rich_help_panel='Inspect')
 # Shared by the `update` command and the daily check in the callback below, so
 # the notice cannot name a release the update command would not install.
 UPDATE_CONFIG = Config(tool='syncer', owner='datapointchris')
+
+# The README's install section names the package index every release is published to. A bare
+# `uv tool install syncer` asks PyPI instead, where `syncer` is a different project.
+INSTALL_INSTRUCTIONS = 'https://github.com/datapointchris/syncer#installing'
 
 EPILOG = examples_epilog(
     ('syncer check', 'report the repos that need something; never writes'),
@@ -432,6 +440,13 @@ def update(
     check_only: Annotated[bool, typer.Option('--check', help='Report whether an update is available without installing it')] = False,
 ) -> None:
     """Update syncer to the newest release its package index serves."""
+    try:
+        read_installation(UPDATE_CONFIG.tool)
+    except NotInstalledError as exc:
+        error("✗ syncer update failed: it is not installed as a uv tool, or uv's record of it cannot be read.")
+        hint('  Install it from the package index its README names, not from PyPI, where the name is another project:')
+        hint(f'  [bold]{INSTALL_INSTRUCTIONS}[/bold]')
+        raise typer.Exit(1) from exc
     run_update(UPDATE_CONFIG, check_only=check_only)
 
 
@@ -557,6 +572,9 @@ def demo() -> None:
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+
+# Last, so every command above and in the sub-apps is registered before its help is unwrapped.
+unwrap_help(app)
 
 if __name__ == '__main__':
     app()

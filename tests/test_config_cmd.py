@@ -1,4 +1,5 @@
 import json
+import shlex
 import subprocess
 
 import pytest
@@ -8,6 +9,7 @@ from syncer.config import STARTER_REGISTRY
 from syncer.config import STARTER_TOOL_CONFIG
 from syncer.config import TEMPLATE_REGISTRY
 from syncer.config import TEMPLATE_TOOL_CONFIG
+from syncer.config import init_registry_command
 from syncer.main import app
 from syncer.policy import Action
 from syncer.policy import PrimaryState
@@ -484,6 +486,15 @@ class TestConfigValidate:
         result = runner.invoke(app, ['config', 'validate'])
         assert result.exit_code == 1
         assert 'config init registry' in result.output
+
+    def test_missing_registry_command_creates_the_registry_it_names(self, config_home, tmp_path):
+        """Run as printed, the command creates the registry at the path the error named, not at
+        the default the command would resolve without -c."""
+        target = tmp_path / 'elsewhere' / 'repos.json'
+        command = shlex.split(init_registry_command(target, 'the --repos-file flag'))
+        assert command[:2] == ['syncer', 'config']
+        assert runner.invoke(app, command[1:]).exit_code == 0
+        assert target.exists()
 
     def test_unreachable_repos_registry_says_how_to_fall_back(self, config_home, tmp_path):
         """The work-box case: a config naming a registry this machine does not have. Reporting
